@@ -47,7 +47,7 @@ Semantic and render traversal are distinct and ordered.
 Every PaintCommand alternative has an explicit serializer; an unhandled new alternative fails compilation.
 Schema 2 uses named fields, fixed six-decimal classic-locale numbers, normalized negative zero, escaped control characters, and stable command names.
 It excludes process identities, pointers, revisions, source paths, and external texture pixels.
-Encoded image bytes are retained in hexadecimal rather than identified by an address or process-local hash.
+Encoded images retain their bytes in hexadecimal. Bitmap snapshots retain pixel dimensions and hexadecimal RGBA8 pixel bytes.
 Structural equality is not native-rendering equality.
 Equality and Diff traverse the canonical tree directly, independently of the text export.
 ToString serializes that tree on demand and returns an owning string; no duplicate text export is retained or generated during Pump.

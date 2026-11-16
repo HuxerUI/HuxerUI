@@ -5,12 +5,14 @@
 #include <cmath>
 #include <iomanip>
 #include <locale>
+#include <span>
 #include <sstream>
 #include <type_traits>
 
 #include <huxerui/external_texture.h>
 
 #include "internal_access.h"
+#include "graphics/paint_internal.h"
 #include "graphics/path_internal.h"
 
 namespace huxerui::detail {
@@ -42,6 +44,17 @@ std::string Escaped(std::string_view value) {
       result += static_cast<char>(c);
   }
   return result + '"';
+}
+
+SnapshotNode ImageBytes(std::string name, std::span<const std::byte> bytes) {
+  std::string hex;
+  constexpr char digits[] = "0123456789abcdef";
+  for (auto byte : bytes) {
+    const auto value = std::to_integer<unsigned char>(byte);
+    hex += digits[value >> 4];
+    hex += digits[value & 15];
+  }
+  return {std::move(name), std::move(hex)};
 }
 
 class SnapshotBuilder {
@@ -218,15 +231,8 @@ public:
   }
   SnapshotNode Command(const DrawImageCommand& c) {
     auto result = Fields("image", {"source", "destination", "sampling", "opacity", "scale"}, c.source, c.destination,
-                         c.sampling, c.opacity, c.image.Scale());
-    std::string bytes;
-    constexpr char digits[] = "0123456789abcdef";
-    for (auto byte : c.image.EncodedBytes()) {
-      const auto value = std::to_integer<unsigned char>(byte);
-      bytes += digits[value >> 4];
-      bytes += digits[value & 15];
-    }
-    result.children.push_back({"encoded_bytes", std::move(bytes)});
+                         c.sampling, c.opacity, RasterImageScale(c.image));
+    std::visit([&](const auto& image) { AppendImageContent(result, image); }, c.image);
     return result;
   }
   SnapshotNode Command(const DrawExternalTextureCommand& c) {
@@ -328,6 +334,16 @@ public:
     result.children.push_back(std::move(children));
     return result;
   }
+
+private:
+  void AppendImageContent(SnapshotNode& node, const ImageAsset& image) {
+    node.children.push_back(ImageBytes("encoded_bytes", image.EncodedBytes()));
+  }
+  void AppendImageContent(SnapshotNode& node, const Bitmap& bitmap) {
+    node.children.push_back(Value("pixel_width", bitmap.PixelWidth()));
+    node.children.push_back(Value("pixel_height", bitmap.PixelHeight()));
+    node.children.push_back(ImageBytes("pixel_bytes", bitmap.Pixels()));
+  }
 };
 
 void Serialize(const SnapshotNode& node, std::ostream& out, std::size_t indent = 0) {
@@ -383,11 +399,13 @@ public:
       return;
     }
     if (expected.value != actual.value) {
-      if (actual.name == "encoded_bytes")
+      if (actual.name == "encoded_bytes" || actual.name == "pixel_bytes") {
+        const auto units = actual.name == "encoded_bytes" ? " encoded bytes)" : " pixel bytes)";
         Change(path + ": image content changed (" + std::to_string(expected.value.size() / 2) + " -> " +
-               std::to_string(actual.value.size() / 2) + " encoded bytes)");
-      else
+               std::to_string(actual.value.size() / 2) + units);
+      } else {
         Change(path + ": " + ShortValue(expected.value) + " -> " + ShortValue(actual.value));
+      }
     }
     const auto& before = expected.children;
     const auto& after = actual.children;

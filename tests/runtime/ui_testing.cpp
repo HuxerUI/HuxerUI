@@ -896,6 +896,32 @@ TEST_CASE("Windowless snapshots retain image content and external texture geomet
   REQUIRE(before->ToString().find("89504e47") != std::string::npos);
 }
 
+TEST_CASE("Windowless snapshots compare bitmap pixels by value", "[ui-testing]") {
+  Application application([] {
+    count = UseState(0);
+    const auto red = static_cast<std::byte>(count.Get());
+    auto bitmap = Bitmap::FromRgba8(1, 1, Bytes{red, std::byte{0x22}, std::byte{0x33}, std::byte{0xff}}, 2.0F);
+    return Canvas([bitmap = std::move(bitmap)](PaintContext& paint, Size) {
+      paint.DrawImage(bitmap, {0, 0, 40, 40});
+    }).With(Frame{40.0F, 40.0F});
+  }, {.show_debug_overlay = false});
+  UiTest ui(application);
+  const auto before = ui.CaptureSnapshot();
+  REQUIRE(before.ToString().find("pixel_bytes=002233ff") != std::string::npos);
+
+  count = 1;
+  ui.Pump();
+  const auto after = ui.CaptureSnapshot();
+  REQUIRE(after != before);
+  const auto diff = after.Diff(before);
+  REQUIRE(diff.find("image content changed (4 -> 4 pixel bytes)") != std::string::npos);
+  REQUIRE(diff.find("012233ff") == std::string::npos);
+
+  count = 0;
+  ui.Pump();
+  REQUIRE(ui.CaptureSnapshot() == before);
+}
+
 TEST_CASE("Windowless snapshot reports bound display without truncating equality", "[ui-testing]") {
   Application application([]() -> View {
     count = UseState(0);
