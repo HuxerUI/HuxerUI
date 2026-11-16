@@ -118,6 +118,12 @@ public:
   std::deque<std::weak_ptr<WorkerOperation>> queued;
 };
 
+struct TaskWaitState {
+  std::weak_ptr<TaskExecution> execution;
+  std::coroutine_handle<> coroutine;
+  bool active = true;
+};
+
 class TaskExecution final : public std::enable_shared_from_this<TaskExecution> {
 public:
   TaskExecution(
@@ -142,8 +148,7 @@ public:
   /// Closes this execution during owner retirement on the application thread, deferring destruction while running.
   void CloseOnUi() noexcept;
   void QueueCompletion() noexcept;
-  void QueueResume(std::coroutine_handle<> coroutine) noexcept;
-  std::function<void()> ScheduleDelay(double duration_seconds, std::coroutine_handle<> coroutine);
+  void QueueResume(std::weak_ptr<TaskWaitState> wait) noexcept;
 
 private:
   /// Checks the application's owning thread, whether this scope is application-wide or composition-owned.
@@ -323,19 +328,14 @@ public:
     }
   }
 
-  [[nodiscard]] bool await_ready() const noexcept {
-    return false;
+  void Suspend(TaskContinuation continuation) {
+    Runtime& runtime = *CurrentApplicationRuntime()->owner;
+    const auto deadline = runtime.TimerNow() + std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+        std::chrono::duration<double>(duration_seconds_));
+    cancel_ = runtime.ScheduleTimerAt(deadline, [continuation] { continuation.Resume(); });
   }
 
-  template <class Promise> void await_suspend(std::coroutine_handle<Promise> continuation) {
-    const std::shared_ptr<TaskExecution> execution = TaskExecutionFor(continuation).lock();
-    if (!execution) {
-      throw std::logic_error("HuxerUI Delay() requires a running Task execution");
-    }
-    cancel_ = execution->ScheduleDelay(duration_seconds_, continuation);
-  }
-
-  void await_resume() const noexcept {}
+  void TakeResult() const noexcept {}
 
 private:
   double duration_seconds_;
@@ -343,7 +343,7 @@ private:
 };
 
 Task<void> DelayTask(double duration_seconds) {
-  co_await DelayAwaiter(duration_seconds);
+  co_await TaskAwaiter<DelayAwaiter>(duration_seconds);
 }
 
 void TaskExecution::PostNoexcept(std::function<void()> callback) noexcept {
@@ -393,25 +393,15 @@ void TaskExecution::QueueCompletion() noexcept {
   });
 }
 
-void TaskExecution::QueueResume(std::coroutine_handle<> coroutine) noexcept {
+void TaskExecution::QueueResume(std::weak_ptr<TaskWaitState> wait) noexcept {
   std::weak_ptr<TaskExecution> weak = shared_from_this();
-  PostNoexcept([weak, coroutine] {
+  PostNoexcept([weak, wait = std::move(wait)] {
     if (auto execution = weak.lock()) {
-      execution->ResumeOnUi(coroutine);
+      if (auto pending = wait.lock(); pending && std::exchange(pending->active, false)) {
+        execution->ResumeOnUi(pending->coroutine);
+      }
     }
   });
-}
-
-std::function<void()> TaskExecution::ScheduleDelay(double duration_seconds, std::coroutine_handle<> coroutine) {
-  const auto application = context_->application.lock();
-  if (!application || !application->owner) {
-    throw std::logic_error("HuxerUI Delay() application Runtime is retired");
-  }
-  application->RequireThread();
-  Runtime& runtime = *application->owner;
-  const auto deadline = runtime.TimerNow() +
-      std::chrono::duration_cast<std::chrono::steady_clock::duration>(std::chrono::duration<double>(duration_seconds));
-  return runtime.ScheduleTimerAt(deadline, [weak = weak_from_this(), coroutine] { ResumeTask(weak, coroutine); });
 }
 
 void TaskExecution::ResumeOnUi(std::coroutine_handle<> coroutine) noexcept {
@@ -559,9 +549,25 @@ void NotifyTaskCompleted(const std::weak_ptr<TaskExecution>& execution) noexcept
   }
 }
 
-void ResumeTask(const std::weak_ptr<TaskExecution>& execution, std::coroutine_handle<> coroutine) noexcept {
+void TaskContinuation::Resume() const noexcept {
+  if (const auto wait = wait_.lock()) {
+    if (auto execution = wait->execution.lock()) {
+      execution->QueueResume(wait);
+    }
+  }
+}
+
+std::shared_ptr<TaskWaitState> BeginTaskWait(const std::weak_ptr<TaskExecution>& execution,
+                                          std::coroutine_handle<> coroutine) {
   if (auto active = execution.lock()) {
-    active->QueueResume(coroutine);
+    return std::make_shared<TaskWaitState>(TaskWaitState{active, coroutine});
+  }
+  throw std::logic_error("HuxerUI asynchronous operation requires a running Task execution");
+}
+
+void RetireTaskWait(const std::shared_ptr<TaskWaitState>& wait) noexcept {
+  if (wait) {
+    wait->active = false;
   }
 }
 

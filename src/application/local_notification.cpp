@@ -1,7 +1,6 @@
 #include <huxerui/system.h>
 
 #include <algorithm>
-#include <coroutine>
 #include <deque>
 #include <exception>
 #include <mutex>
@@ -13,7 +12,6 @@
 #include "application_internal.h"
 #include "platform_registry_internal.h"
 #include "resources/resource_internal.h"
-#include "runtime/task_internal.h"
 
 namespace huxerui::detail {
 
@@ -203,10 +201,9 @@ public:
   LocalNotificationOperation(Starter starter, Result failure)
       : starter_(std::move(starter)), failure_(std::move(failure)) {}
 
-  void Suspend(std::weak_ptr<TaskExecution> execution, std::coroutine_handle<> continuation) {
+  void Suspend(TaskContinuation continuation) {
     std::scoped_lock lock(mutex_);
-    execution_ = std::move(execution);
-    continuation_ = continuation;
+    continuation_ = std::move(continuation);
   }
 
   void Start(const std::shared_ptr<LocalNotificationTransport>& transport,
@@ -255,7 +252,6 @@ public:
   std::function<void()> Detach() noexcept override {
     std::scoped_lock lock(mutex_);
     canceled_ = true;
-    execution_.reset();
     continuation_ = {};
     return std::move(cancellation_);
   }
@@ -270,8 +266,7 @@ public:
 
 private:
   void Complete(Result result) noexcept {
-    std::weak_ptr<TaskExecution> execution;
-    std::coroutine_handle<> continuation;
+    TaskContinuation continuation;
     {
       std::scoped_lock lock(mutex_);
       if (canceled_ || result_.has_value()) {
@@ -279,17 +274,15 @@ private:
       }
       result_.emplace(std::move(result));
       cancellation_ = {};
-      execution = execution_;
       continuation = std::exchange(continuation_, {});
     }
-    ResumeTask(execution, continuation);
+    continuation.Resume();
   }
 
   std::mutex mutex_;
   Starter starter_;
   Result failure_;
-  std::weak_ptr<TaskExecution> execution_;
-  std::coroutine_handle<> continuation_;
+  TaskContinuation continuation_;
   std::function<void()> cancellation_;
   std::optional<Result> result_;
   bool canceled_ = false;
@@ -311,16 +304,12 @@ public:
     }
   }
 
-  [[nodiscard]] bool await_ready() const noexcept {
-    return false;
-  }
-
-  void await_suspend(std::coroutine_handle<typename Task<Result>::promise_type> continuation) {
-    operation_->Suspend(TaskExecutionFor(continuation), continuation);
+  void Suspend(TaskContinuation continuation) {
+    operation_->Suspend(std::move(continuation));
     controller_->Submit(operation_, ordered_);
   }
 
-  Result await_resume() {
+  Result TakeResult() {
     Result result = operation_->TakeResult();
     operation_.reset();
     return result;
@@ -337,7 +326,7 @@ Task<Result> RunLocalNotificationOperation(std::shared_ptr<LocalNotificationServ
                                            typename LocalNotificationOperation<Result>::Starter starter, Result failure,
                                            bool ordered) {
   ValidateApplicationCall(controller->application_source);
-  co_return co_await LocalNotificationAwaiter<Result>(std::move(controller), std::move(starter), std::move(failure),
+  co_return co_await TaskAwaiter<LocalNotificationAwaiter<Result>>(std::move(controller), std::move(starter), std::move(failure),
                                                       ordered);
 }
 

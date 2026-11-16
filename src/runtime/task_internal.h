@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <coroutine>
 #include <memory>
 
 #include <huxerui/app.h>
@@ -24,12 +23,6 @@ MakeTaskScopeState(UiThreadDispatcher dispatcher, std::shared_ptr<ExecutionConte
 /// Idempotently closes a scope and cancels its retained executions before its owner retires.
 /// @param scope Scope to close on its owning application thread; a null scope is harmless.
 void CloseTaskScope(const std::shared_ptr<TaskScopeImpl>& scope) noexcept;
-
-template <class Promise>
-  requires std::derived_from<Promise, TaskPromiseBase>
-std::weak_ptr<TaskExecution> TaskExecutionFor(std::coroutine_handle<Promise> coroutine) noexcept {
-  return coroutine.promise().Execution();
-}
 
 } // namespace detail
 

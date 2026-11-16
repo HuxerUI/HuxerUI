@@ -31,9 +31,47 @@ class TaskExecution;
 class TaskScopeImpl;
 class WorkerOperation;
 class WorkerSequenceState;
+struct TaskWaitState;
+
+// A completion can resume only the suspension that issued it.
+class TaskContinuation final {
+public:
+  TaskContinuation() = default;
+  explicit TaskContinuation(const std::shared_ptr<TaskWaitState>& wait) noexcept : wait_(wait) {}
+  void Resume() const noexcept;
+
+private:
+  std::weak_ptr<TaskWaitState> wait_;
+};
+
+std::shared_ptr<TaskWaitState> BeginTaskWait(const std::weak_ptr<TaskExecution>& execution,
+                                          std::coroutine_handle<> coroutine);
+void RetireTaskWait(const std::shared_ptr<TaskWaitState>& wait) noexcept;
+
+template <class Operation> class TaskAwaiter final {
+public:
+  template <class... Args> explicit TaskAwaiter(Args&&... args) : operation_(std::forward<Args>(args)...) {}
+  ~TaskAwaiter() { RetireTaskWait(wait_); }
+
+  bool await_ready() const noexcept { return false; }
+
+  template <class Promise> void await_suspend(std::coroutine_handle<Promise> coroutine) {
+    wait_ = BeginTaskWait(coroutine.promise().Execution(), coroutine);
+    operation_.Suspend(TaskContinuation(wait_));
+  }
+
+  decltype(auto) await_resume() {
+    RetireTaskWait(wait_);
+    return operation_.TakeResult();
+  }
+
+private:
+  Operation operation_;
+  std::shared_ptr<TaskWaitState> wait_;
+};
+
 void NotifyTaskCompleted(const std::weak_ptr<TaskExecution>& execution) noexcept;
 void EnqueueWorkerOperation(std::function<void()> operation, const char* api_name = "RunWorker()");
-void ResumeTask(const std::weak_ptr<TaskExecution>& execution, std::coroutine_handle<> coroutine) noexcept;
 void SubmitWorkerSequenceOperation(
     const std::shared_ptr<WorkerSequenceState>& sequence,
     const std::shared_ptr<WorkerOperation>& operation
@@ -382,10 +420,9 @@ template <class T> class CallbackOperation final {
   enum class Phase { Pending, Completed, Canceled };
 
 public:
-  void Bind(std::weak_ptr<TaskExecution> execution, std::coroutine_handle<> continuation) {
+  void Bind(TaskContinuation continuation) {
     // Bind before publishing the completion endpoint; no callback can access these fields yet.
-    execution_ = std::move(execution);
-    continuation_ = continuation;
+    continuation_ = std::move(continuation);
   }
 
   void Complete(StoredResult&& value) noexcept {
@@ -397,8 +434,7 @@ public:
   }
 
   void SetCancellation(std::function<void()> cancellation) noexcept {
-    std::weak_ptr<TaskExecution> execution;
-    std::coroutine_handle<> continuation;
+    TaskContinuation continuation;
     bool cancel = false;
     {
       std::scoped_lock lock(mutex_);
@@ -408,16 +444,13 @@ public:
       } else if (phase_ == Phase::Canceled) {
         cancel = true;
       } else {
-        execution = execution_;
         continuation = std::exchange(continuation_, {});
       }
     }
     if (cancel && cancellation) {
       cancellation();
     }
-    if (continuation) {
-      ResumeTask(execution, continuation);
-    }
+    continuation.Resume();
   }
 
   void Cancel() noexcept {
@@ -427,7 +460,6 @@ public:
       std::scoped_lock lock(mutex_);
       cancel = phase_ == Phase::Pending;
       phase_ = Phase::Canceled;
-      execution_.reset();
       continuation_ = {};
       cancellation = std::move(cancellation_);
     }
@@ -452,8 +484,7 @@ public:
 
 private:
   template <class Store> void Finish(Store store) noexcept {
-    std::weak_ptr<TaskExecution> execution;
-    std::coroutine_handle<> continuation;
+    TaskContinuation continuation;
     {
       std::scoped_lock lock(mutex_);
       if (phase_ != Phase::Pending) {
@@ -467,18 +498,14 @@ private:
       phase_ = Phase::Completed;
       // Even a nested platform event loop must not resume the coroutine while its starter is still executing.
       if (!starting_) {
-        execution = execution_;
         continuation = std::exchange(continuation_, {});
       }
     }
-    if (continuation) {
-      ResumeTask(execution, continuation);
-    }
+    continuation.Resume();
   }
 
   std::mutex mutex_;
-  std::weak_ptr<TaskExecution> execution_;
-  std::coroutine_handle<> continuation_;
+  TaskContinuation continuation_;
   std::function<void()> cancellation_;
   std::optional<StoredResult> result_;
   std::exception_ptr exception_;
@@ -497,16 +524,8 @@ public:
     operation_->Cancel();
   }
 
-  [[nodiscard]] bool await_ready() const noexcept {
-    return false;
-  }
-
-  template <class Promise> void await_suspend(std::coroutine_handle<Promise> continuation) {
-    const auto execution = continuation.promise().Execution();
-    if (execution.expired()) {
-      throw std::logic_error("HuxerUI AwaitCallback() requires a running Task execution");
-    }
-    operation_->Bind(execution, continuation);
+  void Suspend(TaskContinuation continuation) {
+    operation_->Bind(std::move(continuation));
     std::function<void()> cancellation;
     try {
       cancellation = std::invoke(std::move(start_), CallbackCompletion<T>(operation_));
@@ -516,7 +535,7 @@ public:
     operation_->SetCancellation(std::move(cancellation));
   }
 
-  T await_resume() {
+  T TakeResult() {
     return operation_->TakeResult();
   }
 
@@ -528,9 +547,9 @@ private:
 
 template <class T, class Start> Task<T> RunCallbackTask(Start start) {
   if constexpr (std::is_void_v<T>) {
-    co_await CallbackAwaiter<T, Start>(start);
+    co_await TaskAwaiter<CallbackAwaiter<T, Start>>(start);
   } else {
-    co_return co_await CallbackAwaiter<T, Start>(start);
+    co_return co_await TaskAwaiter<CallbackAwaiter<T, Start>>(start);
   }
 }
 
@@ -633,11 +652,10 @@ public:
   WorkerJob(Operation operation, std::shared_ptr<WorkerSequenceState> sequence)
       : operation_(std::move(operation)), sequence_(std::move(sequence)) {}
 
-  void Suspend(std::weak_ptr<TaskExecution> execution, std::coroutine_handle<> continuation) {
+  void Suspend(TaskContinuation continuation) {
     {
       std::scoped_lock lock(mutex_);
-      execution_ = std::move(execution);
-      continuation_ = continuation;
+      continuation_ = std::move(continuation);
     }
     if (sequence_) {
       SubmitWorkerSequenceOperation(sequence_, this->shared_from_this());
@@ -666,7 +684,6 @@ public:
     {
       std::scoped_lock lock(mutex_);
       canceled_ = true;
-      execution_.reset();
       continuation_ = {};
       if (phase_ == Phase::Queued || phase_ == Phase::Scheduled) {
         phase_ = Phase::Finished;
@@ -747,18 +764,16 @@ private:
 
   template <class Value> void CompleteWithResult(Value&& result) noexcept {
     try {
-      std::weak_ptr<TaskExecution> execution;
-      std::coroutine_handle<> continuation;
+      TaskContinuation continuation;
       {
         std::scoped_lock lock(mutex_);
         if (!canceled_) {
           result_.emplace(std::forward<Value>(result));
-          execution = execution_;
           continuation = std::exchange(continuation_, {});
         }
         phase_ = Phase::Finished;
       }
-      ResumeTask(execution, continuation);
+      continuation.Resume();
       RetireSequence();
     } catch (...) {
       CompleteWithException(std::current_exception());
@@ -766,8 +781,7 @@ private:
   }
 
   void CompleteWithException(std::exception_ptr exception) noexcept {
-    std::weak_ptr<TaskExecution> execution;
-    std::coroutine_handle<> continuation;
+    TaskContinuation continuation;
     {
       std::scoped_lock lock(mutex_);
       if (phase_ == Phase::Finished) {
@@ -775,13 +789,12 @@ private:
       }
       if (!canceled_) {
         exception_ = std::move(exception);
-        execution = execution_;
         continuation = std::exchange(continuation_, {});
       }
       phase_ = Phase::Finished;
     }
     operation_.reset();
-    ResumeTask(execution, continuation);
+    continuation.Resume();
     RetireSequence();
   }
 
@@ -794,8 +807,7 @@ private:
   std::mutex mutex_;
   std::optional<Operation> operation_;
   std::shared_ptr<WorkerSequenceState> sequence_;
-  std::weak_ptr<TaskExecution> execution_;
-  std::coroutine_handle<> continuation_;
+  TaskContinuation continuation_;
   std::optional<StoredResult> result_;
   std::exception_ptr exception_;
   std::stop_source stop_source_;
@@ -809,8 +821,7 @@ public:
       : job_(std::make_shared<WorkerJob<Operation, Result>>(std::move(operation), nullptr)) {}
 
   WorkerAwaiter(std::shared_ptr<WorkerSequenceState> sequence, Operation operation)
-      : job_(std::make_shared<WorkerJob<Operation, Result>>(std::move(operation), std::move(sequence))),
-        sequenced_(true) {}
+      : job_(std::make_shared<WorkerJob<Operation, Result>>(std::move(operation), std::move(sequence))) {}
 
   WorkerAwaiter(const WorkerAwaiter&) = delete;
   WorkerAwaiter& operator=(const WorkerAwaiter&) = delete;
@@ -823,40 +834,24 @@ public:
     }
   }
 
-  [[nodiscard]] bool await_ready() const noexcept {
-    return false;
+  void Suspend(TaskContinuation continuation) {
+    job_->Suspend(std::move(continuation));
   }
 
-  template <class Promise> void await_suspend(std::coroutine_handle<Promise> continuation) {
-    static_assert(
-        std::derived_from<Promise, TaskPromiseBase>,
-        "HuxerUI worker operation can only be awaited from another HuxerUI Task"
-    );
-    const std::weak_ptr<TaskExecution> execution = continuation.promise().Execution();
-    if (execution.expired()) {
-      if (sequenced_) {
-        throw std::logic_error("HuxerUI WorkerSequence::Run() requires a running Task execution");
-      }
-      throw std::logic_error("HuxerUI RunWorker() requires a running Task execution");
-    }
-    job_->Suspend(execution, continuation);
-  }
-
-  Result await_resume() {
+  Result TakeResult() {
     return job_->TakeResult();
   }
 
 private:
   std::shared_ptr<WorkerJob<Operation, Result>> job_;
-  bool sequenced_ = false;
 };
 
 template <class Result, class Operation> Task<Result> RunWorkerTask(Operation operation) {
   if constexpr (std::is_void_v<Result>) {
-    co_await WorkerAwaiter<Operation, Result>(std::move(operation));
+    co_await TaskAwaiter<WorkerAwaiter<Operation, Result>>(std::move(operation));
     co_return;
   } else {
-    co_return co_await WorkerAwaiter<Operation, Result>(std::move(operation));
+    co_return co_await TaskAwaiter<WorkerAwaiter<Operation, Result>>(std::move(operation));
   }
 }
 
@@ -886,10 +881,10 @@ private:
 template <class Result, class Operation>
 Task<Result> RunWorkerSequenceTask(std::shared_ptr<WorkerSequenceState> sequence, Operation operation) {
   if constexpr (std::is_void_v<Result>) {
-    co_await WorkerAwaiter<Operation, Result>(std::move(sequence), std::move(operation));
+    co_await TaskAwaiter<WorkerAwaiter<Operation, Result>>(std::move(sequence), std::move(operation));
     co_return;
   } else {
-    co_return co_await WorkerAwaiter<Operation, Result>(std::move(sequence), std::move(operation));
+    co_return co_await TaskAwaiter<WorkerAwaiter<Operation, Result>>(std::move(sequence), std::move(operation));
   }
 }
 
