@@ -1,5 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
+#import <CoreServices/CoreServices.h>
 #import <ImageIO/ImageIO.h>
 #import <QuartzCore/CADisplayLink.h>
 #import <UserNotifications/UserNotifications.h>
@@ -507,6 +508,7 @@ public:
   /// @param application Declaration that outlives this Runtime; called on the AppKit main thread.
   void Start(const Application& application) {
     InitializeApplication(application, TakeStartupActivation(), LifecycleState());
+    started_ = true;
     for (auto& activation : pending_activations_)
       HandleApplicationActivation(std::move(activation));
     pending_activations_.clear();
@@ -534,15 +536,19 @@ public:
     if (IsInitialized() && !stopped_) Runtime::UpdateResourceConfiguration(Configuration());
   }
 
-  /// Coordinates AppKit termination with asynchronous shared Runtime shutdown.
-  /// @return NSTerminateLater while shutdown is pending, NSTerminateNow when stopped, or Cancel before startup.
   NSApplicationTerminateReply ShouldTerminate() {
     if (stopped_) return NSTerminateNow;
-    if (!IsInitialized()) return NSTerminateCancel;
-    termination_pending_ = true;
+    if (!started_) return NSTerminateCancel;
+
+    NSAppleEventDescriptor* event = NSAppleEventManager.sharedAppleEventManager.currentAppleEvent;
+    const bool quit_event = event.eventClass == kCoreEventClass && event.eventID == kAEQuitApplication;
+    if (quit_event) termination_pending_ = true;
     Runtime::RequestShutdown();
-    return NSTerminateLater;
+    // A direct terminate: call may be on the main queue. Let that callback return before completing
+    // termination. A Quit Apple Event needs AppKit's eventual reply so system logout can proceed.
+    return quit_event ? NSTerminateLater : NSTerminateCancel;
   }
+
   void OpenURLs(NSArray* urls) noexcept {
     try {
       std::optional<std::vector<ApplicationActivation>> activations = DecodeMacApplicationActivations(urls);
@@ -719,6 +725,7 @@ private:
   __strong HuxerUIApplicationDelegate* delegate_ = nil;
   std::vector<FileReference> clipboard_references_;
   std::vector<ApplicationActivation> pending_activations_;
+  bool started_ = false;
   bool stopped_ = false;
   bool termination_pending_ = false;
   std::exception_ptr failure_;
