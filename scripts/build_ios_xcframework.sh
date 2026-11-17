@@ -140,6 +140,7 @@ xcrun --sdk iphonesimulator swiftc \
   -lhuxerui_static \
   -lc++ \
   -framework AVFoundation \
+  -framework BackgroundTasks \
   -framework Contacts \
   -framework CoreBluetooth \
   -framework CoreFoundation \
@@ -157,6 +158,7 @@ xcrun --sdk iphonesimulator swiftc \
   -framework Photos \
   -framework QuartzCore \
   -framework UIKit \
+  -framework UserNotifications \
   -Xlinker -weak_framework \
   -Xlinker UniformTypeIdentifiers \
   -o "$build_directory/huxerui_ios_swift_link_test"
