@@ -69,6 +69,12 @@ if (WIN32 OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
                     "-DHOST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
                     -P "${CMAKE_CURRENT_SOURCE_DIR}/runtime_dependencies.cmake"
     )
+    add_test(NAME HuxerUIRuntimeDependencySelectionTests
+            COMMAND "${CMAKE_COMMAND}"
+                    "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
+                    "-DWORK_DIRECTORY=${HUXERUI_SOURCE_SUBDIRECTORY_WORK_DIRECTORY}"
+                    -P "${CMAKE_CURRENT_SOURCE_DIR}/runtime_dependency_selection.cmake"
+    )
 endif ()
 add_test(NAME HuxerUISourceSubdirectoryTests
         COMMAND "${CMAKE_COMMAND}"
