@@ -21,7 +21,7 @@ The Windows, macOS, Linux, iOS, Android, and Web picker/reference transports and
 The file API does not provide a public filesystem subclassing contract, Zip filesystems, mount tables, general URI dispatch, symbolic-link creation, filesystem watching, general permission management, file locking, memory mapping, or a document-provider abstraction.
 Directory copying does not add multi-directory selection, mixed file/directory selection, recursive deletion of grants, mirroring, moves, metadata preservation, transactions, rollback, resumability, or a progress-controller API.
 
-It also does not persist picker grants across process launches or add clipboard, recent-file, or share-sheet APIs.
+The file API does not manage recent-file lists or provide clipboard and share-sheet APIs.
 [External File Drop](file-drop.md) reuses `FileReference` independently of picker presentation and does not expand the picker contract.
 
 Open With, platform file associations, share intents, application activation, window selection, and multi-window document routing are outside this design.
@@ -434,6 +434,10 @@ public:
   Task<IoResult<FileReference>> CopyFileFromAsync(FileReference source, std::string name, bool overwrite = false) const;
   Task<IoResult<DirectoryCopySummary>> CopyDirectoryContentsToAsync(File destination, bool overwrite = false) const;
   Task<IoResult<DirectoryCopySummary>> CopyDirectoryContentsToAsync(FileReference destination, bool overwrite = false) const;
+
+  Task<IoResult<void>> RememberAsync(std::string key) const;
+  static Task<IoResult<FileReference>> RestoreAsync(std::string key);
+  static Task<IoResult<void>> ForgetAsync(std::string key);
 };
 ```
 
@@ -464,7 +468,16 @@ Neither operation exposes a platform path or silently grants broader access.
 
 Each value retains a shared `FileReferenceBackend`.
 Copying a value retains the grant, and destruction of the last copy releases process-scoped resources such as Apple security-scope access, Android provider handles, or a browser handle.
-The public API does not serialize references or promise that a grant remains valid after application restart.
+
+### Persistent access records
+
+The live backend manages reference and stream access. `RememberAsync()` explicitly writes an application-private record, and `RestoreAsync()` acquires a new live backend. The Runtime owns the optional store; each lazy operation captures its original application identity before scheduling. Unsupported hosts and capabilities return `Unsupported`. Records are keyed by exact application-supplied UTF-8 strings and replace atomically. Restore is silent. It refreshes metadata, retains the recorded access ceiling, and relies on the current platform grant and provider. A lost read grant fails, while a lost write grant yields a read-only reference. Cancellation suppresses delivery without undoing committed changes.
+
+Android stores the authority URI and effective read/write modes. A tree record uses the original tree grant URI; its live backend uses the provider's root document URI. Restoration intersects the recorded ceiling with `getPersistedUriPermissions()` before consulting the provider. Ownership records hold only the bits the SDK took and the resulting grant timestamp. Cleanup checks both against the current grant and preserves modes required by other keys. A missing or changed grant, an old record without a timestamp, or an interrupted save without confirmed ownership cannot authorize release. Native code sharing the same grant should coordinate changes with the SDK because the system has one grant per application and URI.
+
+iOS uses minimal bookmarks and macOS uses application-scoped security bookmarks, including the read-only bookmark option where applicable. Both reconstruct existing coordinated references and balance scope ownership through those references. A stale bookmark is updated when it resolves and access can be obtained. Temporary copies and children without independent authorization cannot be stored.
+
+Web persists serializable file system handles in IndexedDB under the existing application storage identity. Its transactions are independent of the local filesystem queue. Restore finishes reading the record before querying the browser's current permission or contacting the provider. Upload snapshots have no restorable handle. Windows and Linux leave persistent access unavailable; their ordinary path-backed I/O remains available.
 
 ### PlatformPayload capability transport
 
@@ -491,7 +504,7 @@ The public JavaScript `PlatformPayload.encode()` and `decode()` methods remain c
 
 No platform wrapper adds `CanWrite()` or another writable flag.
 The original C++ metadata remains available after the reference returns through the bridge, and actual operations continue to enforce current provider authorization.
-The projection neither attenuates nor expands the grant and does not change the existing session-scoped persistence contract.
+The projection preserves the existing grant. Explicit persistent access records use the separate RememberAsync contract.
 
 ### Directory capabilities and copying
 
@@ -720,11 +733,10 @@ For two selected trees, containment checks require the same provider authority, 
 Different authorities or unavailable containment checks return `Unsupported`; they are not assumed independent.
 Copying a selected tree into a local `File` is supported when the destination is inside application-private data and the provider belongs to a different UID; other local destinations remain unsupported when their independence cannot be established.
 Incomplete provider listings and virtual documents without an ordinary byte stream are unsupported rather than silently omitted or converted.
-The initial adapter retains process-scoped URI access only and does not call `takePersistableUriPermission()`.
+Selection alone retains process-scoped URI access. The application can explicitly keep a supported grant through `RememberAsync()`.
 `HuxerUIFileReference.fromUri(context, uri)` creates a read-only capability from an already readable ordinary `content://` file and queries its metadata synchronously, without requiring a window.
 The Java factory checks read access before JNI constructs the provider backend and a payload wrapper with a valid owning handle and capability key.
-The backend retains the application Context independently of the originating module. Persistent URI grants remain under the application's control.
-The caller owns permission policy, and successful creation is not a guarantee against later revocation.
+The backend retains the application Context independently of the originating module. The native URI factory uses the caller's existing permissions. It does not acquire or manage its caller's persistent grant.
 
 `HuxerUIActivity` installs the Activity result host and forwards results and presentation lifecycle automatically.
 An embedded `HuxerUIView` does not cast its arbitrary Context to Activity; its owner installs `HuxerUIView.ActivityResultHost` and forwards results through `dispatchActivityResult()` plus resume, pause, and saved state as described in the [Android platform guide](../guide/platforms.md#window-owned-java-modules-and-activity-results).
@@ -795,8 +807,8 @@ Source and destination directory selection start from separate user actions rath
 Application code starts the picker directly from a click or equivalent event and does not place `Delay()`, HTTP work, or another suspension before `OpenFileAsync()`, `OpenFilesAsync()`, `OpenDirectoryAsync()`, or `SaveFileAsync()`.
 A browser dialog cannot generally be dismissed by script, so Task cancellation detaches the HuxerUI continuation while the transport waits for the platform picker to settle before advancing the shared presentation queue.
 
-Handle and browser `File` lifetimes follow the corresponding `FileReference` and remain session scoped.
-The Web backend does not persist granted handles in IndexedDB or add browser-specific permission methods to the public API.
+Live handles and browser `File` snapshots follow the corresponding `FileReference` lifetime.
+An explicit `RememberAsync()` stores a supported handle in IndexedDB. Restore checks current permissions without prompting.
 
 ### Storage identity and directories
 

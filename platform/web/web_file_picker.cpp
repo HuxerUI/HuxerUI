@@ -184,8 +184,53 @@ EM_JS(void, StartWebReferenceOperation,
     }
   };
   const describe = (handle) => helper.describe(handle, null, source.writable, source.entryKey);
+  const fileAccess = async () => {
+    if (typeof indexedDB === "undefined") { fail(6); }
+    const remembering = request.kind === "rememberAccess";
+    const restoring = request.kind === "restoreAccess";
+    if (remembering && (!source.handle || typeof source.handle.queryPermission !== "function")) { fail(6); }
+    if (remembering && await source.handle.queryPermission({mode: "read"}) !== "granted") { fail(1); }
+    if (operation.canceled) { fail(3); }
+    const database = await new Promise((resolve, reject) => {
+      const open = indexedDB.open(request.database, 1);
+      open.onupgradeneeded = () => open.result.createObjectStore("handles");
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    let record;
+    try {
+      if (operation.canceled) { fail(3); }
+      record = await new Promise((resolve, reject) => {
+        const transaction = database.transaction("handles", restoring ? "readonly" : "readwrite");
+        const handles = transaction.objectStore("handles");
+        const result = restoring ? handles.get(request.key) : remembering
+            ? handles.put({handle: source.handle, writable: source.writable}, request.key) : handles.delete(request.key);
+        transaction.oncomplete = () => resolve(result.result);
+        transaction.onabort = () => reject(result.error || transaction.error || {fileCode: 3});
+      });
+    } finally {
+      database.close();
+    }
+    if (!restoring) { return true; }
+    if (!record) { fail(0); }
+    const handle = record.handle;
+    if (!handle || typeof record.writable !== "boolean") { fail(3); }
+    if (typeof handle.queryPermission !== "function") { fail(6); }
+    if (await handle.queryPermission({mode: "read"}) !== "granted") { fail(1); }
+    const writable = record.writable && await handle.queryPermission({mode: "readwrite"}) === "granted";
+    if (handle.kind === "directory") {
+      // A previously granted handle can still point at a deleted directory. Check access without reading every entry.
+      const entries = handle.values();
+      await entries.next();
+      if (entries.return) { await entries.return(); }
+    }
+    return await helper.describe(handle, null, writable);
+  };
   Promise.resolve().then(async () => {
     if (operation.canceled) { fail(3); }
+    if (request.kind === "rememberAccess" || request.kind === "restoreAccess" || request.kind === "forgetAccess") {
+      return await fileAccess();
+    }
     if (request.kind === "read") {
       if (source.handle && source.handle.kind !== "file") { fail(5); }
       const file = source.handle ? await source.handle.getFile() : source.file;
@@ -289,7 +334,7 @@ EM_JS(void, StartWebReferenceOperation,
       let code = error.fileCode;
       if (code === undefined) {
         code = ({NotFoundError: 0, NotAllowedError: 1, SecurityError: 1, QuotaExceededError: 2,
-          RangeError: 2, TypeMismatchError: 7, NotSupportedError: 6})[error.name] ?? 3;
+          RangeError: 2, TypeMismatchError: 7, NotSupportedError: 6, DataCloneError: 6})[error.name] ?? 3;
       }
       return {kind: 3, errorCode: code, message: "HuxerUI external file operation failed"};
     }
@@ -950,6 +995,49 @@ FileReference MakeWebFileReference(const val& reference) {
   return MakeFileReference(std::move(metadata), std::make_shared<WebFileReferenceBackend>(std::move(source)));
 }
 
+// IndexedDB orders record writes. Keep provider permission queries off the local filesystem queue.
+class WebFileAccessStore final : public FileAccessStore {
+public:
+  explicit WebFileAccessStore(const File& directory) : database_("huxerui-file-access:" + directory.Path()) {}
+
+  Task<IoResult<void>> Remember(std::string key, std::shared_ptr<FileReferenceBackend> reference) override {
+    auto web = std::dynamic_pointer_cast<WebFileReferenceBackend>(std::move(reference));
+    return Change(web ? web->SourceValue() : val::object(), Request("rememberAccess", std::move(key)));
+  }
+
+  Task<IoResult<FileReference>> Restore(std::string key) override {
+    return AwaitCallback<IoResult<FileReference>>(
+        [request = Request("restoreAccess", std::move(key))](auto complete) mutable {
+          return RunWebReference<FileReference>(val::object(), std::move(request),
+              [complete](auto result) { complete.Complete(std::move(result)); }, MakeWebFileReference);
+        });
+  }
+
+  Task<IoResult<void>> Forget(std::string key) override {
+    return Change(val::object(), Request("forgetAccess", std::move(key)));
+  }
+
+private:
+  static Task<IoResult<void>> Change(val source, val request) {
+    auto result = co_await AwaitCallback<IoResult<bool>>(
+        [source = std::move(source), request = std::move(request)](auto complete) mutable {
+          return RunWebReference<bool>(std::move(source), std::move(request),
+              [complete](auto result) { complete.Complete(std::move(result)); },
+              [](const val& value) { return value.as<bool>(); });
+        });
+    co_return result.Succeeded() ? IoResult<void>::Success() : IoResult<void>(std::move(result).Error());
+  }
+
+  val Request(std::string kind, std::string key) const {
+    auto request = ReferenceRequest(std::move(kind));
+    request.set("database", database_);
+    request.set("key", std::move(key));
+    return request;
+  }
+
+  std::string database_;
+};
+
 FileReference MakeWebFileReferenceFromFile(const val& file) {
   val source = val::object();
   source.set("handle", val::null());
@@ -1125,6 +1213,10 @@ huxerui_web_file_picker_complete(std::uintptr_t native_handle, emscripten::EM_VA
 
 std::shared_ptr<FilePickerTransport> CreateWebFilePickerTransport() {
   return std::make_shared<WebFilePickerTransport>();
+}
+
+std::shared_ptr<FileAccessStore> CreateWebFileAccessStore(const AppDirectories& directories) {
+  return std::make_shared<WebFileAccessStore>(directories.data_directory);
 }
 
 FileDropOffer ReadWebFileDropOffer(const val& transfer) {

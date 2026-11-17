@@ -232,11 +232,30 @@ public final class HuxerUIFileReference implements AutoCloseable {
         return operation;
     }
 
+    static int fileAccess(Context context, int operation, String key, String uri, int modes, Metadata[] result) {
+        try {
+            HuxerUIFileAccessStore.run(context, operation, key, uri, modes, result);
+            return -1;
+        } catch (FileNotFoundException exception) {
+            return ERROR_NOT_FOUND;
+        } catch (SecurityException exception) {
+            return ERROR_PERMISSION_DENIED;
+        } catch (UnsupportedOperationException exception) {
+            return ERROR_UNSUPPORTED;
+        } catch (Exception exception) {
+            return ERROR_IO;
+        }
+    }
+
     static Future<?> submit(Runnable operation) {
         return executor.submit(operation);
     }
 
     static Metadata describe(ContentResolver resolver, Uri uri, int grantFlags) {
+        return describe(resolver, uri, grantFlags, uri);
+    }
+
+    static Metadata describe(ContentResolver resolver, Uri uri, int grantFlags, Uri grantUri) {
         // Snapshot display metadata without reading contents. Name/size, MIME, and capability flags
         // are separate provider calls; advertised writability remains subject to the effective grant.
         String name = null;
@@ -266,7 +285,10 @@ public final class HuxerUIFileReference implements AutoCloseable {
         boolean writeAllowed = (grantFlags & Intent.FLAG_GRANT_WRITE_URI_PERMISSION) != 0;
         boolean writable = writeAllowed && supportsWrite(resolver, uri, directory);
         if (directory) { size = -1; }
-        return new Metadata(uri, name, Math.max(-1L, size), contentType, writable, writeAllowed);
+        int persistableModes = (grantFlags & Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION) != 0
+                ? grantFlags & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION) : 0;
+        return new Metadata(uri, name, Math.max(-1L, size), contentType, writable, writeAllowed, persistableModes,
+                persistableModes != 0 ? grantUri.toString() : null);
     }
 
     static String sanitizeContentType(String contentType) {
@@ -394,14 +416,23 @@ public final class HuxerUIFileReference implements AutoCloseable {
         // The tree grant is independent of this item's advertised capability. A directory that cannot
         // create children can still contain existing writable files; read-only grants restrict both.
         final boolean writeAllowed;
+        final int persistableModes;
+        final String grantUri;
 
         Metadata(Uri uri, String name, long size, String contentType, boolean writable, boolean writeAllowed) {
+            this(uri, name, size, contentType, writable, writeAllowed, 0, null);
+        }
+
+        Metadata(Uri uri, String name, long size, String contentType, boolean writable, boolean writeAllowed,
+                int persistableModes, String grantUri) {
             this.uri = uri;
             this.name = name;
             this.size = size;
             this.contentType = contentType;
             this.writable = writable;
             this.writeAllowed = writeAllowed;
+            this.persistableModes = persistableModes;
+            this.grantUri = grantUri;
         }
     }
 

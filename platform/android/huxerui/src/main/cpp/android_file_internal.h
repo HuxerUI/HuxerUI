@@ -18,6 +18,7 @@ class FileReference;
 namespace huxerui::detail {
 
 class FilePickerTransport;
+class FileAccessStore;
 struct FileReferenceMetadata;
 
 // PlatformPayload wrappers expose Android metadata but retain the original FileReference for access and lifetime.
@@ -30,6 +31,7 @@ struct AndroidFileReferenceProjection {
 [[nodiscard]] FileDropPreparation CaptureAndroidFileDrop(JNIEnv* environment, jobject operation);
 
 [[nodiscard]] AppDirectories CreateAndroidAppDirectories(JNIEnv* environment, jobject context);
+std::shared_ptr<FileAccessStore> CreateAndroidFileAccessStore(JavaVM* vm, jobject context);
 [[nodiscard]] std::shared_ptr<FilePickerTransport>
 CreateAndroidFilePickerTransport(JavaVM* virtual_machine, JNIEnv* environment, jobject view, jobject context);
 [[nodiscard]] FileReference CreateAndroidFileReference(

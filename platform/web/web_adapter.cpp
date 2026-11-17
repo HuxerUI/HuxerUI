@@ -917,6 +917,10 @@ public:
   std::shared_ptr<PermissionTransport> CreatePermissionTransport() override { return CreateWebPermissionTransport(); }
   std::optional<AppDirectories> CreateAppDirectories() override { return CreateWebAppDirectories(); }
 
+  std::shared_ptr<FileAccessStore> CreateFileAccessStore(const AppDirectories& directories) override {
+    return CreateWebFileAccessStore(directories);
+  }
+
   std::function<void()> ScheduleTimerAt(std::chrono::steady_clock::time_point deadline,
                                         std::function<void()> callback) override {
     auto timer = std::make_shared<Timer>();

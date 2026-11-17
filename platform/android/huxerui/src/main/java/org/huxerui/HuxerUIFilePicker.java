@@ -155,7 +155,8 @@ final class HuxerUIFilePicker {
                                 // Keep the tree grant while addressing its root document. File operations
                                 // must use document URIs under that grant, not filesystem paths guessed from IDs.
                                 Uri document = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree));
-                                HuxerUIFileReference.Metadata item = HuxerUIFileReference.describe(resolver, document, effectiveFlags);
+                                HuxerUIFileReference.Metadata item =
+                                        HuxerUIFileReference.describe(resolver, document, effectiveFlags, tree);
                                 if (!DocumentsContract.Document.MIME_TYPE_DIR.equals(item.contentType)
                                         || (writable && !item.writable)) { throw new SecurityException(); }
                                 selected = new HuxerUIFileReference.Metadata[] {item};

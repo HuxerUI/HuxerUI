@@ -843,6 +843,10 @@ private:
     return CreateAndroidAppDirectories(Environment(), context_);
   }
 
+  std::shared_ptr<FileAccessStore> CreateFileAccessStore(const AppDirectories&) override {
+    return CreateAndroidFileAccessStore(virtual_machine_, context_);
+  }
+
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {
     return CreateAndroidHttpTransport(virtual_machine_, Environment());
   }

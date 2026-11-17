@@ -17,9 +17,11 @@ class FileReference;
 
 namespace huxerui::detail {
 
+class FileAccessStore;
 class FilePickerTransport;
 
 [[nodiscard]] AppDirectories CreateMacAppDirectories();
+std::shared_ptr<FileAccessStore> CreateMacFileAccessStore(const AppDirectories& directories);
 
 #ifdef __OBJC__
 [[nodiscard]] std::shared_ptr<FilePickerTransport>

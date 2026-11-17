@@ -375,6 +375,11 @@ public:
     }
     constructor_ =
         environment->GetMethodID(reference_class_, "<init>", "(Landroid/content/Context;Ljava/lang/String;Z)V");
+    file_access_ = environment->GetStaticMethodID(
+        reference_class_, "fileAccess",
+        "(Landroid/content/Context;ILjava/lang/String;Ljava/lang/String;I[Lorg/huxerui/HuxerUIFileReference$Metadata;)I");
+    metadata_persistable_modes_ = environment->GetFieldID(metadata_class_, "persistableModes", "I");
+    metadata_grant_uri_ = environment->GetFieldID(metadata_class_, "grantUri", "Ljava/lang/String;");
     prepare_directory_ = environment->GetMethodID(
         reference_class_, "prepareDirectory",
         "(JILjava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Z)"
@@ -409,7 +414,7 @@ public:
     parcel_methods_.close_with_error = environment->GetMethodID(descriptor_class.Get(), "closeWithError",
                                                                "(Ljava/lang/String;)V");
     if (!metadata_uri_ || !metadata_name_ || !metadata_size_ || !metadata_content_type_ || !metadata_writable_ ||
-        !metadata_write_allowed_ ||
+        !metadata_write_allowed_ || !metadata_persistable_modes_ || !metadata_grant_uri_ || !file_access_ ||
         !uri_string_ || entry_key_ == nullptr || prepare_directory_ == nullptr || constructor_ == nullptr ||
         prepare_read_ == nullptr || prepare_import_ == nullptr || prepare_replace_ == nullptr ||
         prepare_open_read_ == nullptr || prepare_open_write_ == nullptr || prepare_open_random_access_ == nullptr ||
@@ -428,6 +433,16 @@ public:
 
   [[nodiscard]] static std::vector<FileReference> DecodeReferences(
       const std::shared_ptr<AndroidFileReferenceBridge>& bridge, JNIEnv* environment, jobjectArray values);
+
+  [[nodiscard]] jobjectArray AllocateFileAccessResult(JNIEnv* environment) const {
+    return environment->NewObjectArray(1, metadata_class_, nullptr);
+  }
+
+  jint FileAccess(JNIEnv* environment, jint operation, jstring key, jstring uri, jint modes,
+                  jobjectArray result) const {
+    return environment->CallStaticIntMethod(reference_class_, file_access_, context_, operation, key, uri, modes,
+                                            result);
+  }
 
   [[nodiscard]] jobject CreateReference(JNIEnv* environment, std::string_view uri, bool write_allowed) const {
     android::LocalRef<jstring> java_uri = android::Utf8ToJavaString(environment, uri);
@@ -527,10 +542,13 @@ private:
   jfieldID metadata_content_type_ = nullptr;
   jfieldID metadata_writable_ = nullptr;
   jfieldID metadata_write_allowed_ = nullptr;
+  jfieldID metadata_persistable_modes_ = nullptr;
+  jfieldID metadata_grant_uri_ = nullptr;
   jmethodID uri_string_ = nullptr;
   jclass reference_class_ = nullptr;
   jclass operation_class_ = nullptr;
   jmethodID constructor_ = nullptr;
+  jmethodID file_access_ = nullptr;
   jmethodID entry_key_ = nullptr;
   jmethodID prepare_directory_ = nullptr;
   jmethodID prepare_read_ = nullptr;
@@ -792,8 +810,10 @@ class AndroidFileReferenceBackend final : public FileReferenceBackend,
                                           public std::enable_shared_from_this<AndroidFileReferenceBackend> {
 public:
   AndroidFileReferenceBackend(std::shared_ptr<AndroidFileReferenceBridge> bridge, JNIEnv* environment,
-                              std::string_view uri, bool write_allowed)
-      : bridge_(std::move(bridge)), uri_(uri), reference_(bridge_->CreateReference(environment, uri, write_allowed)) {
+                              std::string_view uri, bool write_allowed, std::string grant_uri = {},
+                              jint persistable_modes = 0)
+      : bridge_(std::move(bridge)), uri_(uri), grant_uri_(std::move(grant_uri)), persistable_modes_(persistable_modes),
+        reference_(bridge_->CreateReference(environment, uri, write_allowed)) {
     android::LocalRef<jstring> entry_key(
         environment, static_cast<jstring>(environment->CallObjectMethod(reference_, bridge_->EntryKey())));
     if (!entry_key || environment->ExceptionCheck()) {
@@ -921,6 +941,10 @@ public:
   [[nodiscard]] const std::string& Uri() const noexcept {
     return uri_;
   }
+
+  const std::string& GrantUri() const noexcept { return grant_uri_; }
+
+  jint PersistableModes() const noexcept { return persistable_modes_; }
 
   bool NeedsChildListingForLookup() const noexcept override { return true; }
 
@@ -1142,6 +1166,8 @@ private:
   std::shared_ptr<AndroidFileReferenceBridge> bridge_;
   std::string uri_;
   std::string entry_key_;
+  std::string grant_uri_;
+  jint persistable_modes_;
   jobject reference_ = nullptr;
 };
 
@@ -1165,6 +1191,9 @@ std::vector<FileReference> AndroidFileReferenceBridge::DecodeReferences(
     const jlong size = environment->GetLongField(value.Get(), bridge->metadata_size_);
     const bool writable = environment->GetBooleanField(value.Get(), bridge->metadata_writable_) == JNI_TRUE;
     const bool write_allowed = environment->GetBooleanField(value.Get(), bridge->metadata_write_allowed_) == JNI_TRUE;
+    const jint persistable_modes = environment->GetIntField(value.Get(), bridge->metadata_persistable_modes_);
+    android::LocalRef<jstring> grant_uri(
+        environment, static_cast<jstring>(environment->GetObjectField(value.Get(), bridge->metadata_grant_uri_)));
     if (!uri || !name || environment->ExceptionCheck()) {
       throw std::runtime_error("HuxerUI Android file metadata is incomplete");
     }
@@ -1185,11 +1214,108 @@ std::vector<FileReference> AndroidFileReferenceBridge::DecodeReferences(
     if (environment->ExceptionCheck()) {
       throw std::runtime_error("HuxerUI Android file metadata could not be decoded");
     }
-    auto backend = std::make_shared<AndroidFileReferenceBackend>(bridge, environment, uri_value, write_allowed);
+    auto backend = std::make_shared<AndroidFileReferenceBackend>(
+        bridge, environment, uri_value, write_allowed,
+        grant_uri ? android::JavaStringToUtf8(environment, grant_uri.Get()) : std::string{}, persistable_modes);
     references.push_back(MakeFileReference(std::move(metadata), std::move(backend)));
   }
   return references;
 }
+
+class AndroidFileAccessStore final : public FileAccessStore {
+public:
+  AndroidFileAccessStore(JavaVM* vm, jobject context) : vm_(vm), context_(context) {}
+
+  Task<IoResult<void>> Remember(std::string key, std::shared_ptr<FileReferenceBackend> reference) override {
+    const auto android = std::dynamic_pointer_cast<AndroidFileReferenceBackend>(std::move(reference));
+    if (!android || android->GrantUri().empty()) {
+      return Failure<void>(IoErrorCode::Unsupported, "HuxerUI Android file reference cannot be remembered");
+    }
+    return Run<void>(Operation::Remember, std::move(key), android->GrantUri(), android->PersistableModes());
+  }
+
+  Task<IoResult<FileReference>> Restore(std::string key) override {
+    return Run<FileReference>(Operation::Restore, std::move(key));
+  }
+
+  Task<IoResult<void>> Forget(std::string key) override {
+    return Run<void>(Operation::Forget, std::move(key));
+  }
+
+private:
+  enum class Operation : jint { Remember, Restore, Forget };
+
+  template <class T>
+  static Task<IoResult<T>> Failure(IoErrorCode code, const char* message) {
+    co_return IoResult<T>(IoError{code, message});
+  }
+
+  std::shared_ptr<AndroidFileReferenceBridge> Bridge() {
+    if (!bridge_) {
+      // Runtime retains this Context. Resolve Java classes on the application thread before
+      // workers begin using the bridge and its own JNI global references.
+      JniEnvironment attached(vm_);
+      JNIEnv* environment = attached.Get();
+      if (environment != nullptr && !environment->ExceptionCheck()) {
+        try {
+          bridge_ = std::make_shared<AndroidFileReferenceBridge>(vm_, environment, context_);
+        } catch (...) {
+          ClearJavaException(environment);
+        }
+      }
+    }
+    return bridge_;
+  }
+
+  template <class T>
+  Task<IoResult<T>> Run(Operation operation, std::string key, std::string uri = {}, jint modes = 0) {
+    auto bridge = Bridge();
+    if (!bridge) {
+      return Failure<T>(IoErrorCode::Io, "HuxerUI Android file access bridge is unavailable");
+    }
+    return RunWorker([bridge = std::move(bridge), operation, key = std::move(key),
+                      uri = std::move(uri), modes]() -> IoResult<T> {
+      JniEnvironment attached(bridge->VirtualMachine());
+      JNIEnv* environment = attached.Get();
+      const IoError failure{IoErrorCode::Io, "HuxerUI Android file access operation failed"};
+      if (!environment) {
+        return IoResult<T>(failure);
+      }
+      try {
+        const auto java_key = android::Utf8ToJavaString(environment, key);
+        const auto java_uri = android::Utf8ToJavaString(environment, uri);
+        android::LocalRef<jobjectArray> result(environment,
+            operation == Operation::Restore ? bridge->AllocateFileAccessResult(environment) : nullptr);
+        if (!java_key || !java_uri || (operation == Operation::Restore && !result) || environment->ExceptionCheck()) {
+          ClearJavaException(environment);
+          return IoResult<T>(failure);
+        }
+        const jint status = bridge->FileAccess(environment, static_cast<jint>(operation), java_key.Get(),
+                                               java_uri.Get(), modes, result.Get());
+        if (!environment->ExceptionCheck()) {
+          if (status != -1) {
+            return IoResult<T>(IoError{ToFileErrorCode(status), failure.message});
+          }
+          if constexpr (std::is_void_v<T>) {
+            return IoResult<void>::Success();
+          } else {
+            auto references = AndroidFileReferenceBridge::DecodeReferences(bridge, environment, result.Get());
+            if (references.size() == 1) {
+              return IoResult<T>(std::move(references.front()));
+            }
+          }
+        }
+      } catch (...) {
+      }
+      ClearJavaException(environment);
+      return IoResult<T>(failure);
+    });
+  }
+
+  JavaVM* vm_;
+  jobject context_;
+  std::shared_ptr<AndroidFileReferenceBridge> bridge_;
+};
 
 android::LocalRef<jobjectArray>
 MakeStringArray(JNIEnv* environment, jclass string_class, const std::vector<std::string>& values) {
@@ -1755,6 +1881,10 @@ FileReference CreateAndroidFileReference(
   auto bridge = std::make_shared<AndroidFileReferenceBridge>(virtual_machine, environment, context);
   auto backend = std::make_shared<AndroidFileReferenceBackend>(bridge, environment, uri, metadata.can_write);
   return MakeFileReference(std::move(metadata), std::move(backend));
+}
+
+std::shared_ptr<FileAccessStore> CreateAndroidFileAccessStore(JavaVM* vm, jobject context) {
+  return std::make_shared<AndroidFileAccessStore>(vm, context);
 }
 
 AndroidFileReferenceProjection ProjectAndroidFileReference(const FileReference& reference) {

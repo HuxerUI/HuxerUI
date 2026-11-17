@@ -192,6 +192,7 @@ struct ApplicationRuntimeState final : std::enable_shared_from_this<ApplicationR
   std::shared_ptr<ExecutionContext> execution;
   std::shared_ptr<AppResources> resources;
   std::shared_ptr<ApplicationService> application_service;
+  std::shared_ptr<FileAccessStore> file_access_store;
   std::shared_ptr<HttpTransport> http_transport;
   std::vector<std::weak_ptr<HttpOperation>> http_operations;
   std::shared_ptr<TaskScopeImpl> tasks;

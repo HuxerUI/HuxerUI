@@ -589,6 +589,10 @@ public:
     return CreateMacAppDirectories();
   }
 
+  std::shared_ptr<FileAccessStore> CreateFileAccessStore(const AppDirectories& directories) override {
+    return CreateMacFileAccessStore(directories);
+  }
+
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {
     return CreateMacHttpTransport();
   }

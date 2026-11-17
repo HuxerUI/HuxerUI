@@ -18,9 +18,11 @@ struct AppDirectories;
 
 namespace huxerui::detail {
 
+class FileAccessStore;
 class FilePickerTransport;
 
 [[nodiscard]] AppDirectories CreateIosAppDirectories();
+std::shared_ptr<FileAccessStore> CreateIosFileAccessStore(const AppDirectories& directories);
 
 #ifdef __OBJC__
 [[nodiscard]] std::shared_ptr<FilePickerTransport>

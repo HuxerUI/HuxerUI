@@ -347,12 +347,16 @@ void Runtime::InitializeApplication(const Application& application,
     state_->services->Provide(typeid(huxerui::Resources),
         std::shared_ptr<huxerui::Resources>(new huxerui::Resources(state_->resources, state_)));
     state_->http_transport = platform.CreateHttpTransport();
+    auto directories = platform.CreateAppDirectories();
+    if (directories) {
+      state_->file_access_store = platform.CreateFileAccessStore(*directories);
+    }
     state_->application_service = std::make_shared<ApplicationService>(
         *this, std::move(startup_activation), initial_lifecycle,
         std::make_shared<PermissionController>(platform.CreatePermissionTransport(), dispatch),
         LocalNotificationService::Create(platform.CreateLocalNotificationTransport(), dispatch, state_->resources),
         SystemTrayService::Create(platform.CreateSystemTrayTransport(), state_->resources), platform.Clipboard(),
-        platform.CreateAppDirectories());
+        std::move(directories));
     state_->services->Provide(typeid(ApplicationService), state_->application_service);
     state_->services->Provide(typeid(HttpClient), std::shared_ptr<HttpClient>(new HttpClient(state_->http_transport)));
     if (!application.options.system_tasks.empty()) {
@@ -565,6 +569,7 @@ void Runtime::Retire() noexcept {
   }
   state_->services->Clear();
   state_->http_transport.reset();
+  state_->file_access_store.reset();
   state_->application_service.reset();
   state_->resources.reset();
   state_->owner = nullptr;
@@ -872,6 +877,9 @@ std::function<void()> Runtime::ScheduleTimerAt(std::chrono::steady_clock::time_p
 }
 
 std::optional<AppDirectories> Runtime::CreateAppDirectories() { return {}; }
+
+std::shared_ptr<detail::FileAccessStore> Runtime::CreateFileAccessStore(const AppDirectories&) { return {}; }
+
 std::shared_ptr<detail::HttpTransport> Runtime::CreateHttpTransport() { return {}; }
 std::shared_ptr<detail::LocalNotificationTransport> Runtime::CreateLocalNotificationTransport() { return {}; }
 std::shared_ptr<detail::PermissionTransport> Runtime::CreatePermissionTransport() { return {}; }

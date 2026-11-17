@@ -184,6 +184,24 @@ External renaming or replacement can invalidate later operations; a retained dir
 Directory stream opens and whole-file reads fail with `IsDirectory`.
 Existing `ImportToAsync()` and `ReplaceWithAsync()` remain single-file operations and return `false` for directories.
 
+### Remembering access across restarts
+
+Call `RememberAsync(key)` on a selected file or directory to keep its access for a future run. The key is a nonempty, case-sensitive UTF-8 string owned by the application, for example `"workspace"`. Every window shares the application's records. A successful save under the same key replaces the previous record. Picking, previewing, and importing an item do not automatically remember it.
+
+```cpp
+Task<IoResult<FileReference>> RestoreWorkspace() {
+  co_return co_await FileReference::RestoreAsync("workspace");
+}
+```
+
+Run these tasks on the application thread, including from an application task scope before creating a window. Restore never prompts. It returns a regular `FileReference` with fresh metadata and at most the original granted access. A missing key or target reports `NotFound`, a revoked read grant reports `PermissionDenied`, and loss of write access yields a read-only reference. Let the user reselect a directory from a user action when access is lost, then remember it under the same key. A remembered directory provides access to its children through its usual listing and I/O methods.
+
+`FileReference::ForgetAsync(key)` deletes the record. An absent key counts as success. Already opened references and streams retain their normal lifetime rules; the operating system can deny subsequent access when a grant is released or revoked.
+
+Android provider selections with persistable grants, security-scoped bookmarks on iOS and macOS, and Web file system handles that can be stored in IndexedDB support this workflow. Android releases only permission modes acquired by HuxerUI that its other records no longer need. On Web, restore checks the browser's current permission and reports `PermissionDenied` when the browser requires a new grant. Temporary copies and browser uploads report `Unsupported`. Windows and Linux return `Unsupported`; applications using ordinary desktop filesystem access can save local paths instead.
+
+Sandboxed macOS apps need the `com.apple.security.files.bookmarks.app-scope` entitlement to remember user-selected files or directories, in addition to the user-selected file access entitlement for their access mode.
+
 ### Passing a reference to a platform library
 
 `PlatformPayload` can carry a `FileReference` through the common Android, Apple, or Web platform-language bridge without converting it to bytes or a local path.

@@ -48,6 +48,14 @@ using FileReferenceResultBoolOperation =
 Task<IoResult<Bytes>> RunFileReferenceBytesOperation(FileReferenceBytesOperation operation);
 Task<IoResult<bool>> RunFileReferenceBoolOperation(FileReferenceResultBoolOperation operation);
 
+class FileAccessStore {
+public:
+  virtual ~FileAccessStore() = default;
+  virtual Task<IoResult<void>> Remember(std::string key, std::shared_ptr<FileReferenceBackend> reference) = 0;
+  virtual Task<IoResult<FileReference>> Restore(std::string key) = 0;
+  virtual Task<IoResult<void>> Forget(std::string key) = 0;
+};
+
 // Retains access independently of the picker and public reference values. Operations deliver through
 // callbacks and return best-effort cancellation; the shared Task bridge suppresses late delivery.
 // Platforms keep provider-native whole-file transfers here; public incremental streams use the shared stream backends.
@@ -72,6 +80,8 @@ public:
   [[nodiscard]] static std::shared_ptr<FileReferenceBackend> Of(const FileReference& reference);
   // Optional path projection only; the returned File never takes ownership of this backend's grant.
   [[nodiscard]] virtual std::optional<File> AsFile() const;
+  // Only an independently selected Apple root has a bookmark producer. Its children retain live access.
+  virtual IoResult<Bytes> MakeBookmark();
   // Provider-local entry key used for ancestor-cycle and destination-alias checks, never as a public path or a
   // persistent token. An empty key means traversal cannot establish the required relationship safely.
   [[nodiscard]] virtual std::string EntryKey() const;
@@ -98,6 +108,7 @@ public:
 // Optional synchronous read/write coordination for path-backed grants. Null pointers omit that side
 // of the operation; the callback retains the grant owner, but must not retain these borrowed pointers.
 using FileReferenceCoordination = std::function<void(const File*, const File*, const std::function<void()>&)>;
+using FileReferenceBookmark = std::function<IoResult<Bytes>()>;
 
 // Errors from acquiring or operating on a native descriptor use the shared I/O categories.
 class ReferenceFailure final {
@@ -179,7 +190,8 @@ void ValidateFileTypeFilter(const std::vector<std::string>& extensions, const st
 [[nodiscard]] bool IsValidReferenceChildName(std::string_view name) noexcept;
 [[nodiscard]] FileReference MakeLocalFileReference(File file, bool writable,
                                                    std::optional<std::string> content_type = {},
-                                                   FileReferenceCoordination coordination = {});
+                                                   FileReferenceCoordination coordination = {},
+                                                   FileReferenceBookmark bookmark = {});
 Task<IoResult<std::shared_ptr<FileReferenceBackend>>> MakeLocalDirectoryBackend(File directory);
 
 #if defined(__EMSCRIPTEN__)

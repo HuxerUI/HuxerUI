@@ -362,8 +362,8 @@ struct DirectoryCopySummary {
 /// snapshot; later operations can fail if the entry changes, a provider becomes unavailable, or permission is revoked.
 ///
 /// Copies share the underlying access lifetime. Enumerated or created children retain their own access, so
-/// destroying the parent value does not invalidate them. Retention does not promise serializable or permanent
-/// access across application restarts, and a read-only grant is never upgraded implicitly.
+/// destroying the parent value does not invalidate them. Use RememberAsync() to opt in to restoring access after
+/// an application restart. A read-only grant is never upgraded implicitly.
 ///
 /// Prefer asynchronous operations when both forms are available for the broadest Web compatibility.
 /// Synchronous I/O blocks the calling thread and returns Unsupported when the provider requires asynchronous access.
@@ -580,6 +580,31 @@ public:
   Task<IoResult<DirectoryCopySummary>> CopyDirectoryContentsToAsync(
       FileReference destination, bool overwrite = false
   ) const;
+
+  /// @brief Stores this file or directory's existing access under an application-defined key.
+  /// @param key A nonempty UTF-8 key without NUL characters. Keys are case-sensitive and shared across the
+  /// application's windows. A successful save replaces the previous record for this key.
+  /// @return A lazy task resolving when the record is stored, or an IoError. Unsupported is returned for a
+  /// reference without independently restorable access, such as a temporary copy.
+  /// @throws std::invalid_argument If the key is invalid.
+  /// @throws std::logic_error If the reference was moved from or the call has no live application context.
+  Task<IoResult<void>> RememberAsync(std::string key) const;
+
+  /// @brief Restores access to a previously remembered file or directory without opening a picker or prompting.
+  /// @param key The exact key used by RememberAsync() in this application.
+  /// @return A lazy task yielding a new reference, or an IoError. Missing records or entries report NotFound.
+  /// Revoked read access reports PermissionDenied. If only write access was lost, the reference is read-only.
+  /// @throws std::invalid_argument If the key is invalid.
+  /// @throws std::logic_error If the call has no live application context.
+  static Task<IoResult<FileReference>> RestoreAsync(std::string key);
+
+  /// @brief Removes the application's saved record. An already absent record counts as success.
+  /// @param key The exact key used by RememberAsync() in this application.
+  /// @return A lazy task yielding success or an IoError, including Unsupported on an unsupported host.
+  /// Already opened streams retain their normal close contract, and later I/O remains subject to system access.
+  /// @throws std::invalid_argument If the key is invalid.
+  /// @throws std::logic_error If the call has no live application context.
+  static Task<IoResult<void>> ForgetAsync(std::string key);
 
 private:
   FileReference(detail::FileReferenceMetadata metadata, std::shared_ptr<detail::FileReferenceBackend> backend);

@@ -16,6 +16,7 @@
 #include <unordered_set>
 #include <vector>
 
+#include "application/application_internal.h"
 #include "file_internal.h"
 #include "stream_internal.h"
 
@@ -140,6 +141,31 @@ template <class Result, class Starter> Task<Result> RunCallbackOperation(Starter
         return {};
       }
   );
+}
+
+std::weak_ptr<ApplicationRuntimeState> FileAccessApplication(std::string_view key) {
+  if (key.empty() || key.find('\0') != std::string_view::npos || !IsValidFileUtf8(key)) {
+    throw std::invalid_argument("HuxerUI file access key must be nonempty UTF-8 without NUL characters");
+  }
+  return CurrentApplicationRuntime();
+}
+
+template <class T, class... Args>
+Task<IoResult<T>> RunFileAccessOperation(
+    std::weak_ptr<ApplicationRuntimeState> application, Task<IoResult<T>> (FileAccessStore::*operation)(Args...),
+    Args... args
+) {
+  auto owner = application.lock();
+  if (!owner || !owner->accepts_tasks) {
+    co_return IoResult<T>(IoError{IoErrorCode::Unsupported, "HuxerUI file access storage is unavailable"});
+  }
+  ValidateApplicationCall(owner->execution);
+  auto store = owner->file_access_store;
+  owner.reset();
+  if (!store) {
+    co_return IoResult<T>(IoError{IoErrorCode::Unsupported, "HuxerUI file access storage is unavailable"});
+  }
+  co_return co_await ((*store).*operation)(std::move(args)...);
 }
 
 std::optional<IoError> ReferenceFileError(FileType type, bool allowed = true) {
@@ -920,6 +946,11 @@ std::function<void()> FileReferenceBackend::OpenWrite(FileReferenceOutputStreamC
 std::optional<File> FileReferenceBackend::AsFile() const {
   return std::nullopt;
 }
+
+IoResult<Bytes> FileReferenceBackend::MakeBookmark() {
+  return IoResult<Bytes>(IoError{IoErrorCode::Unsupported, "HuxerUI file reference cannot be remembered"});
+}
+
 std::string FileReferenceBackend::EntryKey() const {
   return {};
 }
@@ -1099,6 +1130,25 @@ Task<IoResult<DirectoryCopySummary>> FileReference::CopyDirectoryContentsToAsync
 Task<IoResult<DirectoryCopySummary>> FileReference::CopyDirectoryContentsToAsync(FileReference destination,
                                                                                  bool overwrite) const {
   return detail::CopyDirectoryContents(*this, std::move(destination), overwrite);
+}
+
+Task<IoResult<void>> FileReference::RememberAsync(std::string key) const {
+  auto application = detail::FileAccessApplication(key);
+  if (!backend_) {
+    throw std::logic_error("HuxerUI file reference was moved from");
+  }
+  return detail::RunFileAccessOperation(std::move(application), &detail::FileAccessStore::Remember, std::move(key),
+                                        backend_);
+}
+
+Task<IoResult<FileReference>> FileReference::RestoreAsync(std::string key) {
+  auto application = detail::FileAccessApplication(key);
+  return detail::RunFileAccessOperation(std::move(application), &detail::FileAccessStore::Restore, std::move(key));
+}
+
+Task<IoResult<void>> FileReference::ForgetAsync(std::string key) {
+  auto application = detail::FileAccessApplication(key);
+  return detail::RunFileAccessOperation(std::move(application), &detail::FileAccessStore::Forget, std::move(key));
 }
 
 FilePicker::FilePicker(

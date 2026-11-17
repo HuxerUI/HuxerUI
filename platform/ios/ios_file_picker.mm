@@ -11,6 +11,7 @@
 #include <exception>
 #include <system_error>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -340,13 +341,40 @@ public:
     }
   }
 
+  bool HasScope() const noexcept { return accessing_; }
+
 private:
   __strong NSURL* url_;
   __strong NSURL* cleanup_directory_;
   bool accessing_;
 };
 
+IoError FileAccessError(IoErrorCode code = IoErrorCode::Io) {
+  return {code, "HuxerUI could not store or restore file access"};
+}
+
+IoResult<Bytes> MakeFileBookmark(NSURL* url, bool writable) {
+  NSError* error = nil;
+  NSData* data = [url bookmarkDataWithOptions:NSURLBookmarkCreationMinimalBookmark
+               includingResourceValuesForKeys:nil
+                                relativeToURL:nil
+                                        error:&error];
+  if (data.length == 0) {
+    return IoResult<Bytes>(FileAccessError(FileErrorCodeFor(error)));
+  }
+  Bytes bookmark(data.length + 1);
+  bookmark.front() = writable ? std::byte{1} : std::byte{0};
+  std::memcpy(bookmark.data() + 1, data.bytes, data.length);
+  return IoResult<Bytes>(std::move(bookmark));
+}
+
 FileReference MakeIosReference(NSURL* url, bool writable, std::shared_ptr<IosFileAccess> access) {
+  auto bookmark = [url, writable, access] {
+    if (!access->HasScope()) {
+      return IoResult<Bytes>(FileAccessError(IoErrorCode::Unsupported));
+    }
+    return MakeFileBookmark(url, writable);
+  };
   return MakeLocalFileReference(
       File(MakeString(url.path)), writable, ReferenceContentType(url),
       [access = std::move(access)](const File* reading, const File* writing, const std::function<void()>& operation) {
@@ -405,8 +433,150 @@ FileReference MakeIosReference(NSURL* url, bool writable, std::shared_ptr<IosFil
                                                              : std::errc::io_error));
           }
         }
-      });
+      }, std::move(bookmark));
 }
+
+IoResult<FileReference> OpenBookmarkedReference(NSURL* url, bool writable) {
+  try {
+    auto access = std::make_shared<IosFileAccess>(url);
+    if (!access->HasScope()) {
+      return IoResult<FileReference>(FileAccessError(IoErrorCode::PermissionDenied));
+    }
+    NSNumber* readable = nil;
+    NSError* error = nil;
+    if (![url getResourceValue:&readable forKey:NSURLIsReadableKey error:&error]) {
+      return IoResult<FileReference>(FileAccessError(FileErrorCodeFor(error)));
+    }
+    if (!readable.boolValue) {
+      return IoResult<FileReference>(FileAccessError(IoErrorCode::PermissionDenied));
+    }
+    return IoResult<FileReference>(MakeIosReference(url, writable, std::move(access)));
+  } catch (const ReferenceFailure& failure) {
+    return IoResult<FileReference>(FileAccessError(failure.code));
+  } catch (const std::system_error& failure) {
+    return IoResult<FileReference>(OperationError("restore file access", failure.code()));
+  }
+}
+
+// A single atomic property list keeps keys as data and avoids filesystem aliases between keys, including on
+// case-insensitive volumes. Workers serialize the read/modify/write so a refresh cannot replace a new record.
+class IosFileAccessStore final : public FileAccessStore {
+public:
+  explicit IosFileAccessStore(const File& directory) : file_(directory.Child("file-access.plist")) {}
+
+  Task<IoResult<void>> Remember(std::string key, std::shared_ptr<FileReferenceBackend> reference) override {
+    return RunWorker([file = file_, key = std::move(key), reference = std::move(reference)]() -> IoResult<void> {
+      @autoreleasepool {
+        auto bookmark = reference->MakeBookmark();
+        if (!bookmark.Succeeded()) {
+          return IoResult<void>(std::move(bookmark).Error());
+        }
+        std::scoped_lock lock(records_mutex_);
+        NSMutableDictionary* records = ReadRecords(file);
+        if (!records) {
+          return IoResult<void>(FileAccessError());
+        }
+        records[MakeString(key)] = Data(bookmark.Value());
+        return WriteRecords(file, records);
+      }
+    });
+  }
+
+  Task<IoResult<FileReference>> Restore(std::string key) override {
+    return RunWorker([file = file_, key = std::move(key)]() -> IoResult<FileReference> {
+      @autoreleasepool {
+        std::scoped_lock lock(records_mutex_);
+        NSMutableDictionary* records = ReadRecords(file);
+        if (!records) {
+          return IoResult<FileReference>(FileAccessError());
+        }
+        NSString* name = MakeString(key);
+        id value = records[name];
+        if (!value) {
+          return IoResult<FileReference>(FileAccessError(IoErrorCode::NotFound));
+        }
+        if (![value isKindOfClass:NSData.class] || [value length] < 2) {
+          return IoResult<FileReference>(FileAccessError());
+        }
+        NSData* record = value;
+        const auto* bytes = static_cast<const std::byte*>(record.bytes);
+        if (*bytes != std::byte{0} && *bytes != std::byte{1}) {
+          return IoResult<FileReference>(FileAccessError());
+        }
+        BOOL stale = NO;
+        NSError* error = nil;
+        NSData* bookmark = [NSData dataWithBytes:bytes + 1 length:record.length - 1];
+        const auto options = NSURLBookmarkResolutionWithoutUI;
+        NSURL* url = [NSURL URLByResolvingBookmarkData:bookmark
+                                               options:options
+                                         relativeToURL:nil
+                                   bookmarkDataIsStale:&stale
+                                                 error:&error];
+        if (!url) {
+          return IoResult<FileReference>(FileAccessError(FileErrorCodeFor(error)));
+        }
+        auto restored = OpenBookmarkedReference(url, *bytes == std::byte{1});
+        if (stale && restored.Succeeded()) {
+          auto refreshed = FileReferenceBackend::Of(restored.Value())->MakeBookmark();
+          if (refreshed.Succeeded()) {
+            records[name] = Data(refreshed.Value());
+            HUXERUI_DISCARD(WriteRecords(file, records));
+          }
+        }
+        return restored;
+      }
+    });
+  }
+
+  Task<IoResult<void>> Forget(std::string key) override {
+    return RunWorker([file = file_, key = std::move(key)]() -> IoResult<void> {
+      @autoreleasepool {
+        std::scoped_lock lock(records_mutex_);
+        NSMutableDictionary* records = ReadRecords(file);
+        if (!records) {
+          return IoResult<void>(FileAccessError());
+        }
+        NSString* name = MakeString(key);
+        if (!records[name]) {
+          return IoResult<void>::Success();
+        }
+        [records removeObjectForKey:name];
+        return WriteRecords(file, records);
+      }
+    });
+  }
+
+private:
+  static NSData* Data(const Bytes& bytes) {
+    return [NSData dataWithBytes:bytes.data() length:bytes.size()];
+  }
+
+  static NSMutableDictionary* ReadRecords(const File& file) {
+    NSError* error = nil;
+    NSData* data = [NSData dataWithContentsOfURL:FileURL(file) options:0 error:&error];
+    if (!data) {
+      if ([error.domain isEqualToString:NSCocoaErrorDomain] && error.code == NSFileReadNoSuchFileError) {
+        return [NSMutableDictionary dictionary];
+      }
+      return nil;
+    }
+    id records = [NSPropertyListSerialization propertyListWithData:data options:NSPropertyListMutableContainers
+                                                            format:nullptr error:nil];
+    return [records isKindOfClass:NSMutableDictionary.class] ? records : nil;
+  }
+
+  static IoResult<void> WriteRecords(const File& file, NSMutableDictionary* records) {
+    NSData* data = [NSPropertyListSerialization dataWithPropertyList:records format:NSPropertyListBinaryFormat_v1_0
+                                                             options:0 error:nil];
+    if ([data writeToURL:FileURL(file) options:NSDataWritingAtomic error:nil]) {
+      return IoResult<void>::Success();
+    }
+    return IoResult<void>(FileAccessError());
+  }
+
+  inline static std::mutex records_mutex_;
+  File file_;
+};
 
 // Picker state stays on the main queue; worker preparation returns there before touching the operation.
 class IosOpenPickerOperation final : public std::enable_shared_from_this<IosOpenPickerOperation> {
@@ -660,6 +830,10 @@ private:
 };
 
 } // namespace
+
+std::shared_ptr<FileAccessStore> CreateIosFileAccessStore(const AppDirectories& directories) {
+  return std::make_shared<IosFileAccessStore>(directories.data_directory);
+}
 
 FileReference MakeIosFileReference(NSURL* url, bool writable) {
   if (url == nil || !url.isFileURL) {

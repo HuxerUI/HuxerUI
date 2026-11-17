@@ -682,6 +682,10 @@ public:
     return CreateIosAppDirectories();
   }
 
+  std::shared_ptr<FileAccessStore> CreateFileAccessStore(const AppDirectories& directories) override {
+    return CreateIosFileAccessStore(directories);
+  }
+
   std::shared_ptr<HttpTransport> CreateHttpTransport() override {
     return CreateIosHttpTransport();
   }

@@ -1499,12 +1499,14 @@ std::uint64_t DescriptorSize(int descriptor) {
 class LocalFileReferenceBackend final : public FileReferenceBackend,
                                         public std::enable_shared_from_this<LocalFileReferenceBackend> {
 public:
-  LocalFileReferenceBackend(File file, bool writable, FileReferenceCoordination coordination = {});
+  LocalFileReferenceBackend(File file, bool writable, FileReferenceCoordination coordination = {},
+                            FileReferenceBookmark bookmark = {});
   ~LocalFileReferenceBackend() override;
   [[nodiscard]] FileReference Reference(std::optional<std::string> content_type = {});
   [[nodiscard]] FileReferenceMetadata Metadata(std::string* entry_key = nullptr, int parent_descriptor = -1) const;
   [[nodiscard]] std::string EntryKey() const override;
   [[nodiscard]] std::optional<File> AsFile() const override;
+  IoResult<Bytes> MakeBookmark() override;
   IoResult<InputStream> OpenReadSync() override;
   IoResult<OutputStream> OpenWriteSync() override;
   IoResult<RandomAccessStream> OpenRandomAccessSync(FileAccessMode access, FileOpenMode mode) override;
@@ -1545,6 +1547,7 @@ private:
   struct Anchor;
   File file_;
   FileReferenceCoordination coordination_;
+  FileReferenceBookmark bookmark_;
   bool writable_;
   std::shared_ptr<Anchor> anchor_;
   std::string relative_;
@@ -1580,8 +1583,9 @@ struct LocalFileReferenceBackend::Anchor {
 #endif
 };
 
-LocalFileReferenceBackend::LocalFileReferenceBackend(File file, bool writable, FileReferenceCoordination coordination)
-    : file_(std::move(file)), coordination_(std::move(coordination)), writable_(writable) {
+LocalFileReferenceBackend::LocalFileReferenceBackend(
+    File file, bool writable, FileReferenceCoordination coordination, FileReferenceBookmark bookmark
+) : file_(std::move(file)), coordination_(std::move(coordination)), bookmark_(std::move(bookmark)), writable_(writable) {
   const fs::path canonical = fs::canonical(PlatformPath(file_.Path()));
   file_ = File(PublicPath(canonical));
 #if defined(_WIN32)
@@ -1614,6 +1618,11 @@ std::string LocalFileReferenceBackend::EntryKey() const {
 std::optional<File> LocalFileReferenceBackend::AsFile() const {
   return file_;
 }
+
+IoResult<Bytes> LocalFileReferenceBackend::MakeBookmark() {
+  return bookmark_ ? bookmark_() : FileReferenceBackend::MakeBookmark();
+}
+
 ReferenceStreamCoordination LocalFileReferenceBackend::StreamCoordination(bool writing) {
   return [self = shared_from_this(), writing](const std::function<void()>& operation) {
     self->Coordinate(self->file_, writing, operation);
@@ -2329,10 +2338,10 @@ std::function<void()> LocalFileReferenceBackend::ReplaceWith(File source, FileRe
 }
 
 FileReference MakeLocalFileReference(File file, bool writable, std::optional<std::string> content_type,
-                                     FileReferenceCoordination coordination) {
+                                     FileReferenceCoordination coordination, FileReferenceBookmark bookmark) {
   std::optional<FileReference> reference;
   auto create = [&] {
-    auto backend = std::make_shared<LocalFileReferenceBackend>(file, writable, coordination);
+    auto backend = std::make_shared<LocalFileReferenceBackend>(file, writable, coordination, std::move(bookmark));
     reference = backend->Reference(std::move(content_type));
   };
   if (coordination) {

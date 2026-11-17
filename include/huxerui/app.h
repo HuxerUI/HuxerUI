@@ -182,6 +182,7 @@ enum class ApplicationLifecycleState {
 
 namespace detail {
 class ApplicationService;
+class FileAccessStore;
 class FileDropReceiver;
 class PointerInteraction;
 class SemanticTree;
@@ -537,6 +538,8 @@ protected:
   /// Captures platform-selected application storage directories during initialization.
   /// @return Directory values without performing application I/O, or std::nullopt if unsupported.
   virtual std::optional<AppDirectories> CreateAppDirectories();
+  /// Creates optional application-owned storage for restorable file references.
+  virtual std::shared_ptr<detail::FileAccessStore> CreateFileAccessStore(const AppDirectories& directories);
   /// Creates the application's shared native HTTP capability during initialization.
   /// @return A transport shared by default HttpClient instances, or null when native HTTP is unavailable.
   virtual std::shared_ptr<detail::HttpTransport> CreateHttpTransport();

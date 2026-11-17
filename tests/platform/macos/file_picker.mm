@@ -4,6 +4,7 @@
 
 #include "runtime_test_support.h"
 
+#include <algorithm>
 #include <chrono>
 #include <functional>
 #include <future>
@@ -191,6 +192,84 @@ TEST_CASE("MacDirectoryReferencesExposeProjectPathsForDirectFileOperations") {
     const auto children = project->ListChildren();
     REQUIRE(children.Succeeded());
     REQUIRE(children.Value().size() == 2);
+  }
+}
+
+TEST_CASE("MacFileAccessRestoresTheSavedDirectoryInANewRuntime") {
+  @autoreleasepool {
+    TemporaryDirectory temporary;
+    const File data = temporary.Child("data");
+    const File project = temporary.Child("project");
+    REQUIRE(data.CreateDirectory());
+    REQUIRE(project.CreateDirectory());
+    REQUIRE(project.Child("first.txt").WriteString("first"));
+    REQUIRE(project.Child("second.txt").WriteString("second"));
+
+    class BookmarkPlatform final : public TestPlatform {
+    public:
+      explicit BookmarkPlatform(File data) : TestPlatform(DispatchToMainQueue), data_(std::move(data)) {}
+
+    private:
+      std::optional<AppDirectories> CreateAppDirectories() override {
+        return AppDirectories{std::nullopt, data_, data_, data_};
+      }
+
+      std::shared_ptr<detail::FileAccessStore> CreateFileAccessStore(const AppDirectories& directories) override {
+        return detail::CreateMacFileAccessStore(directories);
+      }
+
+      File data_;
+    };
+
+    {
+      BookmarkPlatform platform(data);
+      UiWindow runtime(MacFileReferenceApp, platform);
+      runtime.BuildFrame();
+      bool saved = false;
+      auto reference = detail::MakeMacFileReference(temporary.ChildURL(@"project"), false);
+      mac_file_reference_tasks.Launch([reference, &saved]() -> Task<void> {
+        saved = (co_await reference.RememberAsync("workspace/工程")).Succeeded();
+      });
+      REQUIRE(RunMainLoopUntil([&] { return saved; }));
+    }
+
+    {
+      BookmarkPlatform platform(data);
+      UiWindow runtime(MacFileReferenceApp, platform);
+      runtime.BuildFrame();
+      bool finished = false;
+      std::vector<std::string> contents;
+      std::optional<IoErrorCode> absent;
+      bool writable = true;
+      mac_file_reference_tasks.Launch([&]() -> Task<void> {
+        auto restored = co_await FileReference::RestoreAsync("workspace/工程");
+        if (restored.Succeeded()) {
+          writable = restored.Value().CanWrite();
+          auto children = co_await restored.Value().ListChildrenAsync();
+          if (children.Succeeded()) {
+            for (const auto& child : children.Value()) {
+              auto text = co_await child.ReadStringAsync();
+              if (text.Succeeded() && !child.CanWrite()) {
+                contents.push_back(std::move(text).Value());
+              }
+            }
+          }
+        }
+        if ((co_await FileReference::ForgetAsync("workspace/工程")).Succeeded()) {
+          auto missing = co_await FileReference::RestoreAsync("workspace/工程");
+          if (!missing.Succeeded()) {
+            absent = missing.Error().code;
+          }
+        }
+        finished = true;
+      });
+      REQUIRE(RunMainLoopUntil([&] { return finished; }));
+      CHECK_FALSE(writable);
+      std::ranges::sort(contents);
+      const std::vector<std::string> expected{"first", "second"};
+      CHECK(contents == expected);
+      CHECK(absent == IoErrorCode::NotFound);
+    }
   }
 }
 
