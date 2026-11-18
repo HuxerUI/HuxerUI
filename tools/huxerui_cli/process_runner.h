@@ -5,9 +5,13 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace huxerui::cli {
+
+/// Ordered child environment overrides. Later entries for the same variable take precedence.
+using ProcessEnvironment = std::vector<std::pair<std::string, std::string>>;
 
 /// Describes a child process without invoking a shell.
 struct ProcessCommand {
@@ -17,6 +21,8 @@ struct ProcessCommand {
   std::vector<std::string> arguments;
   /// Working directory for the child, or an empty path to inherit the current directory.
   std::filesystem::path working_directory;
+  /// Overrides inherited values for this child only.
+  ProcessEnvironment environment = {};
 };
 
 /// Captured child-process completion state.
@@ -36,6 +42,7 @@ public:
   ManagedProcess& operator=(const ManagedProcess&) = delete;
 
   /// Starts a child with inherited streams. Stop the previous child before starting another.
+  /// @throws std::runtime_error if the child cannot be launched.
   void Start(const ProcessCommand& command);
   /// Returns true while the child is alive and reaps a completed child.
   bool Running() noexcept;
@@ -52,7 +59,7 @@ private:
 /// Reads a process environment variable.
 /// @param name Environment variable name.
 /// @return The variable value, or `std::nullopt` when it is not defined.
-[[nodiscard]] std::optional<std::string> ReadEnvironmentVariable(std::string_view name);
+std::optional<std::string> ReadEnvironmentVariable(std::string_view name);
 
 /// Sets an environment variable for the current process and subsequently launched children.
 /// @param name Environment variable name.
@@ -60,15 +67,16 @@ private:
 /// @throws std::runtime_error if the operating system rejects the update.
 void SetProcessEnvironmentVariable(std::string_view name, std::string_view value);
 
-/// Resolves an executable using the current process search path.
+/// Resolves an executable using the child PATH override when present and the current process PATH otherwise.
 /// @param name Executable name without shell syntax.
+/// @param environment Overrides for the child that will run the executable.
 /// @return The resolved path, or `std::nullopt` when no executable is found.
-[[nodiscard]] std::optional<std::filesystem::path> FindExecutable(std::string_view name);
+std::optional<std::filesystem::path> FindExecutable(std::string_view name, const ProcessEnvironment& environment = {});
 
 /// Formats a command for human-readable CLI output.
 /// @param command Command to describe.
 /// @return A quoted display string. The result is diagnostic text and is not intended for shell execution.
-[[nodiscard]] std::string DescribeProcess(const ProcessCommand& command);
+std::string DescribeProcess(const ProcessCommand& command);
 
 /// Runs a command with inherited standard streams.
 /// @param command Command to execute.
@@ -80,6 +88,6 @@ int RunProcess(const ProcessCommand& command);
 /// @param command Command to execute.
 /// @return Exit code and UTF-8 output.
 /// @throws std::runtime_error if the process cannot be created or observed.
-[[nodiscard]] ProcessResult RunProcessCapture(const ProcessCommand& command);
+ProcessResult RunProcessCapture(const ProcessCommand& command);
 
 } // namespace huxerui::cli

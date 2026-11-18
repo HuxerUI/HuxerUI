@@ -1,5 +1,7 @@
 #include "platform.h"
 
+#include "toolchain.h"
+
 #include <algorithm>
 #include <array>
 #include <stdexcept>
@@ -11,6 +13,7 @@ namespace huxerui::cli {
 namespace {
 
 constexpr std::string_view emscripten_version = "4.0.19";
+constexpr std::string_view emsdk_version = "6.0.5";
 constexpr std::string_view termux_web_server_script =
     "import http.server,signal,subprocess,sys,urllib.parse;"
     "server=http.server.ThreadingHTTPServer(('127.0.0.1',0),http.server.SimpleHTTPRequestHandler);"
@@ -46,6 +49,155 @@ std::string ResolveCMakeGenerator(const PlatformCommandContext& context) {
   return generator;
 }
 
+std::string WebVersion(const EnvironmentRequest& request) {
+  if (request.sdk_home.empty() || IsSourceHome(request.sdk_home))
+    return std::string(emscripten_version);
+  // The packaged archive is tied to the Emscripten version that built it.
+  const auto path = request.sdk_home / "share/huxerui/platform/web";
+  std::string version;
+  std::error_code error;
+  for (const auto& entry : std::filesystem::directory_iterator(path, error)) {
+    const auto name = entry.path().filename().string();
+    if (!name.starts_with("emscripten-") || !std::filesystem::is_regular_file(entry.path() / "libhuxerui.a"))
+      continue;
+    if (!version.empty())
+      throw std::runtime_error("the selected SDK has multiple Emscripten archives: " + path.string());
+    version = name.substr(std::string_view("emscripten-").size());
+    if (detail::ParseToolVersion(version) != version) {
+      throw std::runtime_error("the selected SDK has an invalid Emscripten archive version: " + name);
+    }
+  }
+  if (version.empty())
+    throw std::runtime_error("the selected SDK does not contain a Web archive: " + path.string());
+  return version;
+}
+
+std::filesystem::path ManagedEmsdk(std::string_view version) {
+  const auto root = detail::ManagedToolDirectory();
+  return root.empty() ? std::filesystem::path{} : root / "emsdk" / version;
+}
+
+std::filesystem::path ManagedPython() {
+  const auto root = detail::ManagedToolDirectory();
+  return root.empty() ? std::filesystem::path{} : root / "python" / "3.12.10" / "x86_64" / "python.exe";
+}
+
+EnvironmentDiagnostic WebPython() {
+  const auto tool = CurrentHostId() == "windows" ? "python" : "python3";
+  auto executable = FindExecutable(tool).value_or(std::filesystem::path{});
+  if (CurrentHostId() == "macos" && executable == "/usr/bin/python3" &&
+      RunProcessCapture({"/usr/bin/xcode-select", {"-p"}, {}}).exit_code != 0)
+    executable.clear();
+  auto check = detail::CheckTool("python", "Python", executable, "3.8");
+  if (CurrentHostId() == "macos" && check.status != EnvironmentDiagnosticStatus::Ready) {
+    const std::filesystem::path framework = "/Library/Frameworks/Python.framework/Versions/3.12/bin/python3";
+    if (std::filesystem::is_regular_file(framework))
+      return detail::CheckTool("python", "Python", framework, "3.8");
+  }
+  if (check.status == EnvironmentDiagnosticStatus::Ready || CurrentHostId() != "windows")
+    return check;
+  const auto managed = ManagedPython();
+  if (!managed.empty() && std::filesystem::is_regular_file(managed)) {
+    return detail::CheckTool("python", "Python", managed, "3.8");
+  }
+  return check;
+}
+
+SetupAction SetupPython() {
+  const auto host = CurrentHostId();
+  if (host == "windows" && !ManagedPython().empty()) {
+    return detail::InstallTool("install_python", "Install Python 3.12 from python.org",
+                               {"https://www.python.org/ftp/python/3.12.10/python-3.12.10-embed-amd64.zip",
+                                "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3", "",
+                                ManagedPython().parent_path()},
+                               {}, {"python"});
+  }
+  if (host == "macos" && !detail::ManagedToolDirectory().empty()) {
+    auto action = detail::InstallTool("install_python", "Install the official macOS Python 3.12 package",
+                                      {"https://www.python.org/ftp/python/3.12.10/python-3.12.10-macos11.pkg",
+                                       "8373e58da4ea146b3eb1c1f9834f19a319440b6b679b06050b1f9ee3237aa8e4", "",
+                                       detail::ManagedToolDirectory() / "python/3.12.10"},
+                                      {}, {"python"});
+    action.interactive = true;
+    return action;
+  }
+  if (detail::IsUbuntuNoble()) {
+    return {"Install Python with apt",
+            std::nullopt,
+            "install_python",
+            {},
+            {"python"},
+            [] { return detail::InstallUbuntuPackages(std::array{std::string("python3")}); },
+            true};
+  }
+  return {"Install Python 3 from https://www.python.org/downloads/ and make python3 available",
+          std::nullopt,
+          "install_python",
+          {},
+          {"python"}};
+}
+
+ProcessEnvironment PythonEnvironment() {
+  ProcessEnvironment environment;
+  const auto python = WebPython();
+  if (python.status == EnvironmentDiagnosticStatus::Ready)
+    detail::PrependPath(environment, python.path.parent_path());
+  return environment;
+}
+
+std::filesystem::path EmsdkCommand(const std::filesystem::path& root) {
+  return root / (CurrentHostId() == "windows" ? "emsdk.bat" : "emsdk");
+}
+
+EnvironmentDiagnostic EmscriptenCheck(std::string_view version, const ProcessEnvironment& environment) {
+  const auto path = FindExecutable("emcc", environment).value_or(std::filesystem::path{});
+  auto check = detail::CheckTool("emcc", "Emscripten", path, version, environment);
+  if (check.version != version)
+    check.status = EnvironmentDiagnosticStatus::Missing;
+  return check;
+}
+
+ProcessEnvironment LoadEmsdk(const std::filesystem::path& root) {
+  if (root.empty() || !std::filesystem::is_regular_file(root / ".emscripten"))
+    return {};
+
+  ProcessEnvironment environment = PythonEnvironment();
+  environment.emplace_back("EMSDK_QUIET", "1");
+  ProcessResult result;
+  if (CurrentHostId() == "windows") {
+    // Calling by name from the owning directory keeps cmd.exe quoting independent of the install path.
+    result =
+        RunProcessCapture({"cmd.exe", {"/d", "/v:off", "/c", "call emsdk_env.bat >nul && set"}, root, environment});
+  } else {
+    result = RunProcessCapture({"/bin/bash", {"-c", "source ./emsdk_env.sh >/dev/null && env"}, root, environment});
+  }
+  if (result.exit_code != 0)
+    return {};
+  // Carry the activation changes into build children without replacing their entire inherited environment.
+  for (auto& entry : detail::ParseProcessEnvironment(result.output)) {
+    const auto& key = entry.first;
+    if (key == "PATH" || key == "EMSDK" || key == "EM_CONFIG" || key == "EM_CACHE" || key == "SSL_CERT_FILE" ||
+        key.starts_with("EMSDK_")) {
+      environment.push_back(std::move(entry));
+    }
+  }
+  return environment;
+}
+
+ProcessEnvironment WebEnvironment(std::string_view version) {
+  if (CurrentHostId() == "android" || EmscriptenCheck(version, {}).status == EnvironmentDiagnosticStatus::Ready)
+    return {};
+  const auto active = ReadEnvironmentVariable("EMSDK").value_or("");
+  const auto emsdk = FindExecutable("emsdk").value_or(std::filesystem::path{});
+  for (const auto& root : {std::filesystem::path(active), emsdk.parent_path(), ManagedEmsdk(version)}) {
+    auto environment = LoadEmsdk(root);
+    if (!environment.empty() && EmscriptenCheck(version, environment).status == EnvironmentDiagnosticStatus::Ready) {
+      return environment;
+    }
+  }
+  return {};
+}
+
 class WebDriver final : public PlatformDriver {
 public:
   std::string_view Id() const noexcept override {
@@ -62,98 +214,98 @@ public:
            CurrentHostId() == "android";
   }
 
-  std::span<const std::string_view> RequiredTools() const noexcept override {
-    static constexpr std::array desktop_tools{
-        std::string_view{"emcmake"},
-        std::string_view{"emcc"},
-        std::string_view{"emrun"},
-    };
-    static constexpr std::array android_tools{
-        std::string_view{"emcmake"},
-        std::string_view{"emcc"},
-        std::string_view{"python"},
-        std::string_view{"termux-open"},
-    };
-    return CurrentHostId() == "android" ? std::span<const std::string_view>(android_tools)
-                                        : std::span<const std::string_view>(desktop_tools);
+  ProcessEnvironment ResolveEnvironment(const EnvironmentRequest& request) const override {
+    const auto version = WebVersion(request);
+    auto environment = WebEnvironment(version);
+    const auto compiler = EmscriptenCheck(version, environment);
+    if (compiler.status != EnvironmentDiagnosticStatus::Ready) {
+      throw std::runtime_error("the selected HuxerUI SDK requires Emscripten " + version +
+                               "; run 'huxerui doctor web'");
+    }
+    return environment;
   }
 
-  std::vector<EnvironmentDiagnostic> DiagnoseEnvironment() const override {
-    std::vector<EnvironmentDiagnostic> diagnostics = PlatformDriver::DiagnoseEnvironment();
-    const auto emcc = std::find_if(diagnostics.begin(), diagnostics.end(), [](const EnvironmentDiagnostic& diagnostic) {
-      return diagnostic.id == "emcc" && diagnostic.status == EnvironmentDiagnosticStatus::Ready;
-    });
-    if (emcc == diagnostics.end()) {
-      return diagnostics;
+  std::vector<EnvironmentDiagnostic> DiagnoseEnvironment(const EnvironmentRequest& request) const override {
+    if (!SupportsCurrentHost() || request.operation == EnvironmentOperation::Devices) {
+      return PlatformDriver::DiagnoseEnvironment(request);
     }
-
-    const ProcessResult result = RunProcessCapture({emcc->detail, {"--version"}, {}});
-    if (result.exit_code != 0 || result.output.find(emscripten_version) == std::string::npos) {
-      emcc->status = EnvironmentDiagnosticStatus::Missing;
-      emcc->label = "Emscripten " + std::string(emscripten_version);
-      emcc->detail = result.output;
+    const auto version = WebVersion(request);
+    const auto environment = WebEnvironment(version);
+    std::vector<EnvironmentDiagnostic> checks;
+    checks.push_back(EmscriptenCheck(version, environment));
+    checks.push_back(detail::CheckTool("emcmake", "emcmake",
+                                       FindExecutable("emcmake", environment).value_or(std::filesystem::path{})));
+    if (request.operation == EnvironmentOperation::Run && CurrentHostId() != "android") {
+      checks.push_back(
+          detail::CheckTool("emrun", "emrun", FindExecutable("emrun", environment).value_or(std::filesystem::path{})));
     }
-    return diagnostics;
+    if (request.operation == EnvironmentOperation::Run && CurrentHostId() == "android") {
+      checks.push_back(detail::CheckTool("termux-open", "Termux system integration",
+                                         FindExecutable("termux-open").value_or(std::filesystem::path{})));
+    }
+    if (CurrentHostId() != "android") {
+      auto python = WebPython();
+      python.required = false;
+      checks.push_back(std::move(python));
+      const auto root = ManagedEmsdk(version);
+      auto emsdk = detail::CheckTool("emsdk", "Managed Emscripten SDK",
+                                     !root.empty() && std::filesystem::is_regular_file(EmsdkCommand(root))
+                                         ? EmsdkCommand(root)
+                                         : std::filesystem::path{});
+      emsdk.required = false;
+      checks.push_back(std::move(emsdk));
+    }
+    return checks;
   }
 
-  std::vector<SetupAction> PlanSetup(std::span<const EnvironmentDiagnostic> diagnostics) const override {
-    if (std::none_of(diagnostics.begin(), diagnostics.end(), [](const EnvironmentDiagnostic& diagnostic) {
-          return diagnostic.status == EnvironmentDiagnosticStatus::Missing;
-        })) {
+  std::vector<SetupAction> PlanSetup(std::span<const EnvironmentDiagnostic> checks,
+                                     const EnvironmentRequest& request) const override {
+    if (!detail::NeedsSetup(checks, "emcc") && !detail::NeedsSetup(checks, "emcmake") &&
+        !detail::NeedsSetup(checks, "emrun") && !detail::NeedsSetup(checks, "termux-open"))
       return {};
-    }
+    const auto version = WebVersion(request);
+    std::vector<SetupAction> actions;
     if (CurrentHostId() == "android") {
-      std::vector<SetupAction> actions;
-      const bool needs_emscripten = std::any_of(
-          diagnostics.begin(), diagnostics.end(), [](const EnvironmentDiagnostic& diagnostic) {
-            return diagnostic.status == EnvironmentDiagnosticStatus::Missing &&
-                   (diagnostic.id == "emcmake" || diagnostic.id == "emcc");
-          }
-      );
-      if (needs_emscripten) {
-        actions.push_back({
-            "Install a Termux Emscripten " + std::string(emscripten_version) + " toolchain and add it to PATH",
-            std::nullopt,
-        });
+      if (detail::NeedsSetup(checks, "emcc") || detail::NeedsSetup(checks, "emcmake")) {
+        actions.push_back({"Select a Termux Emscripten " + version + " toolchain", std::nullopt, "select_emscripten"});
       }
-      const bool needs_python = std::any_of(
-          diagnostics.begin(), diagnostics.end(), [](const EnvironmentDiagnostic& diagnostic) {
-            return diagnostic.status == EnvironmentDiagnosticStatus::Missing && diagnostic.id == "python";
-          }
-      );
-      if (needs_python) {
-        actions.push_back({
-            "Install Python for the Termux Web development server",
-            ProcessCommand{"pkg", {"install", "-y", "python"}, {}},
-        });
-      }
-      const bool needs_termux_tools = std::any_of(
-          diagnostics.begin(), diagnostics.end(), [](const EnvironmentDiagnostic& diagnostic) {
-            return diagnostic.status == EnvironmentDiagnosticStatus::Missing && diagnostic.id == "termux-open";
-          }
-      );
-      if (needs_termux_tools) {
-        actions.push_back({
-            "Install Termux system integration tools",
-            ProcessCommand{"pkg", {"install", "-y", "termux-tools"}, {}},
-        });
+      if (detail::NeedsSetup(checks, "termux-open")) {
+        actions.push_back({"Install Termux system integration tools",
+                           ProcessCommand{"pkg", {"install", "termux-tools"}, {}},
+                           "install_termux_tools",
+                           {},
+                           {"termux-open"},
+                           {},
+                           true});
       }
       return actions;
     }
-    const std::optional<std::filesystem::path> emsdk = FindExecutable("emsdk");
-    if (!emsdk) {
-      return {
-          {"Install emsdk from https://emscripten.org/docs/getting_started/downloads.html and load its environment",
-           std::nullopt}
-      };
+    const auto root = ManagedEmsdk(version);
+    if (root.empty())
+      return {{"Set a user data directory for the managed emsdk", std::nullopt, "select_emsdk_root"}};
+    if (detail::NeedsSetup(checks, "python"))
+      actions.push_back(SetupPython());
+    if (detail::NeedsSetup(checks, "emsdk")) {
+      actions.push_back(detail::InstallTool(
+          "install_emsdk", "Install official emsdk",
+          {"https://codeload.github.com/emscripten-core/emsdk/tar.gz/refs/tags/" + std::string(emsdk_version),
+           "75ad24a079bcbbe3c1bdb614101eab490d94346668ab3a8e250e7e53b4df565b", "emsdk-" + std::string(emsdk_version),
+           root},
+          {}, {"emsdk"}));
     }
-    return {
-        {"Install Emscripten " + std::string(emscripten_version),
-         ProcessCommand{emsdk->string(), {"install", std::string(emscripten_version)}, {}}},
-        {"Activate Emscripten " + std::string(emscripten_version),
-         ProcessCommand{emsdk->string(), {"activate", std::string(emscripten_version)}, {}}},
-        {"Load the activated emsdk environment in this shell", std::nullopt},
-    };
+    actions.push_back(
+        {"Install and activate Emscripten " + version,
+         std::nullopt,
+         "install_emscripten",
+         {"python", "emsdk"},
+         {"emcc", "emcmake"},
+         [root, version] {
+           const auto executable = EmsdkCommand(root).string();
+           const auto environment = PythonEnvironment();
+           const int result = RunProcess({executable, {"install", version}, root, environment});
+           return result == 0 ? RunProcess({executable, {"activate", version}, root, environment}) : result;
+         }});
+    return actions;
   }
 
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {

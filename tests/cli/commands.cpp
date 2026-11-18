@@ -354,7 +354,7 @@ TEST_CASE("HuxerUICliSetupUsesSharedDiagnosisAndCanBeCancelled") {
   TemporaryDirectory temporary;
   const Invocation invocation = Invoke(temporary.Path(), {"setup", "android"});
 
-  REQUIRE(invocation.result == 1);
+  REQUIRE(invocation.result == 3);
   REQUIRE(invocation.output.find("Common environment:") != std::string::npos);
   REQUIRE(invocation.output.find("Platform android:") != std::string::npos);
   REQUIRE(invocation.output.find("Setup plan:") != std::string::npos);
@@ -379,5 +379,19 @@ TEST_CASE("HuxerUICliDoctorChecksRequestedPlatformsOutsideAProject") {
   REQUIRE(invocation.result == 1);
   REQUIRE(invocation.output.find("Project: not found") != std::string::npos);
   REQUIRE(invocation.output.find("Platform android:") != std::string::npos);
-  REQUIRE(invocation.output.find("  [ok] cmake") == std::string::npos);
+  REQUIRE(invocation.output.find("cmake") < invocation.output.find("Platform android:"));
+}
+
+TEST_CASE("HuxerUICliDoctorEmitsAnOperationScopedJsonPlan") {
+  TemporaryDirectory temporary;
+  const auto plan = Invoke(temporary.Path(), {"doctor", "android", "--operation", "devices", "--json"});
+
+  REQUIRE(plan.error.empty());
+  REQUIRE(plan.output.starts_with("{\"schema\":1,"));
+  REQUIRE(plan.output.find("\"operation\":\"devices\"") != std::string::npos);
+  REQUIRE(plan.output.find("\"platform\":\"android\"") != std::string::npos);
+  REQUIRE(plan.output.find("\"id\":\"cmake\"") == std::string::npos);
+  REQUIRE(plan.output.find("\"id\":\"android.android_ndk\"") == std::string::npos);
+  REQUIRE(Invoke(temporary.Path(), {"setup", "android", "--json"}).result == 2);
+  REQUIRE(Invoke(temporary.Path(), {"doctor", "android", "--operation", "devices", "--format", "rpm"}).result == 2);
 }

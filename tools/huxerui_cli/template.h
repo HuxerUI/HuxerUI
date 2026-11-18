@@ -30,7 +30,7 @@ struct ProjectTemplateContext {
   /// Replaces the standard project tokens in a string.
   /// @param value Template text containing tokens such as `@PROJECT_NAME@` or `@PROJECT_ID@`.
   /// @return Rendered text.
-  [[nodiscard]] std::string Render(std::string_view value) const;
+  std::string Render(std::string_view value) const;
 };
 
 /// Independently selected public identities for a generated reusable library.
@@ -71,9 +71,8 @@ struct TemplateReplacement {
 /// @param replacements Additional platform-specific replacements.
 /// @return Generated files ordered by relative path.
 /// @throws std::logic_error if the embedded template tree is missing or cannot be read.
-[[nodiscard]] std::vector<GeneratedFile>
-RenderTemplateTree(std::string_view root, const ProjectTemplateContext& context,
-                   std::span<const TemplateReplacement> replacements = {});
+std::vector<GeneratedFile> RenderTemplateTree(std::string_view root, const ProjectTemplateContext& context,
+                                              std::span<const TemplateReplacement> replacements = {});
 
 /// Loads an embedded mcpp package template and renders it.
 ///
@@ -84,13 +83,12 @@ RenderTemplateTree(std::string_view root, const ProjectTemplateContext& context,
 /// @param context Token values.
 /// @return Generated files ordered by relative path.
 /// @throws std::logic_error if the tree is missing or names an unknown token.
-[[nodiscard]] std::vector<GeneratedFile>
-RenderPackageTemplateTree(std::string_view root, const PackageTemplateContext& context);
+std::vector<GeneratedFile> RenderPackageTemplateTree(std::string_view root, const PackageTemplateContext& context);
 
 /// Loads an embedded template tree without token substitution.
 /// @param root Embedded template directory relative to the CLI template root.
 /// @return Copied files ordered by relative path.
 /// @throws std::logic_error if the embedded template tree is missing or cannot be read.
-[[nodiscard]] std::vector<GeneratedFile> CopyTemplateTree(std::string_view root);
+std::vector<GeneratedFile> CopyTemplateTree(std::string_view root);
 
 } // namespace huxerui::cli

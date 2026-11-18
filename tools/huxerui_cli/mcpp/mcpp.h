@@ -25,12 +25,12 @@ struct BuildOptions {
 };
 
 /// Creates the direct child process command for an mcpp project.
-[[nodiscard]] std::vector<ProcessCommand> BuildCommands(const BuildOptions& options);
+std::vector<ProcessCommand> BuildCommands(const BuildOptions& options);
 
 /// Runs the standalone `huxerui mcpp` command.
 ///
 /// The argument span starts with `build`, and the command does not use the HuxerUI SDK or project discovery.
-[[nodiscard]] int Run(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
-                      std::ostream& output, std::ostream& error);
+int Run(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
+        std::ostream& output, std::ostream& error);
 
 } // namespace huxerui::cli::mcpp

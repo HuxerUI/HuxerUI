@@ -2,6 +2,21 @@
 
 using namespace huxerui::cli::test;
 
+TEST_CASE("HuxerUICliWebDiagnosisUsesTheSelectedSdkArchiveVersion") {
+  using namespace huxerui::cli;
+  TemporaryDirectory temporary;
+  const auto archive = temporary.Path() / "share/huxerui/platform/web/emscripten-6.0.5/libhuxerui.a";
+  std::filesystem::create_directories(archive.parent_path());
+  std::ofstream(archive) << "fixture";
+  EnvironmentRequest request;
+  request.sdk_home = temporary.Path();
+  const auto diagnostics = FindPlatformDriver("web")->DiagnoseEnvironment(request);
+
+  const auto compiler = std::ranges::find(diagnostics, std::string_view{"emcc"}, &EnvironmentDiagnostic::id);
+  REQUIRE(compiler != diagnostics.end());
+  REQUIRE(compiler->required_version == "6.0.5");
+}
+
 TEST_CASE("HuxerUICliCreatesWebPlatformShell") {
   TemporaryDirectory temporary;
   const auto invocation = Invoke(temporary.Path(),

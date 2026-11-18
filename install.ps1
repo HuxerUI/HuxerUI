@@ -7,7 +7,7 @@ param(
     [switch]$Uninstall,
     [switch]$Update,
     [switch]$Check,
-    [ValidateSet("list", "use", "update")][string]$Sdk
+    [string]$Sdk
 )
 
 Set-StrictMode -Version Latest
@@ -160,6 +160,9 @@ function Select-Sdk {
     Set-UserEnvironment $Prefix
 }
 
+if ($Sdk -and $Sdk -notin @("list", "use", "update")) {
+    Fail "invalid SDK command '$Sdk'; expected list, use, or update"
+}
 if ($Check -and -not $Update -and $Sdk -ne "update") {
     Fail "-Check requires an update"
 }
@@ -265,24 +268,22 @@ if ($Update) {
 $ReleaseTag = $null
 if (-not $Archive) {
     if (-not $Version) {
-        $ApiUrl = $RepositoryUrl -replace '^https://github\.com/', 'https://api.github.com/repos/'
-        
         try {
-            $Release = Invoke-RestMethod -Uri "$ApiUrl/releases/latest" -Headers @{
-                Accept       = "application/vnd.github+json"
-                "User-Agent" = "PowerShell-Installer"
+            $Response = (Invoke-WebRequest -Uri "$RepositoryUrl/releases/latest" -Method Head -UseBasicParsing).BaseResponse
+            $ReleaseUri = if ($Response -is [System.Net.HttpWebResponse]) {
+                $Response.ResponseUri
+            } else {
+                $Response.RequestMessage.RequestUri
             }
         } catch {
-            Fail "Failed to query latest release from API: $_"
+            Fail "failed to resolve the latest HuxerUI release: $_"
         }
 
-        $ReleaseTag = [string]$Release.tag_name
-        if (-not $ReleaseTag) {
-            Fail "GitHub API did not return a valid release. Response: $($Release | ConvertTo-Json -Depth 2)"
+        $TagPrefix = [regex]::Escape("$RepositoryUrl/releases/tag/")
+        if (-not $ReleaseUri -or $ReleaseUri.AbsoluteUri -cnotmatch "^$TagPrefix(v[0-9A-Za-z._-]+)$") {
+            Fail "latest HuxerUI release did not redirect to a valid tag: $ReleaseUri"
         }
-        if (-not $ReleaseTag.StartsWith("v")) {
-            Fail "latest HuxerUI release has an invalid tag: $ReleaseTag"
-        }
+        $ReleaseTag = $Matches[1]
         $Version = $ReleaseTag.Substring(1)
     } else {
         $Version = $Version.TrimStart("v")
@@ -291,7 +292,7 @@ if (-not $Archive) {
     if ($Version -notmatch "^[0-9A-Za-z._-]+$") {
         Fail "invalid version: $Version"
     }
-    
+
     $ArchiveName = "huxerui-sdk-$Version-windows-$HostArchitecture.zip"
     $ArchiveSource = "$RepositoryUrl/releases/download/$ReleaseTag/$ArchiveName"
     $ArchiveDisplay = $ArchiveSource

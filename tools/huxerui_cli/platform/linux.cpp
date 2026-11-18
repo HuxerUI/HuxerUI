@@ -1,5 +1,7 @@
 #include "platform.h"
 
+#include "toolchain.h"
+
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -31,8 +33,8 @@ std::filesystem::path LinuxToolchain(const PlatformCommandContext& context) {
   return (context.project_root / *toolchain).lexically_normal();
 }
 
-std::filesystem::path LinuxPackageTool(std::string_view name) {
-  const std::optional<std::filesystem::path> tool = FindExecutable(name);
+std::filesystem::path LinuxPackageTool(std::string_view name, const ProcessEnvironment& environment) {
+  const std::optional<std::filesystem::path> tool = FindExecutable(name, environment);
   if (!tool) {
     throw std::runtime_error("HuxerUI Linux packaging requires " + std::string(name) + " on PATH");
   }
@@ -56,6 +58,28 @@ std::filesystem::path LinuxPackageArtifact(const PlatformCommandContext& context
   return root / (detail::JsonString(plan, "target") + "-" + version + ".AppImage");
 }
 
+std::filesystem::path ManagedPatchelf() {
+  const auto root = detail::ManagedToolDirectory();
+  if (root.empty())
+    return {};
+  return root / "patchelf/0.19.2" / detail::HostArchitecture() / "bin/patchelf";
+}
+
+struct LinuxPackageRequirement {
+  std::string_view name;
+  std::string_view minimum;
+  std::string_view apt_package;
+};
+
+constexpr std::array development_packages{
+    LinuxPackageRequirement{"gtk4", "4.14", "libgtk-4-dev"},
+    LinuxPackageRequirement{"epoxy", "1.5", "libepoxy-dev"},
+    LinuxPackageRequirement{"gio-2.0", {}, "libglib2.0-dev"},
+    LinuxPackageRequirement{"pangoft2", {}, "libpango1.0-dev"},
+    LinuxPackageRequirement{"fontconfig", {}, "libfontconfig1-dev"},
+    LinuxPackageRequirement{"libsoup-3.0", "3.0", "libsoup-3.0-dev"},
+};
+
 class LinuxDriver final : public PlatformDriver {
 public:
   std::string_view Id() const noexcept override {
@@ -76,71 +100,136 @@ public:
     return tools;
   }
 
-  std::vector<EnvironmentDiagnostic> DiagnoseEnvironment() const override {
-    std::vector<EnvironmentDiagnostic> diagnostics = PlatformDriver::DiagnoseEnvironment();
-    if (!SupportsCurrentHost() || !FindExecutable("pkg-config")) {
-      return diagnostics;
+  ProcessEnvironment ResolveEnvironment(const EnvironmentRequest&) const override {
+    ProcessEnvironment environment;
+    const auto patchelf = ManagedPatchelf();
+    if (!patchelf.empty() && std::filesystem::is_regular_file(patchelf)) {
+      const auto system = FindExecutable("patchelf").value_or(std::filesystem::path{});
+      if (detail::CheckTool("patchelf", "patchelf", system, "0.19.0").status != EnvironmentDiagnosticStatus::Ready) {
+        detail::PrependPath(environment, patchelf.parent_path());
+      }
     }
-    struct PackageRequirement {
-      std::string_view name;
-      std::string_view minimum_version;
-    };
-    static constexpr std::array packages{
-        PackageRequirement{"gtk4", "4.14"},
-        PackageRequirement{"epoxy", "1.5"},
-        PackageRequirement{"gio-2.0", {}},
-        PackageRequirement{"pangoft2", {}},
-        PackageRequirement{"fontconfig", {}},
-        PackageRequirement{"libsoup-3.0", "3.0"},
-    };
-    for (const PackageRequirement& package : packages) {
-      const ProcessResult version_result =
-          RunProcessCapture({"pkg-config", {"--modversion", std::string(package.name)}, {}});
-      std::string version = version_result.output;
-      while (!version.empty() && std::isspace(static_cast<unsigned char>(version.back()))) {
-        version.pop_back();
+    return environment;
+  }
+
+  std::vector<EnvironmentDiagnostic> DiagnoseEnvironment(const EnvironmentRequest& request) const override {
+    auto diagnostics = PlatformDriver::DiagnoseEnvironment(request);
+    if (!SupportsCurrentHost() || request.operation == EnvironmentOperation::Devices)
+      return diagnostics;
+    const auto cxx = ReadEnvironmentVariable("CXX").value_or("c++");
+    const auto compiler = std::filesystem::path(cxx).has_parent_path()
+                              ? std::filesystem::path(cxx)
+                              : FindExecutable(cxx).value_or(std::filesystem::path{});
+    diagnostics.push_back(detail::CheckTool(
+        "compiler", "C++ compiler", std::filesystem::is_regular_file(compiler) ? compiler : std::filesystem::path{}));
+    const auto generator =
+        request.generator.empty() ? ReadEnvironmentVariable("CMAKE_GENERATOR").value_or("") : request.generator;
+    const auto build_tool =
+        generator.starts_with("Ninja") || (generator.empty() && FindExecutable("ninja")) ? "ninja" : "make";
+    diagnostics.push_back(
+        detail::CheckTool(build_tool, build_tool, FindExecutable(build_tool).value_or(std::filesystem::path{})));
+    const auto pkg_config = FindExecutable("pkg-config");
+    for (const auto& package : development_packages) {
+      EnvironmentDiagnostic check{EnvironmentDiagnosticStatus::Blocked,
+                                  "pkg:" + std::string(package.name),
+                                  std::string(package.name) + " development package",
+                                  {},
+                                  {},
+                                  std::string(package.minimum)};
+      if (pkg_config) {
+        const auto result = RunProcessCapture({pkg_config->string(), {"--modversion", std::string(package.name)}, {}});
+        check.version = detail::ParseToolVersion(result.output);
+        check.status =
+            result.exit_code == 0 && (package.minimum.empty() || detail::VersionAtLeast(check.version, package.minimum))
+                ? EnvironmentDiagnosticStatus::Ready
+                : EnvironmentDiagnosticStatus::Missing;
       }
-      bool ready = version_result.exit_code == 0;
-      if (ready && !package.minimum_version.empty()) {
-        const ProcessResult requirement_result = RunProcessCapture(
-            {"pkg-config", {"--atleast-version=" + std::string(package.minimum_version), std::string(package.name)}, {}}
-        );
-        ready = requirement_result.exit_code == 0;
+      diagnostics.push_back(std::move(check));
+    }
+    if (request.operation == EnvironmentOperation::Package) {
+      const auto environment = ResolveEnvironment(request);
+      diagnostics.push_back(detail::CheckTool("patchelf", "patchelf",
+                                              FindExecutable("patchelf", environment).value_or(std::filesystem::path{}),
+                                              "0.19.0", environment));
+      const auto format = request.package_format;
+      const auto tool = format == "deb" ? "dpkg-shlibdeps" : format == "rpm" ? "rpmbuild" : "appimagetool";
+      diagnostics.push_back(detail::CheckTool(tool, tool, FindExecutable(tool).value_or(std::filesystem::path{})));
+      if (format == "deb" || format == "rpm") {
+        const auto cmake = request.cmake_path ? *request.cmake_path : detail::ResolveCMake().path;
+        const auto cpack = cmake.empty() ? std::filesystem::path{} : cmake.parent_path() / "cpack";
+        diagnostics.push_back(detail::CheckTool(
+            "cpack", "CPack", std::filesystem::is_regular_file(cpack) ? cpack : std::filesystem::path{}));
       }
-      const std::string requirement = package.minimum_version.empty()
-                                          ? std::string(package.name)
-                                          : std::string(package.name) + " >= " + std::string(package.minimum_version);
-      diagnostics.push_back({
-          ready ? EnvironmentDiagnosticStatus::Ready : EnvironmentDiagnosticStatus::Missing,
-          "pkg:" + std::string(package.name),
-          requirement + " development package",
-          version_result.exit_code == 0 ? std::move(version) : std::string{},
-      });
     }
     return diagnostics;
   }
 
-  std::vector<SetupAction> PlanSetup(std::span<const EnvironmentDiagnostic> diagnostics) const override {
-    const bool missing_tool =
-        std::any_of(diagnostics.begin(), diagnostics.end(), [](const EnvironmentDiagnostic& diagnostic) {
-          return diagnostic.status == EnvironmentDiagnosticStatus::Missing && !diagnostic.id.starts_with("pkg:");
-        });
-    const bool missing_package =
-        std::any_of(diagnostics.begin(), diagnostics.end(), [](const EnvironmentDiagnostic& diagnostic) {
-          return diagnostic.status == EnvironmentDiagnosticStatus::Missing && diagnostic.id.starts_with("pkg:");
-        });
+  std::vector<SetupAction> PlanSetup(std::span<const EnvironmentDiagnostic> checks,
+                                     const EnvironmentRequest&) const override {
+    if (!SupportsCurrentHost())
+      return {};
     std::vector<SetupAction> actions;
-    if (missing_tool) {
-      actions.push_back({
-          "Install pkg-config with the host distribution package manager",
-          std::nullopt,
-      });
+    const bool ubuntu = detail::IsUbuntuNoble();
+    const auto apt = [&](std::string id, std::vector<std::string> packages, std::vector<std::string> provides,
+                         std::vector<std::string> prerequisites = {}) {
+      const std::string description = "Install " + detail::JoinTargetAbis(packages, ' ');
+      if (!ubuntu) {
+        actions.push_back({description + " or the equivalent packages for this distribution", std::nullopt,
+                           std::move(id), std::move(prerequisites), std::move(provides)});
+        return;
+      }
+      actions.push_back({description + " with apt", std::nullopt, std::move(id), std::move(prerequisites),
+                         std::move(provides),
+                         [packages = std::move(packages)] { return detail::InstallUbuntuPackages(packages); }, true});
+    };
+    std::vector<std::string> host_packages;
+    std::vector<std::string> host_requirements;
+    for (const auto& [id, package] : {std::pair{"pkg-config", "pkg-config"},
+                                      {"compiler", "build-essential"},
+                                      {"make", "make"},
+                                      {"ninja", "ninja-build"},
+                                      {"dpkg-shlibdeps", "dpkg-dev"},
+                                      {"rpmbuild", "rpm"}}) {
+      if (!detail::NeedsSetup(checks, id))
+        continue;
+      if (std::string_view(id) == "compiler" && ReadEnvironmentVariable("CXX")) {
+        actions.push_back({"Correct CXX to select an installed C++ compiler", std::nullopt, "select_compiler"});
+        continue;
+      }
+      host_packages.emplace_back(package);
+      host_requirements.emplace_back(id);
     }
-    if (missing_package) {
-      actions.push_back({
-          "Install the required GTK 4.14, libepoxy, GIO, and libsoup 3 development packages",
-          std::nullopt,
-      });
+    if (!host_packages.empty())
+      apt("install_host_tools", std::move(host_packages), std::move(host_requirements));
+    std::vector<std::string> packages;
+    std::vector<std::string> needed;
+    // Without pkg-config the development checks are blocked. Keep their packages in the plan for the recheck.
+    for (const auto& package : development_packages) {
+      const auto id = "pkg:" + std::string(package.name);
+      if (detail::NeedsSetup(checks, id) || detail::NeedsSetup(checks, "pkg-config")) {
+        packages.emplace_back(package.apt_package);
+        needed.push_back(id);
+      }
+    }
+    if (!packages.empty())
+      apt("install_development_packages", std::move(packages), std::move(needed), {"pkg-config"});
+    if (detail::NeedsSetup(checks, "patchelf")) {
+      const auto path = ManagedPatchelf();
+      if (!path.empty() && detail::HostArchitecture() != "unknown") {
+        const bool arm = detail::HostArchitecture() == "arm64";
+        actions.push_back(detail::InstallTool(
+            "install_patchelf", "Install patchelf 0.19.2",
+            {std::string("https://github.com/NixOS/patchelf/releases/download/0.19.2/patchelf-0.19.2-") +
+                 (arm ? "aarch64" : "x86_64") + ".tar.gz",
+             arm ? "ba6850c1a6f4cbdb050e1cc22fa5239159ad31c43606846e49c408d335f594ff"
+                 : "2abdc34fbe949c995a1baa4ec310896a085588a45a99cd0d726851bdfac2a4bb",
+             "", path.parent_path().parent_path()},
+            {}, {"patchelf"}));
+      }
+    }
+    if (detail::NeedsSetup(checks, "appimagetool")) {
+      actions.push_back({"Install appimagetool from https://github.com/AppImage/appimagetool/releases", std::nullopt,
+                         "install_appimagetool"});
     }
     return actions;
   }
@@ -202,10 +291,10 @@ public:
     const bool system_package = IsLinuxSystemPackage(context);
     if (context.package && SupportsCurrentHost()) {
       if (system_package) {
-        (void)LinuxPackageTool("cpack");
-        (void)LinuxPackageTool(context.package_format == "deb" ? "dpkg-shlibdeps" : "rpmbuild");
+        (void)LinuxPackageTool("cpack", context.environment);
+        (void)LinuxPackageTool(context.package_format == "deb" ? "dpkg-shlibdeps" : "rpmbuild", context.environment);
       } else {
-        (void)LinuxPackageTool("appimagetool");
+        (void)LinuxPackageTool("appimagetool", context.environment);
       }
     }
     auto commands = detail::DesktopBuildCommands(context);
@@ -248,16 +337,16 @@ public:
       auto commands = detail::DesktopPackageStageCommands(context, stage, install_component);
       const bool deb = context.package_format == "deb";
       commands.push_back({
-          LinuxPackageTool("cpack").string(),
-          {"-G", deb ? "DEB" : "RPM", "--config", config.string(), "-B", root.string(),
-           "-D", "CPACK_INSTALLED_DIRECTORIES=" + stage.string() + ";/",
-           "-D", "CPACK_PACKAGE_VERSION=" + detail::JsonString(plan, "version"),
-           "-D", "CPACK_PACKAGE_FILE_NAME=" + artifact.stem().string()},
+          LinuxPackageTool("cpack", context.environment).string(),
+          {"-G", deb ? "DEB" : "RPM", "--config", config.string(), "-B", root.string(), "-D",
+           "CPACK_INSTALLED_DIRECTORIES=" + stage.string() + ";/", "-D",
+           "CPACK_PACKAGE_VERSION=" + detail::JsonString(plan, "version"), "-D",
+           "CPACK_PACKAGE_FILE_NAME=" + artifact.stem().string()},
           context.project_root,
       });
       return commands;
     }
-    const std::filesystem::path appimagetool = LinuxPackageTool("appimagetool");
+    const std::filesystem::path appimagetool = LinuxPackageTool("appimagetool", context.environment);
     const std::filesystem::path staging = root / "AppDir";
     std::vector<ProcessCommand> commands =
         detail::DesktopPackageStageCommands(context, staging, install_component);

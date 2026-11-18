@@ -114,6 +114,95 @@ TEST_CASE("HuxerUICliAndroidEnvironmentDiagnosisOwnsToolChecks") {
 
 }
 
+#if !defined(_WIN32)
+TEST_CASE("HuxerUICliKeepsAndroidSetupActionsWhenDeviceDiscoveryFails") {
+  if (huxerui::cli::CurrentHostId() == "android")
+    SKIP("Termux does not support Android device discovery");
+  TemporaryDirectory temporary;
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "diagnosis_fixture", "--platform", "android"}).result == 0);
+  const auto project = temporary.Path() / "diagnosis_fixture";
+  const auto sdk = temporary.Path() / "Android SDK";
+  const auto adb = sdk / "platform-tools/adb";
+  std::filesystem::create_directories(adb.parent_path());
+  std::ofstream(project / "platform/android/local.properties") << "sdk.dir=" << sdk.string() << '\n';
+  std::ofstream(adb) << "#!/bin/sh\nexit 126\n";
+  std::filesystem::permissions(adb, std::filesystem::perms::owner_exec, std::filesystem::perm_options::add);
+
+  const auto diagnose = [&] {
+    return Invoke(project, {"doctor", "android", "--operation", "run", "--sdk", HUXERUI_TEST_SOURCE_DIRECTORY, "--json"});
+  };
+  const auto broken_adb = diagnose();
+  REQUIRE(broken_adb.result == 1);
+  REQUIRE(broken_adb.output.find("\"id\":\"android.platform_tools\",\"status\":\"missing\"") != std::string::npos);
+  REQUIRE(broken_adb.output.find("\"id\":\"android.install_platform_tools\"") != std::string::npos);
+  REQUIRE(broken_adb.output.find("\"id\":\"android.device\",\"status\":\"blocked\"") != std::string::npos);
+
+  std::ofstream(adb) << "#!/bin/sh\nif [ \"$1\" = version ]; then echo 'Android Debug Bridge version 1.0.41'; exit 0; fi\n"
+                       "exit 126\n";
+  const auto broken_discovery = diagnose();
+  REQUIRE(broken_discovery.result == 1);
+  REQUIRE(broken_discovery.output.find("\"id\":\"android.platform_tools\",\"status\":\"ready\"") != std::string::npos);
+  REQUIRE(broken_discovery.output.find("\"id\":\"android.device\",\"status\":\"blocked\"") != std::string::npos);
+  REQUIRE(broken_discovery.output.find("exit code 126") != std::string::npos);
+  REQUIRE(broken_discovery.output.find("\"id\":\"android.install_android_ndk\"") != std::string::npos);
+}
+
+TEST_CASE("HuxerUICliAndroidSetupRechecksSdkPackagesAndSkipsInstalledOnRetry") {
+  if (huxerui::cli::CurrentHostId() == "android")
+    SKIP("Desktop Android setup uses sdkmanager");
+  TemporaryDirectory temporary;
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "setup_fixture", "--platform", "android"}).result == 0);
+  const auto project = temporary.Path() / "setup_fixture";
+  const auto sdk = temporary.Path() / "Android SDK";
+  const auto java = temporary.Path() / "JDK 17";
+  const auto manager = sdk / "cmdline-tools/19.0/bin/sdkmanager";
+  const auto compiler = java / "bin/javac";
+  std::filesystem::create_directories(compiler.parent_path());
+  std::filesystem::create_directories(manager.parent_path());
+  std::ofstream(project / "platform/android/local.properties") << "sdk.dir=" << sdk.string() << '\n';
+  std::ofstream(compiler) << "#!/bin/sh\nprintf 'javac 17.0.18\\n'\n";
+  std::ofstream(manager) << R"sh(#!/bin/sh
+set -eu
+if [ "$1" = "--version" ]; then echo 19.0; exit 0; fi
+[ "$(cd "${1#--sdk_root=}" && pwd -P)" = "$(pwd -P)" ]
+[ "$2" = "--install" ]
+[ -x "$JAVA_HOME/bin/javac" ]
+case "$3" in
+  'platforms;android-36') file=platforms/android-36/android.jar ;;
+  'build-tools;35.0.0')
+    [ -f platforms/android-36/android.jar ]
+    [ -f allow-remaining ] || exit 130
+    file=build-tools/35.0.0/source.properties ;;
+  'ndk;29.0.14206865')
+    [ -f build-tools/35.0.0/source.properties ]
+    file=ndk/29.0.14206865/build/cmake/android.toolchain.cmake ;;
+  *) exit 1 ;;
+esac
+mkdir -p "$(dirname "$file")"
+touch "$file"
+printf '%s\n' "$3" >> install-log
+)sh";
+  for (const auto& executable : {manager, compiler}) {
+    std::filesystem::permissions(executable, std::filesystem::perms::owner_exec, std::filesystem::perm_options::add);
+  }
+  const auto java_home = java.string();
+  const auto setup = [&] {
+    return Invoke(project,
+                  {"setup", "android", "--yes", "--sdk", HUXERUI_TEST_SOURCE_DIRECTORY, "--java-home", java_home});
+  };
+
+  const auto partial = setup();
+  INFO(partial.output << partial.error);
+  REQUIRE(partial.result == 3);
+  REQUIRE(Read(sdk / "install-log") == "platforms;android-36\n");
+  std::ofstream(sdk / "allow-remaining") << "resume\n";
+  const auto retried = setup();
+  INFO(retried.output << retried.error);
+  REQUIRE(retried.result == 0);
+  REQUIRE(Read(sdk / "install-log") == "platforms;android-36\nbuild-tools;35.0.0\nndk;29.0.14206865\n");
+}
+#endif
+
 TEST_CASE("HuxerUICliPreservesAndroidLocalSettings") {
   using namespace huxerui::cli;
   TemporaryDirectory temporary;

@@ -7,9 +7,9 @@ if [ ! -f "$HUXERUI_RESOURCE_SOURCE/huxerui/resources.bin" ]; then
   exit 1
 fi
 
-cmake -E remove_directory "$HUXERUI_RESOURCE_DESTINATION"
-cmake -E make_directory "$HUXERUI_RESOURCE_DESTINATION"
-cmake -E copy_directory "$HUXERUI_RESOURCE_SOURCE" "$HUXERUI_RESOURCE_DESTINATION"
+"${HUXERUI_CMAKE_EXECUTABLE:-cmake}" -E remove_directory "$HUXERUI_RESOURCE_DESTINATION"
+"${HUXERUI_CMAKE_EXECUTABLE:-cmake}" -E make_directory "$HUXERUI_RESOURCE_DESTINATION"
+"${HUXERUI_CMAKE_EXECUTABLE:-cmake}" -E copy_directory "$HUXERUI_RESOURCE_SOURCE" "$HUXERUI_RESOURCE_DESTINATION"
 
 if [ -n "${HUXERUI_INTEGRATION_PLAN:-}" ]; then
   mkdir -p "$(dirname "$HUXERUI_INTEGRATION_PLAN")"

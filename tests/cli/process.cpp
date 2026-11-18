@@ -31,6 +31,20 @@ TEST_CASE("HuxerUICliExecutableSearchSkipsInaccessiblePathEntries") {
   REQUIRE(resolved);
   REQUIRE(std::filesystem::equivalent(*resolved, executable));
 }
+
+TEST_CASE("HuxerUICliManagedProcessReportsExecFailureAndCanRestart") {
+  using namespace huxerui::cli;
+  TemporaryDirectory temporary;
+  const auto executable = temporary.Path() / "app";
+  std::ofstream(executable) << "#!" << (temporary.Path() / "missing-interpreter").string() << '\n';
+  std::filesystem::permissions(executable, std::filesystem::perms::owner_read | std::filesystem::perms::owner_exec);
+
+  ManagedProcess process;
+  REQUIRE_THROWS_AS(process.Start({executable.string(), {}, {}}), std::runtime_error);
+  REQUIRE_FALSE(process.Running());
+  REQUIRE_NOTHROW(process.Start({"/bin/sh", {"-c", "exit 127"}, {}}));
+  REQUIRE(RunProcess({executable.string(), {}, {}}) == 127);
+}
 #endif
 
 TEST_CASE("HuxerUICliDescribesProcessArgumentsWithoutShellEvaluation") {
@@ -50,4 +64,15 @@ TEST_CASE("HuxerUICliCapturesProcessOutput") {
 
   REQUIRE(result.exit_code == 0);
   REQUIRE(result.output.find("captured output") != std::string::npos);
+}
+
+TEST_CASE("HuxerUICliOverridesOnlyTheChildProcessEnvironment") {
+  using namespace huxerui::cli;
+  const auto inherited = ReadEnvironmentVariable("HUXERUI_TEST_CHILD_VALUE");
+  const auto result =
+      RunProcessCapture({"cmake", {"-E", "environment"}, {}, {{"HUXERUI_TEST_CHILD_VALUE", "with spaces"}}});
+
+  REQUIRE(result.exit_code == 0);
+  REQUIRE(result.output.find("HUXERUI_TEST_CHILD_VALUE=with spaces") != std::string::npos);
+  REQUIRE(ReadEnvironmentVariable("HUXERUI_TEST_CHILD_VALUE") == inherited);
 }

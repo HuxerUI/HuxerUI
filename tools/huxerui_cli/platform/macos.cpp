@@ -1,5 +1,7 @@
 #include "platform.h"
 
+#include "toolchain.h"
+
 #include <algorithm>
 #include <array>
 #include <iterator>
@@ -31,17 +33,61 @@ public:
     return CurrentHostId() == "macos";
   }
 
-  std::span<const std::string_view> RequiredTools() const noexcept override {
-    static constexpr std::array tools{std::string_view{"xcodebuild"}};
-    return tools;
+  std::vector<EnvironmentDiagnostic> DiagnoseEnvironment(const EnvironmentRequest& request) const override {
+    if (!SupportsCurrentHost() || request.operation == EnvironmentOperation::Devices) {
+      return PlatformDriver::DiagnoseEnvironment(request);
+    }
+    const auto generator =
+        request.generator.empty() ? ReadEnvironmentVariable("CMAKE_GENERATOR").value_or("") : request.generator;
+    std::vector<EnvironmentDiagnostic> checks;
+    auto sdk = detail::CheckTool("macos_sdk", "macOS SDK", {});
+    const auto selected = RunProcessCapture({"/usr/bin/xcode-select", {"-p"}, {}});
+    if (selected.exit_code == 0) {
+      const auto result = RunProcessCapture({"/usr/bin/xcrun", {"--sdk", "macosx", "--show-sdk-path"}, {}});
+      const auto end = result.output.find_last_not_of("\r\n");
+      sdk.path = result.output.substr(0, end + 1);
+      sdk.detail = sdk.path.string();
+      if (result.exit_code == 0 && std::filesystem::is_directory(sdk.path))
+        sdk.status = EnvironmentDiagnosticStatus::Ready;
+      const auto compiler = RunProcessCapture({"/usr/bin/xcrun", {"--sdk", "macosx", "--find", "clang++"}, {}});
+      checks.push_back(
+          {compiler.exit_code == 0 ? EnvironmentDiagnosticStatus::Ready : EnvironmentDiagnosticStatus::Missing,
+           "compiler", "Apple C++ compiler", compiler.output});
+    }
+    checks.push_back(std::move(sdk));
+    // Command Line Tools suffice for the ordinary CMake build with a non-Xcode generator.
+    if (generator == "Xcode" || selected.output.find("/Contents/Developer") != std::string::npos) {
+      auto xcode = detail::CheckTool("xcodebuild", "Xcode", "/usr/bin/xcodebuild", "15.0", {}, "-version");
+      if (xcode.status == EnvironmentDiagnosticStatus::Ready) {
+        const auto initialized = RunProcessCapture({"/usr/bin/xcodebuild", {"-checkFirstLaunchStatus"}, {}});
+        checks.push_back(
+            {initialized.exit_code == 0 ? EnvironmentDiagnosticStatus::Ready : EnvironmentDiagnosticStatus::Missing,
+             "xcode_initialization", "Xcode first-launch setup", initialized.output});
+      }
+      checks.push_back(std::move(xcode));
+    }
+    if (request.operation == EnvironmentOperation::Package) {
+      checks.push_back(
+          detail::CheckTool("hdiutil", "hdiutil", FindExecutable("hdiutil").value_or(std::filesystem::path{})));
+    }
+    return checks;
   }
 
-  std::vector<SetupAction> PlanSetup(std::span<const EnvironmentDiagnostic> diagnostics) const override {
-    return std::any_of(diagnostics.begin(), diagnostics.end(), [](const EnvironmentDiagnostic& diagnostic) {
-             return diagnostic.status == EnvironmentDiagnosticStatus::Missing;
-           })
-               ? std::vector<SetupAction>{{"Install Xcode and select it with xcode-select", std::nullopt}}
-               : std::vector<SetupAction>{};
+  std::vector<SetupAction> PlanSetup(std::span<const EnvironmentDiagnostic> checks,
+                                     const EnvironmentRequest&) const override {
+    if (detail::NeedsSetup(checks, "macos_sdk") || detail::NeedsSetup(checks, "xcodebuild") ||
+        detail::NeedsSetup(checks, "compiler")) {
+      return {{"Install and select Xcode or the Command Line Tools from https://developer.apple.com/xcode/",
+               std::nullopt, "select_apple_tools"}};
+    }
+    if (detail::NeedsSetup(checks, "xcode_initialization")) {
+      return {{"Open the selected Xcode and complete its first-launch setup and license",
+               std::nullopt,
+               "initialize_xcode",
+               {},
+               {"xcode_initialization"}}};
+    }
+    return PlatformDriver::PlanSetup(checks);
   }
 
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {

@@ -37,7 +37,7 @@ public:
     std::filesystem::remove_all(path_, error);
   }
 
-  [[nodiscard]] const std::filesystem::path& Path() const noexcept {
+  const std::filesystem::path& Path() const noexcept {
     return path_;
   }
 

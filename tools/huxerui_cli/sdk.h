@@ -9,13 +9,13 @@
 namespace huxerui::cli {
 
 /// Identifies incremental output by the normalized framework location.
-[[nodiscard]] std::string BuildHomeKey(const std::filesystem::path& home);
+std::string BuildHomeKey(const std::filesystem::path& home);
 
 /// Checks whether a directory contains the HuxerUI source layout required for application builds.
 bool IsSourceHome(const std::filesystem::path& path);
 
 /// Resolves an explicit SDK installation or source checkout, or validates the default installed SDK.
-[[nodiscard]] std::filesystem::path ResolveBuildHome(const std::filesystem::path& sdk_home,
+std::filesystem::path ResolveBuildHome(const std::filesystem::path& sdk_home,
     const std::optional<std::filesystem::path>& sdk_override, const std::filesystem::path& working_directory);
 
 /// Identifies how the CLI located the active HuxerUI SDK.
@@ -39,7 +39,7 @@ struct SdkLocation {
 /// Resolves the running CLI executable path.
 /// @param argument_zero Value received as the process `argv[0]`.
 /// @return An absolute, normalized executable path when the host can resolve it.
-[[nodiscard]] std::filesystem::path ExecutablePath(std::string_view argument_zero);
+std::filesystem::path ExecutablePath(std::string_view argument_zero);
 
 /// Locates the configured HuxerUI SDK candidate without validating a build selection.
 ///
@@ -49,7 +49,7 @@ struct SdkLocation {
 /// @param executable_path Resolved CLI executable path.
 /// @return The configured location, or source `Missing` when no SDK is available.
 /// Environment selections are validated by the consuming command so --sdk can override an invalid SDK path.
-[[nodiscard]] SdkLocation LocateHuxerUIHome(const std::filesystem::path& executable_path);
+SdkLocation LocateHuxerUIHome(const std::filesystem::path& executable_path);
 
 /// Rejects source checkouts, missing installations, and a CLI belonging to another SDK.
 /// @param sdk Selected SDK location.
@@ -72,16 +72,16 @@ int RunSdkInstaller(const SdkLocation& sdk, std::string_view command, std::strin
 /// @param huxerui_home SDK prefix or repository root.
 /// @return Path to the `huxerui-app-development` Skill directory.
 /// @throws std::runtime_error if the SDK layout is invalid or the Skill is absent.
-[[nodiscard]] std::filesystem::path ResolveApplicationDevelopmentSkill(const std::filesystem::path& huxerui_home);
+std::filesystem::path ResolveApplicationDevelopmentSkill(const std::filesystem::path& huxerui_home);
 
 /// True when `huxerui_home` is a HuxerUI source checkout that is also an mcpp
 /// package, and can therefore be named by path rather than by published version.
 /// @param huxerui_home Resolved SDK home, which may be empty.
-[[nodiscard]] bool IsMcppSourcePackage(const std::filesystem::path& huxerui_home);
+bool IsMcppSourcePackage(const std::filesystem::path& huxerui_home);
 
 /// Returns the stable diagnostic name for an SDK location source.
 /// @param source Source value to name.
 /// @return `"missing"`, `"environment"`, or `"executable"`.
-[[nodiscard]] std::string_view SdkLocationSourceName(SdkLocationSource source) noexcept;
+std::string_view SdkLocationSourceName(SdkLocationSource source) noexcept;
 
 } // namespace huxerui::cli

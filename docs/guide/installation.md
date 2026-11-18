@@ -116,5 +116,5 @@ The installer refuses to remove a directory that does not contain a recognizable
 ## Toolchains
 
 Installing HuxerUI does not install platform SDKs, compilers, Android tooling, Emscripten, Xcode, or signing identities.
-Use `huxerui doctor [platform-list]` for read-only diagnostics and `huxerui setup <platform-list>` for prerequisites the CLI can configure.
+Use `huxerui doctor [platform-list]` for read-only diagnostics, add `--json` for a machine-readable installation plan, and use `huxerui setup <platform-list>` to prepare the platform prerequisites. Both commands accept `--operation` to select build, run, device discovery, or packaging requirements. The official Linux SDK installer checks for glibc 2.38 or later before launching the downloaded CLI.
 See [Platform Support](platforms.md) for host-specific requirements.

@@ -49,6 +49,7 @@ add_library(huxerui_cli_core STATIC
         process_runner.cpp
         project.cpp
         sdk.cpp
+        toolchain.cpp
         template.cpp
         watch.cpp
 )

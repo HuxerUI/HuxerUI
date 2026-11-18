@@ -480,6 +480,17 @@ if [ "$update" = true ]; then
   validate_version "$current_version"
 fi
 
+if [ "$host_system" = linux ]; then
+  libc=$(getconf GNU_LIBC_VERSION 2>/dev/null) || fail "the official Linux SDK requires glibc 2.38 or later"
+  case "$libc" in
+    "glibc "*) glibc_version=${libc#glibc } ;;
+    *) fail "the official Linux SDK requires glibc 2.38 or later" ;;
+  esac
+  if version_is_older "$glibc_version.0" 2.38.0; then
+    fail "the official Linux SDK requires glibc 2.38 or later (found $glibc_version)"
+  fi
+fi
+
 release_tag=""
 if [ -z "$archive" ]; then
   if [ -z "$version" ]; then

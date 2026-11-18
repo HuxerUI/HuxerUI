@@ -54,25 +54,24 @@ struct Project {
 /// Checks whether a name is valid for a generated application project.
 /// @param name Candidate name.
 /// @return `true` when the name starts with a letter and otherwise contains only letters, digits, `_`, or `-`.
-[[nodiscard]] bool IsValidProjectName(std::string_view name) noexcept;
+bool IsValidProjectName(std::string_view name) noexcept;
 
 /// Checks whether a name is valid for a generated library project.
 /// @param name Candidate name.
 /// @return `true` when the name consists of non-empty alphanumeric segments separated by single `_` or `-` characters.
-[[nodiscard]] bool IsValidLibraryProjectName(std::string_view name) noexcept;
+bool IsValidLibraryProjectName(std::string_view name) noexcept;
 
 /// Checks whether a string is a lowercase reverse-domain project identifier.
 /// @param id Candidate identifier, such as `org.example.notes`.
 /// @return `true` when the identifier has at least two letter-prefixed lowercase alphanumeric segments.
-[[nodiscard]] bool IsValidProjectId(std::string_view id) noexcept;
+bool IsValidProjectId(std::string_view id) noexcept;
 
 /// Creates normalized template values for an application project.
 /// @param project_name Valid project name.
 /// @param project_id Optional explicit identifier; an empty value derives `com.example.<name>`.
 /// @return Template values containing the original name, normalized target, and resolved identifier.
 /// @throws std::invalid_argument if the name or identifier is invalid.
-[[nodiscard]] ProjectTemplateContext
-MakeProjectTemplateContext(std::string_view project_name, std::string_view project_id = {});
+ProjectTemplateContext MakeProjectTemplateContext(std::string_view project_name, std::string_view project_id = {});
 
 /// Creates normalized template values for a library project.
 /// @param project_name Valid segmented library name.
@@ -81,31 +80,31 @@ MakeProjectTemplateContext(std::string_view project_name, std::string_view proje
 /// @param project_id Optional explicit identifier; an empty value derives `com.example.<name>`.
 /// @return Validated project and independently owned library identities.
 /// @throws std::invalid_argument if any supplied identity is invalid.
-[[nodiscard]] LibraryTemplateContext MakeLibraryTemplateContext(std::string_view project_name,
+LibraryTemplateContext MakeLibraryTemplateContext(std::string_view project_name,
     std::string_view cpp_namespace = {}, std::string_view public_target = {}, std::string_view project_id = {});
 
 /// Converts a segmented library name to its PascalCase product name.
 /// @param library_name Valid library project name, such as `data-grid`.
 /// @return Product name, such as `DataGrid`.
 /// @throws std::invalid_argument if `library_name` is invalid.
-[[nodiscard]] std::string MakeLibraryProductName(std::string_view library_name);
+std::string MakeLibraryProductName(std::string_view library_name);
 
 /// Searches a path and its ancestors for a HuxerUI project.
 /// @param start File or directory from which discovery starts.
 /// @return Discovered project and platform names.
 /// @throws std::runtime_error if no project is found or the start path cannot be resolved.
-[[nodiscard]] Project DiscoverProject(const std::filesystem::path& start);
+Project DiscoverProject(const std::filesystem::path& start);
 
 /// Loads project identity through the project's CMake planning contract.
 /// @param project Project whose root CMake file should be queried.
 /// @return Validated application or library template values.
 /// @throws std::runtime_error if planning fails or emits invalid metadata.
-[[nodiscard]] ProjectTemplate LoadProjectTemplate(const Project& project);
+ProjectTemplate LoadProjectTemplate(const Project& project);
 
 /// Selects the runnable application for a project.
 /// @param project Discovered application or library project.
 /// @return The project itself for applications, or its preview application for libraries.
-[[nodiscard]] Project ResolveApplicationProject(const Project& project);
+Project ResolveApplicationProject(const Project& project);
 
 /// Generates a complete project and publishes it atomically at the destination.
 /// @param destination New project directory, which must not already exist.
@@ -133,7 +132,7 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
     std::string_view template_name = {});
 
 /// Version of the HuxerUI package an mcpp project depends on.
-[[nodiscard]] std::string_view McppPackageVersion() noexcept;
+std::string_view McppPackageVersion() noexcept;
 
 /// Adds missing platform shells and library packages to an existing project.
 /// @param project Existing project.

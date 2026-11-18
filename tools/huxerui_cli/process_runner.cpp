@@ -1,10 +1,13 @@
 #include "process_runner.h"
 
+#include <algorithm>
 #include <array>
 #include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
+#include <cstring>
+#include <cwchar>
 #include <cwctype>
 #include <stdexcept>
 #include <string_view>
@@ -19,6 +22,7 @@
 
 #undef FindExecutable
 #else
+#include <fcntl.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #endif
@@ -188,8 +192,38 @@ std::wstring WindowsCommandLine(const ProcessCommand& command) {
   return command_line;
 }
 
+std::wstring WindowsEnvironment(const ProcessEnvironment& overrides) {
+  if (overrides.empty())
+    return {};
+  wchar_t* inherited = GetEnvironmentStringsW();
+  if (!inherited)
+    throw std::runtime_error("cannot read child process environment");
+  std::vector<std::wstring> entries;
+  for (const wchar_t* entry = inherited; *entry; entry += std::wcslen(entry) + 1) {
+    entries.emplace_back(entry);
+  }
+  FreeEnvironmentStringsW(inherited);
+  for (const auto& [key, value] : overrides) {
+    const auto prefix = Utf8ToWide(key) + L"=";
+    std::erase_if(entries, [&prefix](const std::wstring& entry) {
+      return entry.size() >= prefix.size() && _wcsnicmp(entry.c_str(), prefix.c_str(), prefix.size()) == 0;
+    });
+    entries.push_back(prefix + Utf8ToWide(value));
+  }
+  // CreateProcessW expects a case-insensitively sorted block ending in two NUL characters.
+  std::sort(entries.begin(), entries.end(),
+            [](const auto& lhs, const auto& rhs) { return _wcsicmp(lhs.c_str(), rhs.c_str()) < 0; });
+  std::wstring block;
+  for (const auto& entry : entries) {
+    block.append(entry).push_back(L'\0');
+  }
+  block.push_back(L'\0');
+  return block;
+}
+
 ProcessResult RunWindowsProcess(const ProcessCommand& command, bool capture_output) {
   std::wstring command_line = WindowsCommandLine(command);
+  std::wstring environment = WindowsEnvironment(command.environment);
   std::wstring working_directory = command.working_directory.wstring();
 
   HANDLE output_read = nullptr;
@@ -220,7 +254,8 @@ ProcessResult RunWindowsProcess(const ProcessCommand& command, bool capture_outp
     startup.hStdError = GetStdHandle(STD_ERROR_HANDLE);
   }
   PROCESS_INFORMATION process{};
-  if (!CreateProcessW(nullptr, command_line.data(), nullptr, nullptr, capture_output ? TRUE : FALSE, 0, nullptr,
+  if (!CreateProcessW(nullptr, command_line.data(), nullptr, nullptr, capture_output ? TRUE : FALSE,
+                      CREATE_UNICODE_ENVIRONMENT, environment.empty() ? nullptr : environment.data(),
                       working_directory.empty() ? nullptr : working_directory.c_str(), &startup, &process)) {
     const DWORD error = GetLastError();
     if (output_read) {
@@ -260,9 +295,21 @@ ProcessResult RunWindowsProcess(const ProcessCommand& command, bool capture_outp
 #endif
 
 #if !defined(_WIN32)
-[[noreturn]] void ExecPosixProcess(const ProcessCommand& command) {
+[[noreturn]] void ExitPosixLaunch(int exit_code, int launch_fd) {
+  if (launch_fd >= 0) {
+    const int error = errno;
+    while (write(launch_fd, &error, sizeof(error)) < 0 && errno == EINTR) {}
+  }
+  _exit(exit_code);
+}
+
+[[noreturn]] void ExecPosixProcess(const ProcessCommand& command, int launch_fd = -1) {
   if (!command.working_directory.empty() && chdir(command.working_directory.c_str()) != 0) {
-    _exit(126);
+    ExitPosixLaunch(126, launch_fd);
+  }
+  for (const auto& [key, value] : command.environment) {
+    if (setenv(key.c_str(), value.c_str(), 1) != 0)
+      ExitPosixLaunch(126, launch_fd);
   }
   std::vector<std::string> values;
   values.reserve(command.arguments.size() + 1);
@@ -275,7 +322,7 @@ ProcessResult RunWindowsProcess(const ProcessCommand& command, bool capture_outp
   }
   arguments.push_back(nullptr);
   execvp(command.executable.c_str(), arguments.data());
-  _exit(errno == ENOENT ? 127 : 126);
+  ExitPosixLaunch(errno == ENOENT ? 127 : 126, launch_fd);
 }
 
 ProcessResult RunPosixProcess(const ProcessCommand& command, bool capture_output) {
@@ -347,6 +394,7 @@ void ManagedProcess::Start(const ProcessCommand& command) {
   if (Running()) throw std::logic_error("a managed process is already running");
 #if defined(_WIN32)
   std::wstring command_line = WindowsCommandLine(command);
+  std::wstring environment = WindowsEnvironment(command.environment);
   const auto directory = command.working_directory.wstring();
   STARTUPINFOW startup{};
   startup.cb = sizeof(startup);
@@ -360,7 +408,8 @@ void ManagedProcess::Start(const ProcessCommand& command) {
   }
   PROCESS_INFORMATION process{};
   if (!CreateProcessW(nullptr, command_line.data(), nullptr, nullptr, FALSE,
-                      CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED, nullptr,
+                      CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+                      environment.empty() ? nullptr : environment.data(),
                       directory.empty() ? nullptr : directory.c_str(), &startup, &process)) {
     const DWORD error = GetLastError();
     CloseHandle(job);
@@ -378,13 +427,49 @@ void ManagedProcess::Start(const ProcessCommand& command) {
   process_ = reinterpret_cast<std::intptr_t>(process.hProcess);
   job_ = reinterpret_cast<std::intptr_t>(job);
 #else
-  const pid_t child = fork();
-  if (child < 0) throw std::runtime_error("cannot fork process");
-  if (child == 0) {
-    setpgid(0, 0);
-    ExecPosixProcess(command);
+  std::array<int, 2> launch_pipe{};
+  if (pipe(launch_pipe.data()) != 0)
+    throw std::system_error(errno, std::generic_category(), "cannot create process launch pipe");
+  // Exec closes the writer on success. If startup fails, the child sends errno before exiting.
+  if (fcntl(launch_pipe[1], F_SETFD, FD_CLOEXEC) == -1) {
+    const int error = errno;
+    close(launch_pipe[0]);
+    close(launch_pipe[1]);
+    throw std::system_error(error, std::generic_category(), "cannot configure process launch pipe");
   }
-  setpgid(child, child);
+
+  const pid_t child = fork();
+  if (child < 0) {
+    const int error = errno;
+    close(launch_pipe[0]);
+    close(launch_pipe[1]);
+    throw std::system_error(error, std::generic_category(), "cannot fork process");
+  }
+  if (child == 0) {
+    close(launch_pipe[0]);
+    if (setpgid(0, 0) != 0)
+      ExitPosixLaunch(126, launch_pipe[1]);
+    ExecPosixProcess(command, launch_pipe[1]);
+  }
+  close(launch_pipe[1]);
+
+  int launch_error = 0;
+  ssize_t received;
+  do {
+    received = read(launch_pipe[0], &launch_error, sizeof(launch_error));
+  } while (received < 0 && errno == EINTR);
+  const int read_error = errno;
+  close(launch_pipe[0]);
+  if (received != 0) {
+    if (received < 0) {
+      launch_error = read_error;
+      kill(child, SIGKILL);
+    } else if (received != sizeof(launch_error)) {
+      launch_error = EIO;
+    }
+    while (waitpid(child, nullptr, 0) < 0 && errno == EINTR) {}
+    throw std::system_error(launch_error, std::generic_category(), "cannot start process: " + command.executable);
+  }
   process_ = child;
 #endif
 }
@@ -475,8 +560,16 @@ void SetProcessEnvironmentVariable(std::string_view name, std::string_view value
 #endif
 }
 
-std::optional<std::filesystem::path> FindExecutable(std::string_view name) {
-  const std::optional<std::string> path_value = ReadEnvironmentVariable("PATH");
+std::optional<std::filesystem::path> FindExecutable(std::string_view name, const ProcessEnvironment& environment) {
+  const auto override = std::find_if(environment.rbegin(), environment.rend(), [](const auto& entry) {
+#if defined(_WIN32)
+    return _stricmp(entry.first.c_str(), "PATH") == 0;
+#else
+    return entry.first == "PATH";
+#endif
+  });
+  const auto path_value =
+      override == environment.rend() ? ReadEnvironmentVariable("PATH") : std::optional<std::string>(override->second);
   if (!path_value) {
     return std::nullopt;
   }

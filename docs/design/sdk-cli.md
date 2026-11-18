@@ -229,8 +229,8 @@ The implemented command surface is:
 huxerui create app <name> [--id <reverse-domain-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
 huxerui create library <name> [--namespace <cpp-namespace>] [--target <public-cmake-target>] [--id <reverse-domain-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
 huxerui platform add <platform-list>
-huxerui doctor [platform-list]
-huxerui setup <platform-list> [--yes]
+huxerui doctor [platform-list] [--operation build|run|package|devices] [--json]
+huxerui setup <platform-list> [--operation build|run|package|devices] [--yes]
 huxerui devices [platform]
 huxerui build [platform-list] [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
 huxerui mcpp build [--project <dir>] [--release] [--locked] [--offline] [--verbose]
@@ -269,38 +269,23 @@ The template creates `resources/images`, `resources/raw`, and `resources/strings
 It uses a temporary tree and publishes the project only after every file succeeds.
 `platform add` fills only missing application shells or Library platform packages, never overwrites an existing tree, and rolls back directories created by a failed multi-platform operation.
 
-### Doctor
+### Doctor and setup
 
-`doctor` is read-only.
-Outside a project it reports the SDK, common tools, available drivers, and any explicitly requested platform tools.
-Inside a project it also validates required common files, unknown platform directories, shell contents, current-host support, and required platform tools.
+`doctor` probes the selected SDK, host tools, and platform requirements without installing anything or modifying the project. Outside a project the default scope is the common environment. Inside a project the default environment scope is the enabled platforms available on the host. Project-shell errors are reported separately from tool readiness.
 
-Checks are scoped to requested platforms.
-A missing Android toolchain does not make a Windows-only diagnostic fail.
-Host environment diagnosis and project-shell diagnosis remain separate operations even when one `doctor` invocation reports both.
-Environment diagnosis owns tool discovery, versions, executable paths, licenses, and actionable remediation; project diagnosis owns repository structure and generated or source-controlled shell validity.
-The diagnostic result carries one stable requirement identity, status, display label, and optional detail; common and per-driver checks use the same result without introducing an environment-provider hierarchy.
-Checks report SDK selection, host availability, executable paths, versions, licenses, and remediation where applicable.
-The same environment diagnosis is reused by `setup` before and after any installation, so the two commands cannot disagree about readiness.
+The default operation is `build`. `devices` checks whether device discovery can run, even if no device is connected. `run` also checks the requested destination. `package` adds the tools used by the selected package format. Both commands accept the applicable `--sdk`, `--generator`, `--abi`, `--java-home`, `--device`, and `--format` selectors. `all` selects the relevant platforms available from the current host. An explicitly requested unsupported platform reports an unavailable check.
 
-### Setup
+`doctor --json` emits one schema-1 plan. `targets` contains per-platform readiness and references to required checks, `checks` contains stable identifiers, status, and detected values, and `actions` contains the prerequisite and resulting check identifiers for each automatic or manual action. Installation-only prerequisites may appear in the plan without making an otherwise usable target unready. `projectErrors` reports shell validation separately. Human-readable labels and details may change.
 
-```text
-huxerui setup <platform-list> [--yes]
-```
+`setup` requires a platform list, prints that same plan, and asks for confirmation unless `--yes` is present. Official license prompts and privilege elevation remain with the vendor or system tools. After each automatic action the CLI re-probes the environment and verifies the action's result before choosing the next step. Repeated runs inspect the installed tools again and reuse compatible components. Exit codes are 0 for ready, 1 for incomplete or failed, and 2 for invalid arguments. Setup additionally returns 3 for cancellation and 4 for a required restart.
 
-`setup` installs or configures missing external prerequisites for an explicitly requested comma-separated platform list.
-It never defaults to every platform; a user who wants that scope must pass `all` explicitly.
-The command first runs the same read-only environment diagnosis as `doctor`, prints the intended changes and their owning package managers or official distribution channels, and requests confirmation unless `--yes` is present.
-It is idempotent: satisfied requirements remain untouched, and a successful run ends by repeating diagnosis for every requested platform.
+Drivers own their platform's tool discovery. The build, device, and setup paths use the selected tool locations and pass environment overrides to child processes. The selected CMake version is passed to generated Gradle shells and its executable path is passed to Xcode build scripts. Android projects with `cmake.dir` use that explicit selection. CMake, JDK, and Emscripten installations managed by HuxerUI are discoverable by subsequent invocations and stored in the host's user data directory. Managed archives are verified before deployment.
 
-Platform prerequisites continue to use their official ownership mechanisms.
-For example, Android SDK and NDK components use Android tooling, Web requirements use the Emscripten toolchain's supported installation path, and Windows requirements use supported Microsoft installers or package sources.
-Dependencies that require manual interaction, account acceptance, platform licensing, or system UI are opened or reported with an actionable official path instead of being simulated by the CLI.
-`setup` reports the environment as incomplete until the corresponding `doctor` checks pass.
+Web checks the compiler against the version recorded in the selected SDK's archive directory. Source builds use the default version of the current CLI. The managed emsdk bootstrap installs the required version from its release catalog, and can reuse an existing matching toolchain.
 
-`setup` does not install, select, upgrade, or remove HuxerUI itself.
-That remains the responsibility of the SDK installer and avoids a recursive dependency in which the installed CLI owns its own installation.
+Windows reuses a compatible Visual Studio instance or installs the x64 C++ tools and Windows SDK with Microsoft's installer. Android uses the project's SDK root and Gradle SDK and NDK settings, with JDK 17 as the managed default for desktop hosts. Google SDK components retain their official license prompts. Ubuntu 24.04 uses apt for system development packages. iOS platform and simulator downloads use the selected Xcode. Termux, mcpp, and native project signing continue to use their own toolchains or configuration.
+
+The SDK installer handles HuxerUI archive publication. Before running a downloaded official Linux SDK binary, it checks the host's glibc 2.38 baseline.
 
 ### SDK versions
 
@@ -393,7 +378,7 @@ For Android on Termux, `run` opens the generated APK through `termux-open` and d
 
 `run <platform> --watch` owns one development session using the selected build, SDK, and device. The CLI tracks changes in the project and its declared local library roots, coalesces saves, and runs the existing incremental build. Changes to generated output do not trigger a new build. After a build failure, the current application keeps running and the next edit can retry.
 
-Desktop sessions launch a copy of the built application from an independent directory, including its bundled or adjacent resources and adjacent shared libraries. A completed build is staged before the CLI stops the application it previously launched. Web publishes versioned copies of the generated entry and its assets to the same loopback server and refreshes the open page. iOS installs each successful build and launches it using the original device selection.
+Desktop sessions launch a copy of the built application from an independent directory, including its bundled or adjacent resources and adjacent shared libraries. A completed build is staged before the CLI stops the application it previously launched. If the replacement cannot start, the CLI relaunches the previous build with its original child environment. Web publishes versioned copies of the generated entry and its assets to the same loopback server and refreshes the open page. iOS installs each successful build and launches it using the original device selection.
 
 For Android Debug watch sessions on desktop hosts, the current shell prepares a fingerprint of the APK outside the application library and HuxerUI resource package. On a compatible device, the first installation records that fingerprint and the installed APK path. A later matching build transfers the selected ABI library and full resource package together through ADB and `run-as`, then restarts the process. Startup loads one version's read-only library and binds its matching resource package. APK shell changes, older generated shells, and devices without private deployment support use the normal install and launch path. Incomplete transfers leave the running application alone. If the staged library cannot load, the session selects the previous valid version again.
 

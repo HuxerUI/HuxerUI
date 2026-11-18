@@ -215,7 +215,7 @@ GeneratedTree PlatformDriver::CreateLibraryPackage(const LibraryTemplateContext&
   return {};
 }
 
-std::vector<EnvironmentDiagnostic> PlatformDriver::DiagnoseEnvironment() const {
+std::vector<EnvironmentDiagnostic> PlatformDriver::DiagnoseEnvironment(const EnvironmentRequest& request) const {
   if (!SupportsCurrentHost()) {
     return {{
         EnvironmentDiagnosticStatus::Unavailable,
@@ -223,6 +223,10 @@ std::vector<EnvironmentDiagnostic> PlatformDriver::DiagnoseEnvironment() const {
         "unsupported from host " + std::string(CurrentHostId()),
         {},
     }};
+  }
+
+  if (request.operation == EnvironmentOperation::Devices && !SupportsDeviceDiscovery()) {
+    return {{EnvironmentDiagnosticStatus::Unavailable, "devices", "Device discovery is unsupported", {}}};
   }
 
   std::vector<EnvironmentDiagnostic> diagnostics;
@@ -238,11 +242,16 @@ std::vector<EnvironmentDiagnostic> PlatformDriver::DiagnoseEnvironment() const {
   return diagnostics;
 }
 
-std::vector<SetupAction> PlatformDriver::PlanSetup(std::span<const EnvironmentDiagnostic> diagnostics) const {
+std::vector<SetupAction> PlatformDriver::PlanSetup(std::span<const EnvironmentDiagnostic> diagnostics,
+                                                   const EnvironmentRequest&) const {
   std::vector<SetupAction> actions;
   for (const EnvironmentDiagnostic& diagnostic : diagnostics) {
     if (diagnostic.status == EnvironmentDiagnosticStatus::Missing) {
-      actions.push_back({"Install or configure " + diagnostic.label + " for " + std::string(Id()), std::nullopt});
+      actions.push_back({"Install or configure " + diagnostic.label + " for " + std::string(Id()),
+                         std::nullopt,
+                         "configure_" + diagnostic.id,
+                         {},
+                         {diagnostic.id}});
     }
   }
   return actions;
@@ -252,7 +261,7 @@ bool PlatformDriver::SupportsDeviceDiscovery() const noexcept {
   return false;
 }
 
-std::vector<PlatformDevice> PlatformDriver::DiscoverDevices() const {
+std::vector<PlatformDevice> PlatformDriver::DiscoverDevices(const EnvironmentRequest&) const {
   throw std::logic_error("platform does not support device discovery: " + std::string(Id()));
 }
 
@@ -266,7 +275,9 @@ std::vector<ProcessCommand> PlatformDriver::PackageCommands(const PlatformComman
   return {};
 }
 
-void PlatformDriver::PrepareBuildEnvironment() const {}
+ProcessEnvironment PlatformDriver::ResolveEnvironment(const EnvironmentRequest&) const {
+  return {};
+}
 
 void PlatformDriver::ValidateBuildAbis(const PlatformCommandContext&) const {}
 
