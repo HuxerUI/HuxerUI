@@ -35,6 +35,7 @@
 #include <vector>
 
 #include <huxerui/app.h>
+#include <huxerui/windows/platform_registry.h>
 
 #include "internal_access.h"
 #include "application/platform_frame_internal.h"
@@ -2494,3 +2495,13 @@ int RunPlatformApplication(const Application& application) {
 }
 
 } // namespace huxerui::detail
+
+namespace huxerui::windows {
+
+HWND GetPlatformWindow(const WindowHandle& window) {
+  auto* attachment =
+      dynamic_cast<huxerui::detail::WindowsUiWindow*>(huxerui::detail::WindowService::AttachedWindow(window));
+  return attachment ? attachment->Window() : nullptr;
+}
+
+} // namespace huxerui::windows

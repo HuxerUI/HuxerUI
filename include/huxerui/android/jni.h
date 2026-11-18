@@ -27,6 +27,7 @@ using jbyteArray = _jbyteArray*;
 namespace huxerui {
 
 class PlatformPayload;
+class WindowHandle;
 
 namespace android {
 
@@ -96,6 +97,13 @@ LocalRef<jbyteArray> BytesToJavaByteArray(JNIEnv* environment, std::span<const s
 Bytes JavaByteArrayToBytes(JNIEnv* environment, jbyteArray value);
 LocalRef<jobject> PlatformPayloadToJava(JNIEnv* environment, const PlatformPayload& payload);
 PlatformPayload JavaPlatformPayloadToCpp(JNIEnv* environment, jobject payload);
+
+/// Gets a JNI local reference to the HuxerUIView hosting the window on the Android main thread.
+/// @param window Handle for the window to query.
+/// @return A local reference, or an empty reference if the window has no live Android attachment.
+/// Use and destroy it on the calling thread within the current JNI local reference frame. HuxerUI owns the attachment.
+/// @throws std::logic_error If called off the original live application's thread.
+LocalRef<jobject> GetWindowView(const WindowHandle& window);
 
 /// Owns an open Android document descriptor and retains the file reference's provider access.
 /// Serialize use of the descriptor, including closing or moving its owner.

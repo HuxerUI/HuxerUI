@@ -208,16 +208,26 @@ NS_ASSUME_NONNULL_END
 #include <utility>
 
 #include <huxerui/platform_registry.h>
+#include <huxerui/window.h>
 
 #if defined(__OBJC__)
 @class UIView;
 @class UIViewController;
+@class UIWindow;
 #else
 class UIView;
 class UIViewController;
+class UIWindow;
 #endif
 
 namespace huxerui::ios {
+
+/// Borrows the UIKit window on the main thread. HuxerUI owns the window and its scene attachment.
+/// @param window Handle for the scene session to query.
+/// @return The current UIWindow without transferring ownership, or null while the scene is disconnected or closed.
+/// A reconnected session can provide a different UIWindow through the same handle. Query again after deferred work.
+/// @throws std::logic_error If called off the original live application's thread.
+UIWindow* GetPlatformWindow(const WindowHandle& window);
 
 /// Describes the UIKit lifecycle of one registered PlatformView type.
 ///

@@ -313,6 +313,23 @@ Hidden windows count, while initial windowless startup, failed creation, and ret
 
 [Multiple-window example](../../examples/multi_window/main.cpp) uses shared application state to move tabs between two open windows. Click **Open secondary**, then drag a tab onto the other window's tab bar to move and select it.
 
+### Platform window access
+
+Pass a `WindowHandle` to the platform getter when a library needs the original window's host object, for example to parent an operating system dialog.
+
+| Header | Function | Result |
+| --- | --- | --- |
+| `<huxerui/windows/platform_registry.h>` | `windows::GetPlatformWindow` | Borrowed `HWND` |
+| `<huxerui/macos/platform_registry.h>` | `macos::GetPlatformWindow` | Borrowed `NSWindow*` |
+| `<huxerui/linux/platform_registry.h>` | `linux::GetPlatformWindow` | Borrowed `GtkWindow*` |
+| `<huxerui/ios/platform_registry.h>` | `ios::GetPlatformWindow` | Borrowed `UIWindow*` for the connected scene |
+| `<huxerui/android/jni.h>` | `android::GetWindowView` | `LocalRef<jobject>` for the `HuxerUIView` |
+| `<huxerui/web/platform_registry.h>` | `web::GetWindowRootElement` | `emscripten::val` for the HuxerUI root element inside the mount container |
+
+Call and use the result on the original window's application thread. The getters return an empty result when the host attachment is unavailable, including during iOS scene disconnection. Web uses `emscripten::val::null()`. A hidden or minimized window can still have a live attachment.
+
+Keep the `WindowHandle` for deferred work and query again when that work runs. HuxerUI owns window closure, view attachment, and DOM root placement. Use and destroy an Android local reference within its JNI frame on the original thread. Use and release Web references on the browser main thread. Retaining an Objective-C object or JavaScript reference can keep the object alive after teardown without keeping its HuxerUI attachment active.
+
 ### Desktop floating windows
 
 Use `WindowChromeMode::None` to open an undecorated window. Mark an area with `WindowDragRegion{}` to make it draggable. Interactive descendants still receive pointer input. Set `WindowOptions::resizable` to false to disable user resizing in windowed mode.

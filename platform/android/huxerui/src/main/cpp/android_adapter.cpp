@@ -30,6 +30,7 @@
 #include <huxerui/android/platform_registry.h>
 
 #include "internal_access.h"
+#include "application/window_internal.h"
 #include "android_accessibility.h"
 #include "android_application_internal.h"
 #include "android_file_internal.h"
@@ -1290,6 +1291,12 @@ public:
   /// @return UiWindow-owned JNI reference, valid only while this window attachment remains live.
   jobject NativeView() const noexcept { return view_; }
 
+  android::LocalRef<jobject> LocalWindowView() const {
+    auto* environment = Environment();
+    return environment ? android::LocalRef<jobject>{environment, environment->NewLocalRef(view_)}
+                       : android::LocalRef<jobject>{};
+  }
+
   void RequestFrameAt(double deadline) override {
     if (const std::optional<double> scheduled = frame_coordinator_.Request(deadline, Now(), view_ != nullptr)) {
       ScheduleFrame(*scheduled);
@@ -1843,6 +1850,12 @@ PlatformEnv GetPlatformEnv(UiWindow& ui_window) {
     throw std::logic_error("HuxerUI Android platform host is unavailable");
   }
   return {environment, platform->context_};
+}
+
+LocalRef<jobject> GetWindowView(const WindowHandle& window) {
+  auto* attachment = dynamic_cast<huxerui::detail::AndroidUiWindow*>(
+      huxerui::detail::WindowService::AttachedWindow(window));
+  return attachment ? attachment->LocalWindowView() : LocalRef<jobject>{};
 }
 
 } // namespace huxerui::android

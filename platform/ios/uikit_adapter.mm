@@ -905,6 +905,8 @@ public:
   }
 
   void Shutdown() {
+    // Closing presentation can synchronously call clients while the UIWindow still exists.
+    detaching_ = true;
     [presentation_ close];
     Retire();
     [NSNotificationCenter.defaultCenter removeObserver:view_];
@@ -951,6 +953,10 @@ public:
 
   void RefreshSystemTheme() {
     if (IsInitialized()) UpdateSystemThemeBrightness(QuerySystemThemeBrightness());
+  }
+
+  UIWindow* Window() const noexcept {
+    return detaching_ ? nil : window_;
   }
 
   UIViewController* ViewController() const noexcept {
@@ -1204,6 +1210,7 @@ private:
   CGSize viewport_size_ = CGSizeZero;
   std::optional<CGRect> keyboard_frame_;
   std::optional<double> scheduled_frame_deadline_;
+  bool detaching_ = false;
 };
 
 IosRuntime::IosRuntime(const Application& application)
@@ -1481,6 +1488,15 @@ Task<WindowHandle> ApplicationHandle::OpenWindowAsync(ViewFactory content, Windo
 }
 
 } // namespace huxerui
+
+namespace huxerui::ios {
+
+UIWindow* GetPlatformWindow(const WindowHandle& window) {
+  auto* attachment = dynamic_cast<huxerui::detail::IosUiWindow*>(huxerui::detail::WindowService::AttachedWindow(window));
+  return attachment ? attachment->Window() : nil;
+}
+
+} // namespace huxerui::ios
 
 namespace huxerui::ios::detail {
 

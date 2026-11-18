@@ -9,8 +9,16 @@
 #include <emscripten/val.h>
 
 #include <huxerui/platform_registry.h>
+#include <huxerui/window.h>
 
 namespace huxerui::web {
+
+/// Gets the HuxerUI-owned root HTMLElement on the browser main thread.
+/// @param window Handle for the mount to query.
+/// @return A JavaScript reference to the root element, or `emscripten::val::null()` if the mount is unavailable.
+/// Use and release it on the browser main thread. HuxerUI owns the element's placement and removal.
+/// @throws std::logic_error If called off the original live application's thread.
+emscripten::val GetWindowRootElement(const WindowHandle& window);
 
 /// Describes the Emscripten lifecycle of one registered PlatformView type.
 ///

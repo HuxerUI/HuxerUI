@@ -250,8 +250,19 @@ void WindowService::Disconnect() noexcept {
 }
 
 void WindowService::EndSession() noexcept {
+  if (ui_window_) ui_window_->state_->closing_ = true;
   session_command_ = {};
   BeginClose();
+}
+
+UiWindow* WindowService::AttachedWindow(const WindowHandle& window) {
+  const auto& service = window.service_;
+  const auto application = service ? service->application_.lock() : nullptr;
+  if (!application) return nullptr;
+  application->RequireThread();
+  if (application->phase != ApplicationRuntimeState::Phase::Running) return nullptr;
+  auto* attachment = service->ui_window_;
+  return attachment && attachment->IsInitialized() ? attachment : nullptr;
 }
 
 bool WindowService::IsOpen() const {

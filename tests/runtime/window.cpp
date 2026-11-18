@@ -965,16 +965,19 @@ TEST_CASE("A host window session survives replacing its UI attachment") {
   });
   const auto handle = service->Handle();
   REQUIRE_FALSE(handle.IsOpen());
+  REQUIRE(detail::WindowService::AttachedWindow(handle) == nullptr);
 
   auto attachment = std::make_unique<OwnedTestWindow>(platform.destroyed);
   attachment->Initialize(platform, EmptyOwnedWindow, {}, service);
   attachment->UpdateWindowLifecycleState(WindowLifecycleState::Active);
   REQUIRE(handle.IsOpen());
   REQUIRE(handle.LifecycleState() == WindowLifecycleState::Active);
+  REQUIRE(detail::WindowService::AttachedWindow(handle) == attachment.get());
   attachment.reset();
 
   REQUIRE(handle.IsOpen());
   REQUIRE(handle.LifecycleState() == WindowLifecycleState::Background);
+  REQUIRE(detail::WindowService::AttachedWindow(handle) == nullptr);
   REQUIRE_FALSE(handle.SetAlwaysOnTop(true));
   handle.Activate();
   REQUIRE(commands == std::vector{WindowCommand::Activate});
@@ -983,10 +986,12 @@ TEST_CASE("A host window session survives replacing its UI attachment") {
   attachment->Initialize(platform, EmptyOwnedWindow, {}, service);
   REQUIRE(service->Handle() == handle);
   REQUIRE(handle.IsOpen());
+  REQUIRE(detail::WindowService::AttachedWindow(handle) == attachment.get());
   handle.Close();
   REQUIRE(commands == std::vector{WindowCommand::Activate, WindowCommand::Close});
   REQUIRE(handle.IsOpen());
   service->EndSession();
+  REQUIRE(detail::WindowService::AttachedWindow(handle) == nullptr);
   attachment.reset();
   REQUIRE_FALSE(handle.IsOpen());
   handle.Close();
@@ -1047,6 +1052,20 @@ TEST_CASE("Owned window closure is observable and waits for the outer UI callbac
     open = first.IsOpen();
     return Text(open ? "Open" : "Closed");
   });
+  REQUIRE(detail::WindowService::AttachedWindow(first) == platform.windows[0]);
+  REQUIRE(detail::WindowService::AttachedWindow(observer) == platform.windows[1]);
+#if !defined(__EMSCRIPTEN__) || defined(__EMSCRIPTEN_PTHREADS__)
+  bool rejected = false;
+  std::thread worker([&] {
+    try {
+      detail::WindowService::AttachedWindow(first);
+    } catch (const std::logic_error&) {
+      rejected = true;
+    }
+  });
+  worker.join();
+  REQUIRE(rejected);
+#endif
   platform.windows[1]->Frame();
   REQUIRE(open);
   {
@@ -1054,6 +1073,8 @@ TEST_CASE("Owned window closure is observable and waits for the outer UI callbac
     first.Close();
     platform.RunPlatformModuleTasks();
     REQUIRE_FALSE(first.IsOpen());
+    REQUIRE(detail::WindowService::AttachedWindow(first) == nullptr);
+    REQUIRE(detail::WindowService::AttachedWindow(observer) == platform.windows[1]);
     REQUIRE(platform.destroyed == 0);
   }
   platform.RunPlatformModuleTasks();

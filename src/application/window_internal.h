@@ -59,6 +59,9 @@ public:
   void Disconnect() noexcept;
   void EndSession() noexcept;
 
+  /// Borrows the initialized attachment on the original application's thread without observing window state.
+  static UiWindow* AttachedWindow(const WindowHandle& window);
+
   [[nodiscard]] bool IsOpen() const;
   bool IsFullscreen() const;
   void Open();

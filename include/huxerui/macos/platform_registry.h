@@ -158,6 +158,7 @@ NS_ASSUME_NONNULL_END
 #include <utility>
 
 #include <huxerui/platform_registry.h>
+#include <huxerui/window.h>
 
 #if defined(__OBJC__)
 @class NSView;
@@ -168,6 +169,13 @@ class NSWindow;
 #endif
 
 namespace huxerui::macos {
+
+/// Borrows the AppKit window on the main thread. HuxerUI owns the window and its close path.
+/// @param window Handle for the window to query.
+/// @return The NSWindow without transferring ownership, or null if there is no live AppKit attachment.
+/// Query again after deferred work. Retaining the object does not extend its HuxerUI attachment.
+/// @throws std::logic_error If called off the original live application's thread.
+NSWindow* GetPlatformWindow(const WindowHandle& window);
 
 /// Describes the AppKit lifecycle of one registered PlatformView type.
 ///

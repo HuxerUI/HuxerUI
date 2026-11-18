@@ -34,6 +34,7 @@
 #include <huxerui/app.h>
 #include <huxerui/clipboard.h>
 #include <huxerui/file.h>
+#include <huxerui/linux/platform_registry.h>
 #include <huxerui/resource.h>
 #include <huxerui/window.h>
 
@@ -1197,6 +1198,10 @@ public:
     RequestFrameAt(Now());
   }
 
+  GtkWindow* Window() const noexcept {
+    return window_;
+  }
+
   void RequestFrameAt(double deadline) override {
     if (const std::optional<double> scheduled =
             frame_coordinator_.Request(deadline, Now(), drawing_area_ != nullptr && running_)) {
@@ -2108,3 +2113,12 @@ int RunPlatformApplication(const Application& application) {
 }
 
 } // namespace huxerui::detail
+
+namespace huxerui::linux {
+
+GtkWindow* GetPlatformWindow(const WindowHandle& window) {
+  auto* attachment = dynamic_cast<detail::LinuxUiWindow*>(detail::WindowService::AttachedWindow(window));
+  return attachment ? attachment->Window() : nullptr;
+}
+
+} // namespace huxerui::linux

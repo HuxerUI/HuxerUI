@@ -24,8 +24,11 @@
 #include <emscripten/eventloop.h>
 #include <emscripten/val.h>
 
+#include <huxerui/web/platform_registry.h>
+
 #include "internal_access.h"
 #include "application/platform_frame_internal.h"
+#include "application/window_internal.h"
 #include "resources/resource_internal.h"
 #include "text/text_internal.h"
 #include "web_application_internal.h"
@@ -1099,6 +1102,10 @@ public:
     text_input_.Reset();
   }
 
+  val RootElement() const {
+    return platform_ready_ && root_["isConnected"].as<bool>() ? root_ : val::null();
+  }
+
   void RequestFrameAt(double deadline) override {
     if (const std::optional<double> scheduled = frame_coordinator_.Request(deadline, Now(), platform_ready_)) {
       Schedule(*scheduled);
@@ -1393,6 +1400,15 @@ void ShutdownWebApplication() {
 void EnsureWebPlatformLinked() {}
 
 } // namespace huxerui::detail
+
+namespace huxerui::web {
+
+emscripten::val GetWindowRootElement(const WindowHandle& window) {
+  auto* attachment = dynamic_cast<huxerui::detail::WebUiWindow*>(huxerui::detail::WindowService::AttachedWindow(window));
+  return attachment ? attachment->RootElement() : emscripten::val::null();
+}
+
+} // namespace huxerui::web
 
 extern "C" {
 

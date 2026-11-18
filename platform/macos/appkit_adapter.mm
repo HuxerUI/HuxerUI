@@ -1404,6 +1404,15 @@ int RunPlatformApplication(const Application& application) {
 
 } // namespace huxerui::detail
 
+namespace huxerui::macos {
+
+NSWindow* GetPlatformWindow(const WindowHandle& window) {
+  auto* attachment = dynamic_cast<huxerui::detail::MacUiWindow*>(huxerui::detail::WindowService::AttachedWindow(window));
+  return attachment ? attachment->Window() : nil;
+}
+
+} // namespace huxerui::macos
+
 namespace huxerui::macos::detail {
 
 NSWindow* GetAppKitWindow(UiWindow& ui_window) {
