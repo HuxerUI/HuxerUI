@@ -366,6 +366,7 @@ The Web shell owns the HTML document and host-element mount code rather than hid
 
 `run` accepts exactly one enabled platform and performs a build before launch.
 Windows starts the executable, macOS opens the application bundle, desktop Web hosts delegate the generated HTML entry point to `emrun`, Android installs and launches the generated APK, and iOS uses `simctl` for a selected booted Simulator and `devicectl` for a paired physical device.
+iOS discovery uses CoreDevice IDs for physical devices and treats `simctl` as authoritative for simulators. Each device ID appears once, with a ready entry preferred among duplicate reports from the same tool.
 On Windows hosts, the Web driver asks `emrun` to open its URL through `explorer.exe` so the operating system selects the default browser without relying on Python browser discovery.
 On Android hosts, the Web driver binds a Python standard-library server to an available loopback port, opens the generated entry URL through `termux-open`, and keeps the server in the foreground until interruption.
 This path never selects Emscripten's ADB-backed Android mode or exposes the server to another network interface.

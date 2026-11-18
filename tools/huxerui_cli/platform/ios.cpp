@@ -516,37 +516,57 @@ public:
   }
 
   std::vector<PlatformDevice> DiscoverDevices(const EnvironmentRequest&) const override {
-    const ProcessCommand physical_command{
-        "xcrun",
-        {
-            "devicectl",
-            "list",
-            "devices",
-            "--hide-default-columns",
-            "--columns",
-            "name",
-            "identifier",
-            "state",
-            "udid",
-            "--hide-headers",
-        },
-        {},
+    const auto list_physical = [](bool filter_simulators) {
+      ProcessCommand command{
+          "xcrun",
+          {
+              "devicectl",
+              "list",
+              "devices",
+              "--hide-default-columns",
+              "--columns",
+              "name",
+              filter_simulators ? "CoreDevice ID" : "identifier",
+              "state",
+              "udid",
+              "--hide-headers",
+          },
+          {},
+      };
+      if (filter_simulators) {
+        command.arguments.insert(command.arguments.end(), {"--filter", "Reality = 'physical'"});
+      }
+      return RunProcessCapture(command);
     };
     const ProcessCommand simulator_command{"xcrun", {"simctl", "list", "devices", "available"}, {}};
-    const ProcessResult physical_result = RunProcessCapture(physical_command);
+    ProcessResult physical_result = list_physical(true);
+    if (physical_result.exit_code != 0) {
+      // Older devicectl versions expose the CoreDevice UUID in the Identifier column.
+      physical_result = list_physical(false);
+    }
     const ProcessResult simulator_result = RunProcessCapture(simulator_command);
     if (physical_result.exit_code != 0 && simulator_result.exit_code != 0) {
       throw std::runtime_error("cannot discover iOS devices through devicectl or simctl");
     }
 
     std::vector<PlatformDevice> devices;
+    const auto merge = [&devices](std::vector<PlatformDevice> discovered) {
+      for (PlatformDevice& device : discovered) {
+        const auto existing = std::ranges::find(devices, device.id, &PlatformDevice::id);
+        if (existing == devices.end()) {
+          devices.push_back(std::move(device));
+        } else if (existing->kind != device.kind ||
+                   (device.state == DeviceState::Ready && existing->state != DeviceState::Ready)) {
+          *existing = std::move(device);
+        }
+      }
+    };
     if (physical_result.exit_code == 0) {
-      devices = ParseIosPhysicalDevices(physical_result.output);
+      merge(ParseIosPhysicalDevices(physical_result.output));
     }
     if (simulator_result.exit_code == 0) {
-      std::vector<PlatformDevice> simulators = ParseIosSimulatorDevices(simulator_result.output);
-      devices.insert(devices.end(), std::make_move_iterator(simulators.begin()),
-                     std::make_move_iterator(simulators.end()));
+      // simctl owns the kind and state of simulators, including any also reported by devicectl.
+      merge(ParseIosSimulatorDevices(simulator_result.output));
     }
     return devices;
   }
@@ -675,14 +695,22 @@ std::vector<PlatformDevice> ParseIosPhysicalDevices(std::string_view output) {
       continue;
     }
     const std::string_view value(line);
-    const std::string_view name = Trim(value.substr(0, *identifier));
+    std::string_view name = Trim(value.substr(0, *identifier));
     const std::string_view details = Trim(value.substr(*identifier + 36));
-    const std::size_t destination_separator = details.find_last_of(" \t");
-    if (destination_separator == std::string_view::npos) {
-      continue;
+    std::string_view state;
+    std::string_view destination = details;
+    if (const auto separator = details.find_last_of(" \t"); separator != std::string_view::npos) {
+      state = Trim(details.substr(0, separator));
+      destination = details.substr(separator + 1);
+    } else {
+      // The explicit CoreDevice ID column follows State in the newer table.
+      const auto state_separator = name.rfind("  ");
+      if (state_separator == std::string_view::npos) {
+        continue;
+      }
+      state = Trim(name.substr(state_separator + 2));
+      name = Trim(name.substr(0, state_separator));
     }
-    const std::string_view state = Trim(details.substr(0, destination_separator));
-    const std::string_view destination = Trim(details.substr(destination_separator + 1));
     if (destination.empty()) {
       continue;
     }

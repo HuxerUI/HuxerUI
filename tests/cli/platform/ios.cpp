@@ -1,5 +1,7 @@
 #include "support.h"
 
+#include <cstdlib>
+
 using namespace huxerui::cli::test;
 
 TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
@@ -384,3 +386,72 @@ TEST_CASE("HuxerUICliParsesIosDeviceStates") {
       }
   );
 }
+
+#if !defined(_WIN32)
+TEST_CASE("HuxerUICliDiscoversOneDestinationPerIosDevice") {
+  using namespace huxerui::cli;
+  bool legacy = false;
+  SECTION("devicectl supports physical-device filtering") {}
+  SECTION("devicectl requires the legacy device table") {
+    legacy = true;
+  }
+
+  TemporaryDirectory temporary;
+  const auto xcrun = temporary.Path() / "xcrun";
+  {
+    std::ofstream script(xcrun);
+    script << "#!/bin/sh\ncase \"$1 $2 $3\" in\n  'devicectl list devices')\n";
+    if (legacy) {
+      script << R"(    case " $* " in *" --filter "*) exit 1 ;; esac
+    printf '%s\n' \
+      'Paired iPhone  AC622B12-7BDD-5F92-9091-A0673B827C3A   available (paired)   00008130-000C048A1A90001C' \
+      'Stale simulator  AE3792D8-0370-4B69-94F4-FF5A26C51A38   unavailable   AE3792D8-0370-4B69-94F4-FF5A26C51A38'
+)";
+    } else {
+      script << R"(    case " $* " in
+      *" CoreDevice ID "*" --filter Reality = 'physical' "*) ;;
+      *) exit 1 ;;
+    esac
+    printf '%s\n' \
+      'Paired iPhone   available (paired)   AC622B12-7BDD-5F92-9091-A0673B827C3A   00008130-000C048A1A90001C'
+)";
+    }
+    script << R"(    ;;
+  'simctl list devices')
+    printf '%s\n' '-- iOS 26.5 --' \
+      '    iPad (AE3792D8-0370-4B69-94F4-FF5A26C51A38) (Shutdown)' \
+      '-- iOS 27.2 --' \
+      '    iPad (AE3792D8-0370-4B69-94F4-FF5A26C51A38) (Booted)' \
+      '    iPhone (14C02540-D279-474E-8D33-06363B85A5B6) (Shutdown)'
+    ;;
+  *) exit 1 ;;
+esac
+)";
+  }
+  std::filesystem::permissions(xcrun, std::filesystem::perms::owner_exec, std::filesystem::perm_options::add);
+
+  struct RestorePath {
+    std::optional<std::string> value = ReadEnvironmentVariable("PATH");
+    ~RestorePath() {
+      if (value) {
+        setenv("PATH", value->c_str(), 1);
+      } else {
+        unsetenv("PATH");
+      }
+    }
+  } previous_path;
+  SetProcessEnvironmentVariable("PATH", temporary.Path().string() + ":" + previous_path.value.value_or(""));
+
+  const PlatformDriver* ios = FindPlatformDriver("ios");
+  REQUIRE(ios != nullptr);
+  REQUIRE(ios->DiscoverDevices({}) ==
+          std::vector<PlatformDevice>{
+              {"AC622B12-7BDD-5F92-9091-A0673B827C3A", "Paired iPhone", DeviceState::Ready, DeviceKind::Physical,
+               "00008130-000C048A1A90001C"},
+              {"AE3792D8-0370-4B69-94F4-FF5A26C51A38", "iPad — iOS 27.2", DeviceState::Ready,
+               DeviceKind::Simulator, "AE3792D8-0370-4B69-94F4-FF5A26C51A38"},
+              {"14C02540-D279-474E-8D33-06363B85A5B6", "iPhone — iOS 27.2", DeviceState::Offline,
+               DeviceKind::Simulator, "14C02540-D279-474E-8D33-06363B85A5B6"},
+          });
+}
+#endif
