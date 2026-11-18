@@ -9,6 +9,8 @@ using namespace huxerui;
 
 #if defined(__ANDROID__)
 constexpr float platform_text_field_height = 48.0F;
+#elif defined(__linux__)
+constexpr float platform_text_field_height = 36.0F;
 #else
 constexpr float platform_text_field_height = 28.0F;
 #endif

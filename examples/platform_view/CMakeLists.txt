@@ -26,6 +26,9 @@ elseif (EMSCRIPTEN)
     set_property(TARGET example_platform_view APPEND PROPERTY
             LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/platform_text_field_web.js"
     )
+elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(example_platform_view PRIVATE platform_text_field_linux.cpp)
+    target_link_libraries(example_platform_view PRIVATE PkgConfig::HUXERUI_GTK4)
 else ()
     message(FATAL_ERROR "HuxerUI platform view example is not implemented for this platform")
 endif ()

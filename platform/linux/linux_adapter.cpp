@@ -44,6 +44,7 @@
 #include "linux_file_internal.h"
 #include "linux_file_picker_internal.h"
 #include "linux_http_internal.h"
+#include "linux_platform_view.h"
 #include "linux_renderer.h"
 #include "linux_system_tray.h"
 #include "linux_text_input.h"
@@ -51,6 +52,7 @@
 #include "application/platform_frame_internal.h"
 #include "resources/resource_internal.h"
 #include "runtime/gesture_internal.h"
+#include "runtime/mounted_node_internal.h"
 #include "text/text_internal.h"
 #include "application/window_internal.h"
 #include "application/application_internal.h"
@@ -457,9 +459,11 @@ using HuxerUICanvasSnapshot = void (*)(GtkSnapshot* snapshot, int width, int hei
 
 struct HuxerUICanvas {
   GtkWidget parent_instance;
-  HuxerUICanvasSnapshot snapshot = nullptr;
-  void (*style_changed)(gpointer data) = nullptr;
-  gpointer data = nullptr;
+  HuxerUICanvasSnapshot snapshot;
+  void (*allocate)(int width, int height, gpointer data);
+  void (*style_changed)(gpointer data);
+  void (*destroy)(GtkWidget* widget, gpointer data);
+  gpointer data;
 };
 
 struct HuxerUICanvasClass {
@@ -486,16 +490,68 @@ void HuxerUICanvasStyleChanged(GtkWidget* widget, GtkCssStyleChange* change) {
 void huxerui_canvas_class_init(HuxerUICanvasClass* canvas_class) {
   GTK_WIDGET_CLASS(canvas_class)->snapshot = HuxerUICanvasSnapshotFrame;
   GTK_WIDGET_CLASS(canvas_class)->css_changed = HuxerUICanvasStyleChanged;
+  GTK_WIDGET_CLASS(canvas_class)->size_allocate = [](GtkWidget* widget, int width, int height, int) {
+    auto* canvas = reinterpret_cast<HuxerUICanvas*>(widget);
+    if (canvas->data) {
+      canvas->allocate(width, height, canvas->data);
+    }
+  };
+  G_OBJECT_CLASS(canvas_class)->dispose = [](GObject* object) {
+    // Release the canvas input owner before unparenting its GTK input target.
+    auto* canvas = reinterpret_cast<HuxerUICanvas*>(object);
+    if (canvas->data) {
+      canvas->destroy(GTK_WIDGET(object), canvas->data);
+    }
+    while (GtkWidget* child = gtk_widget_get_first_child(GTK_WIDGET(object))) {
+      gtk_widget_unparent(child);
+    }
+    G_OBJECT_CLASS(huxerui_canvas_parent_class)->dispose(object);
+  };
 }
 
 void huxerui_canvas_init(HuxerUICanvas*) {}
 
-GtkWidget* CreateHuxerUICanvas(HuxerUICanvasSnapshot snapshot, void (*style_changed)(gpointer), gpointer data) {
+GtkWidget* CreateHuxerUICanvas(HuxerUICanvasSnapshot snapshot, void (*allocate)(int, int, gpointer),
+                              void (*style_changed)(gpointer), void (*destroy)(GtkWidget*, gpointer), gpointer data) {
   auto* canvas = static_cast<HuxerUICanvas*>(g_object_new(huxerui_canvas_get_type(), nullptr));
   canvas->snapshot = snapshot;
+  canvas->allocate = allocate;
   canvas->style_changed = style_changed;
+  canvas->destroy = destroy;
   canvas->data = data;
   return GTK_WIDGET(canvas);
+}
+
+struct HuxerUIInput {
+  GtkWidget parent_instance;
+  bool (*contains)(Point point, gpointer data);
+  gpointer data;
+};
+
+struct HuxerUIInputClass {
+  GtkWidgetClass parent_class;
+};
+
+G_DEFINE_TYPE(HuxerUIInput, huxerui_input, GTK_TYPE_WIDGET)
+
+void huxerui_input_class_init(HuxerUIInputClass* input_class) {
+  GtkWidgetClass* widget_class = GTK_WIDGET_CLASS(input_class);
+  widget_class->contains = [](GtkWidget* widget, double x, double y) -> gboolean {
+    auto* input = reinterpret_cast<HuxerUIInput*>(widget);
+    return GTK_WIDGET_CLASS(huxerui_input_parent_class)->contains(widget, x, y) &&
+           (!input->data || input->contains({static_cast<float>(x), static_cast<float>(y)}, input->data));
+  };
+  gtk_widget_class_set_accessible_role(widget_class, GTK_ACCESSIBLE_ROLE_PRESENTATION);
+}
+
+void huxerui_input_init(HuxerUIInput*) {}
+
+GtkWidget* CreateHuxerUIInput(bool (*contains)(Point, gpointer), gpointer data) {
+  auto* input = static_cast<HuxerUIInput*>(g_object_new(huxerui_input_get_type(), nullptr));
+  input->contains = contains;
+  input->data = data;
+  gtk_widget_set_focusable(GTK_WIDGET(input), TRUE);
+  return GTK_WIDGET(input);
 }
 
 const char* linux_clipboard_text[] = {"text/plain;charset=utf-8", "text/plain", nullptr};
@@ -1177,7 +1233,7 @@ public:
     auto configuration = application.Resources()->Configuration();
     configuration.display_scale = static_cast<float>(gtk_widget_get_scale_factor(drawing_area_));
     text_input_.SetUiWindow(this);
-    file_drop_ = std::make_unique<LinuxFileDrop>(drawing_area_, *this, ui_dispatcher_->Bind());
+    file_drop_ = std::make_unique<LinuxFileDrop>(input_area_, *this, ui_dispatcher_->Bind());
     running_ = true;
     InitializeWindow(application, std::move(content), options, configuration);
     system_theme_ = std::make_shared<LinuxSystemTheme>();
@@ -1194,7 +1250,7 @@ public:
       }
     });
     UpdateRuntimeViewport(initial_size);
-    gtk_widget_grab_focus(drawing_area_);
+    gtk_widget_grab_focus(input_area_);
     RequestFrameAt(Now());
   }
 
@@ -1354,7 +1410,9 @@ private:
     gtk_window_set_decorated(window_, options.chrome_mode == WindowChromeMode::System);
     gtk_window_set_resizable(window_, options.resizable);
 
-    drawing_area_ = CreateHuxerUICanvas(Snapshot, StyleChanged, this);
+    drawing_area_ = CreateHuxerUICanvas(Snapshot, Allocate, StyleChanged, ClientWidgetDestroyed, this);
+    input_area_ = CreateHuxerUIInput(ContainsInput, this);
+    gtk_widget_set_parent(input_area_, drawing_area_);
     if (options.minimum_size.has_value()) {
       gtk_widget_set_size_request(
           GTK_WIDGET(drawing_area_),
@@ -1362,16 +1420,15 @@ private:
           std::max(1, static_cast<int>(std::ceil(options.minimum_size->height)))
       );
     }
-    gtk_widget_set_focusable(GTK_WIDGET(drawing_area_), TRUE);
     gtk_window_set_child(window_, GTK_WIDGET(drawing_area_));
-    g_signal_connect(drawing_area_, "destroy", G_CALLBACK(ClientWidgetDestroyed), this);
-    text_input_.SetClientWidget(GTK_WIDGET(drawing_area_));
+    text_input_.SetClientWidget(input_area_);
 
     g_signal_connect(window_, "close-request", G_CALLBACK(CloseRequested), this);
     g_signal_connect(window_, "destroy", G_CALLBACK(Destroyed), this);
     g_signal_connect(window_, "map", G_CALLBACK(WindowMapped), this);
     g_signal_connect(window_, "unmap", G_CALLBACK(WindowUnmapped), this);
     g_signal_connect(window_, "notify::is-active", G_CALLBACK(WindowActiveChanged), this);
+    g_signal_connect(window_, "notify::focus-widget", G_CALLBACK(WindowFocusChanged), this);
     g_signal_connect(window_, "notify::maximized", G_CALLBACK(WindowResizeStateChanged), this);
     g_signal_connect(window_, "notify::fullscreened", G_CALLBACK(WindowResizeStateChanged), this);
     g_signal_connect(window_, "notify::resizable", G_CALLBACK(WindowResizeStateChanged), this);
@@ -1379,20 +1436,20 @@ private:
 
     GtkEventController* pointer = gtk_event_controller_legacy_new();
     g_signal_connect(pointer, "event", G_CALLBACK(PointerEventReceived), this);
-    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), pointer);
+    gtk_widget_add_controller(input_area_, pointer);
 
     GtkGesture* touch = gtk_gesture_click_new();
     gtk_gesture_single_set_touch_only(GTK_GESTURE_SINGLE(touch), TRUE);
     g_signal_connect(touch, "pressed", G_CALLBACK(TouchPressed), this);
     g_signal_connect(touch, "released", G_CALLBACK(TouchReleased), this);
     g_signal_connect(touch, "cancel", G_CALLBACK(PointerCanceled), this);
-    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), GTK_EVENT_CONTROLLER(touch));
+    gtk_widget_add_controller(input_area_, GTK_EVENT_CONTROLLER(touch));
 
     GtkEventController* motion = gtk_event_controller_motion_new();
     g_signal_connect(motion, "enter", G_CALLBACK(PointerEntered), this);
     g_signal_connect(motion, "motion", G_CALLBACK(PointerMoved), this);
     g_signal_connect(motion, "leave", G_CALLBACK(PointerLeft), this);
-    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), motion);
+    gtk_widget_add_controller(input_area_, motion);
 
     const char* formats[]{application_drag_format};
     GtkDropTargetAsync* drop = gtk_drop_target_async_new(gdk_content_formats_new(formats, 1), GDK_ACTION_COPY);
@@ -1401,24 +1458,28 @@ private:
     g_signal_connect(drop, "drag-motion", G_CALLBACK(ApplicationDragMoved), this);
     g_signal_connect(drop, "drag-leave", G_CALLBACK(ApplicationDragLeft), this);
     g_signal_connect(drop, "drop", G_CALLBACK(ApplicationDragDropped), this);
-    gtk_widget_add_controller(drawing_area_, GTK_EVENT_CONTROLLER(drop));
+    gtk_widget_add_controller(input_area_, GTK_EVENT_CONTROLLER(drop));
 
     GtkEventController* scroll = gtk_event_controller_scroll_new(
         static_cast<GtkEventControllerScrollFlags>(GTK_EVENT_CONTROLLER_SCROLL_BOTH_AXES |
                                                    GTK_EVENT_CONTROLLER_SCROLL_DISCRETE)
     );
     g_signal_connect(scroll, "scroll", G_CALLBACK(Scrolled), this);
-    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), scroll);
+    gtk_widget_add_controller(input_area_, scroll);
 
     GtkEventController* key = gtk_event_controller_key_new();
     g_signal_connect(key, "key-pressed", G_CALLBACK(KeyPressed), this);
     g_signal_connect(key, "key-released", G_CALLBACK(KeyReleased), this);
-    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), key);
+    gtk_widget_add_controller(input_area_, key);
+
+    GtkEventController* platform_key = gtk_event_controller_key_new();
+    g_signal_connect(platform_key, "key-pressed", G_CALLBACK(PlatformViewTabPressed), this);
+    gtk_widget_add_controller(drawing_area_, platform_key);
 
     GtkEventController* focus = gtk_event_controller_focus_new();
     g_signal_connect(focus, "enter", G_CALLBACK(FocusEntered), this);
     g_signal_connect(focus, "leave", G_CALLBACK(FocusLeft), this);
-    gtk_widget_add_controller(GTK_WIDGET(drawing_area_), focus);
+    gtk_widget_add_controller(input_area_, focus);
   }
 
   void ScheduleFrame(double deadline) {
@@ -1444,7 +1505,6 @@ private:
   }
 
   void CommitFrame() {
-    ExecutionGuard guard(InternalAccess::WindowExecution(*this));
     frame_source_ = 0;
     if (!IsInitialized()) {
       return;
@@ -1453,6 +1513,13 @@ private:
       // Keep the previous frame's text scale until its snapshot has finished, then rebuild all text geometry together.
       RefreshTextDpi();
       const FrameCommit& commit = BuildFrameOrErrorPage();
+      if (!platform_views_ && RenderSceneHasPlatformViews(commit.render_frame.scene.root)) {
+        platform_views_ =
+            std::make_unique<LinuxPlatformViews>(*this, PlatformRegistry(), window_, drawing_area_, input_area_);
+      }
+      if (platform_views_) {
+        platform_views_->Commit(commit.render_frame);
+      }
       committed_frame_ = &commit.render_frame;
       frame_coordinator_.MarkPaintPending();
       gtk_widget_queue_draw(GTK_WIDGET(drawing_area_));
@@ -1475,7 +1542,7 @@ private:
     }
     frame_coordinator_.BeginPaint();
     try {
-      renderer_.Snapshot(snapshot, *committed_frame_);
+      renderer_.Snapshot(snapshot, *committed_frame_, platform_views_.get());
     } catch (...) {
       static_cast<LinuxRuntime&>(ApplicationRuntime()).ReportFailure(std::current_exception());
     }
@@ -1566,15 +1633,15 @@ private:
   }
 
   void ApplyPointerCursor() noexcept {
-    if (drawing_area_ == nullptr) return;
+    if (input_area_ == nullptr) return;
     PointerCursorKind kind = requested_pointer_cursor_;
     if (pointer_inside_ && pressed_buttons_ == PointerButton::None) {
       if (const auto edge = HitTestResizeEdge(last_pointer_position_)) kind = LinuxResizePointerCursor(*edge);
     }
     const char* name = LinuxPointerCursorName(kind);
-    GdkCursor* cursor = gtk_widget_get_cursor(drawing_area_);
+    GdkCursor* cursor = gtk_widget_get_cursor(input_area_);
     if (cursor == nullptr || g_strcmp0(gdk_cursor_get_name(cursor), name) != 0) {
-      gtk_widget_set_cursor_from_name(drawing_area_, name);
+      gtk_widget_set_cursor_from_name(input_area_, name);
     }
   }
 
@@ -1675,9 +1742,11 @@ private:
     }
 
     text_input_.Reset();
+    platform_views_.reset();
     DetachToplevelState();
     key_tracker_.Reset();
     committed_frame_ = nullptr;
+    DetachInputWidget();
     if (drawing_area_ != nullptr) reinterpret_cast<HuxerUICanvas*>(drawing_area_)->data = nullptr;
     renderer_.Discard();
     if (window_ != nullptr) {
@@ -1687,8 +1756,22 @@ private:
     }
   }
 
+  void DetachInputWidget() noexcept {
+    if (input_area_) {
+      reinterpret_cast<HuxerUIInput*>(input_area_)->data = nullptr;
+      input_area_ = nullptr;
+    }
+  }
+
   static gboolean FrameReady(gpointer data) {
-    static_cast<LinuxUiWindow*>(data)->CommitFrame();
+    auto& self = *static_cast<LinuxUiWindow*>(data);
+    ExecutionGuard guard(InternalAccess::WindowExecution(self));
+    try {
+      self.CommitFrame();
+    } catch (...) {
+      self.committed_frame_ = nullptr;
+      static_cast<LinuxRuntime&>(self.ApplicationRuntime()).ReportFailure(std::current_exception());
+    }
     return G_SOURCE_REMOVE;
   }
 
@@ -1697,6 +1780,22 @@ private:
     ExecutionGuard guard(InternalAccess::WindowExecution(self));
     self.UpdateRuntimeViewport({static_cast<float>(width), static_cast<float>(height)});
     self.DrawFrame(snapshot);
+  }
+
+  static void Allocate(int width, int height, gpointer data) {
+    auto& self = *static_cast<LinuxUiWindow*>(data);
+    if (self.input_area_) {
+      gtk_widget_allocate(self.input_area_, width, height, -1, nullptr);
+    }
+    if (self.platform_views_) {
+      self.platform_views_->Allocate(width, height);
+    }
+  }
+
+  static bool ContainsInput(Point point, gpointer data) {
+    const auto& self = *static_cast<LinuxUiWindow*>(data);
+    return !self.IsInitialized() || !self.platform_views_ || self.HitTestResizeEdge(point).has_value() ||
+           self.platform_views_->TargetsHuxerUI(point);
   }
 
   static void StyleChanged(gpointer data) {
@@ -1720,7 +1819,10 @@ private:
     auto& self = *static_cast<LinuxUiWindow*>(data);
     ExecutionGuard guard(InternalAccess::WindowExecution(self));
     self.text_input_.Reset();
+    self.file_drop_.reset();
+    self.platform_views_.reset();
     reinterpret_cast<HuxerUICanvas*>(widget)->data = nullptr;
+    self.DetachInputWidget();
     if (self.drawing_area_ != nullptr && GTK_WIDGET(self.drawing_area_) == widget) {
       self.drawing_area_ = nullptr;
     }
@@ -1735,6 +1837,7 @@ private:
     self.toplevel_ = nullptr;
     self.window_ = nullptr;
     self.drawing_area_ = nullptr;
+    self.input_area_ = nullptr;
   }
 
   static void WindowMapped(GtkWidget*, gpointer data) {
@@ -1755,6 +1858,19 @@ private:
 
   static void WindowActiveChanged(GObject*, GParamSpec*, gpointer data) {
     static_cast<LinuxUiWindow*>(data)->UpdateLifecycleState();
+  }
+
+  static void WindowFocusChanged(GObject*, GParamSpec*, gpointer data) {
+    auto& self = *static_cast<LinuxUiWindow*>(data);
+    ExecutionGuard guard(InternalAccess::WindowExecution(self));
+    if (!self.platform_views_ || !self.IsInitialized()) {
+      return;
+    }
+    try {
+      self.platform_views_->SynchronizeFocusFromGtk();
+    } catch (...) {
+      static_cast<LinuxRuntime&>(self.ApplicationRuntime()).ReportFailure(std::current_exception());
+    }
   }
 
   static void ToplevelLayoutChanged(GdkSurface* surface, int, int, gpointer data) {
@@ -2041,7 +2157,11 @@ private:
     if (!press.dispatch) {
       return TRUE;
     }
-    return self.SendKey(KeyEventType::Down, key_value, state, event, press.repeat);
+    const bool handled = self.SendKey(KeyEventType::Down, key_value, state, event, press.repeat);
+    if (self.platform_views_ && handled && self.IsInitialized()) {
+      self.platform_views_->ApplyFocusToGtk((state & GDK_SHIFT_MASK) != 0 || key_value == GDK_KEY_ISO_Left_Tab);
+    }
+    return handled;
   }
 
   static void KeyReleased(
@@ -2052,6 +2172,29 @@ private:
     GdkEvent* event = gtk_event_controller_get_current_event(GTK_EVENT_CONTROLLER(controller));
     if (self.key_tracker_.Release(key_code, self.text_input_.FilterKeyEvent(event))) {
       HUXERUI_DISCARD(self.SendKey(KeyEventType::Up, key_value, state, event));
+    }
+  }
+
+  static gboolean PlatformViewTabPressed(
+      GtkEventControllerKey*, guint key, guint, GdkModifierType state, gpointer data
+  ) {
+    auto& self = *static_cast<LinuxUiWindow*>(data);
+    if (!self.IsInitialized() || !self.platform_views_ ||
+        (key != GDK_KEY_Tab && key != GDK_KEY_ISO_Left_Tab && key != GDK_KEY_KP_Tab) ||
+        (state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK | GDK_META_MASK))) {
+      return FALSE;
+    }
+    ExecutionGuard guard(InternalAccess::WindowExecution(self));
+    try {
+      const bool reverse = key == GDK_KEY_ISO_Left_Tab || (state & GDK_SHIFT_MASK) != 0;
+      const bool handled = self.platform_views_->HandleTab(reverse);
+      if (handled && self.IsInitialized()) {
+        self.platform_views_->ApplyFocusToGtk(reverse);
+      }
+      return handled;
+    } catch (...) {
+      static_cast<LinuxRuntime&>(self.ApplicationRuntime()).ReportFailure(std::current_exception());
+      return TRUE;
     }
   }
 
@@ -2071,10 +2214,12 @@ private:
   std::shared_ptr<LinuxSystemTheme> system_theme_;
   GtkWindow* window_ = nullptr;
   GtkWidget* drawing_area_ = nullptr;
+  GtkWidget* input_area_ = nullptr;
   GdkToplevel* toplevel_ = nullptr;
   LinuxRenderer renderer_;
   LinuxTextInput text_input_;
   std::unique_ptr<LinuxFileDrop> file_drop_;
+  std::unique_ptr<LinuxPlatformViews> platform_views_;
   FrameCoordinator frame_coordinator_;
   const RenderFrame* committed_frame_ = nullptr;
   guint frame_source_ = 0;
@@ -2117,7 +2262,8 @@ int RunPlatformApplication(const Application& application) {
 namespace huxerui::linux {
 
 GtkWindow* GetPlatformWindow(const WindowHandle& window) {
-  auto* attachment = dynamic_cast<detail::LinuxUiWindow*>(detail::WindowService::AttachedWindow(window));
+  auto* attachment = dynamic_cast<huxerui::detail::LinuxUiWindow*>(
+      huxerui::detail::WindowService::AttachedWindow(window));
   return attachment ? attachment->Window() : nullptr;
 }
 

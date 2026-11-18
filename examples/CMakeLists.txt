@@ -47,6 +47,6 @@ if (WIN32 OR (APPLE AND NOT IOS) OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(desktop_lyrics)
 endif ()
 
-if (WIN32 OR APPLE OR ANDROID OR EMSCRIPTEN)
+if (WIN32 OR APPLE OR ANDROID OR EMSCRIPTEN OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(platform_view)
 endif ()

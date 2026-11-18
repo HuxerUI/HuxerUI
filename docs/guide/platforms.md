@@ -9,7 +9,7 @@ Each backend uses platform lifecycle, input, text, accessibility, file, network,
 |---|---|---:|---:|---:|---:|---:|---:|---:|
 | Windows | Direct2D and DirectWrite | Yes | UI Automation | Yes | Yes | Camera, microphone, location, notifications | Registered Win32 toast identity | Yes |
 | macOS | Core Graphics and Core Text | Yes | AppKit accessibility | Yes | Yes | Application permissions | User Notifications | Yes |
-| Linux | GSK, Cairo, and Pango | Yes | Not supported | No | Yes | Unavailable | Unavailable | StatusNotifierItem host |
+| Linux | GSK, Cairo, and Pango | Yes | GTK PlatformViews with GTK accessibility enabled | Yes | Yes | Unavailable | Unavailable | StatusNotifierItem host |
 | Web | Canvas 2D and browser text metrics | Yes | Not supported | Yes | Yes | Browser permissions, limited requests | Unavailable | No |
 | Android | Android Canvas and StaticLayout | Yes | AccessibilityNodeInfo | Yes | Yes | Application permissions | Configured NotificationManager | No |
 | iOS | Core Graphics and Core Text | Yes | UIKit accessibility | Yes | Yes | Application permissions | User Notifications | No |
@@ -161,7 +161,12 @@ Release CI builds and tests on Ubuntu 24.04; meeting the glibc baseline alone do
 Application packages retain the distribution-owned runtime stack and may require newer system ABI versions according to their binaries; see [Packaging Applications](packaging.md#desktop-system-requirements).
 
 Linux builds are provided for x86_64 and aarch64 hosts.
-PlatformView is not implemented, and a platform accessibility bridge is not supported.
+Include `<huxerui/linux/platform_registry.h>` and register a `linux::PlatformViewFactory` in an application hook to embed a GTK widget.
+The widget participates in the window's paint order and rectangular clipping and handles its own keyboard input and input method.
+Its instance owns a strong reference to the unparented widget returned by the factory. Widgets with their own GdkSurface, such as GtkWindow, cannot serve as the PlatformView root.
+See `example_platform_view` for a controlled GtkEntry.
+
+Linux does not publish HuxerUI semantics through GTK. If the application or environment explicitly enables GTK accessibility, GTK exposes the embedded widgets through its own accessibility tree.
 System tray presentation requires an active StatusNotifierItem watcher and host; `IsAvailable()` tracks hosts appearing or disappearing at runtime.
 
 Native libraries include `<huxerui/linux/external_texture.h>` for `linux::PixelTexture`, `linux::GlTexture`, and `linux::GdkTexture`.

@@ -1326,7 +1326,7 @@ Platform adapters preserve the same contract through platform-specific compositi
 | --- | --- |
 | Windows | One transparent DirectComposition surface replays every HuxerUI slice, while child HWNDs remain beneath it. Each placement clears a rectangular aperture in command order, and later HuxerUI drawing may cover that aperture without allocating a surface per slice. |
 | macOS | Transparent HuxerUI slice views or layers and NSViews are retained as ordered siblings under one host NSView. AppKit hierarchy changes occur outside `drawRect:`. |
-| Linux | PlatformView hosting is not implemented. |
+| Linux | Retained GtkWidget children are clipped and inserted between Cairo and GSK drawing in one GtkSnapshot. A transparent input widget uses UiWindow hit testing to admit GTK child picks only where platform content owns input. |
 | Web | HuxerUI Canvas slices and DOM PlatformViews are ordered siblings in one isolated CSS stacking context. The Web host coordinates DOM event targeting with UiWindow hit testing. |
 | Android | The host is a ViewGroup that alternates HuxerUI slice replay with ordinary child drawing in committed order. A `TextureView` participates as a regular child, while any `SurfaceView` subtree is rejected because its system composition cannot preserve this Canvas order. |
 | iOS | Transparent HuxerUI slice views or layers and UIViews are retained as ordered siblings under one host UIView. CoreGraphics replay targets only damaged slices. |
@@ -1340,7 +1340,8 @@ Current shared tests cover payload invariants, per-surface registration, leaf la
 The macOS integration fixture covers PlatformView creation, property update, HuxerUI slice ordering, retained identity, unchanged placement, focus synchronization, accessibility identity resolution, removal, stale-event rejection, and disposal.
 Android focused tests cover semantic-anchor encoding, while the Android PlatformView example and device validation cover PlatformView creation, controlled updates, slice ordering, hit testing, focus and IME transfer, platform accessibility attachment, removal, and recreation.
 The Windows integration fixture covers PlatformView creation and update, retained identity across hiding, nested HWND focus and UI Automation resolution, stale-event rejection, presentation-delayed retirement, remount, and deterministic disposal.
-Each available platform adds an integration fixture with HuxerUI content below and above one PlatformView, verifies frontmost pointer ownership, platform focus and IME transfer, accessibility traversal through the anchor, retained platform state across recomposition and temporary hiding, and deterministic teardown.
+The Linux integration fixture covers GTK picking, controlled properties and events, clipping during scrolling, retained identity, and disposal. GTK can expose its own widget accessibility when enabled. The shared semantic anchor is not projected into GTK.
+Each available platform adds an integration fixture with HuxerUI content below and above one PlatformView, verifies frontmost pointer ownership, platform focus and IME transfer, accessibility traversal through the anchor where bridged, retained platform state across recomposition and temporary hiding, and deterministic teardown.
 Android integration rejects `SurfaceView` where system composition cannot preserve the shared order.
 Web integration validation covers DOM stacking, platform events, focus boundaries, and disposal across supported browsers.
 

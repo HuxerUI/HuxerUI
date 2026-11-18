@@ -10,6 +10,7 @@
 
 namespace huxerui::detail {
 
+class LinuxPlatformViews;
 class TextLayoutBackend;
 
 // Records the platform-neutral scene into GTK Snapshot nodes, using Cairo nodes
@@ -41,7 +42,7 @@ public:
   std::unique_ptr<TextLayoutBackend> CreatePlatformTextLayout(
       const AttributedText& text, const TextStyle& style, float max_width, const TextLayoutOptions& options);
 
-  void Snapshot(GtkSnapshot* snapshot, const RenderFrame& frame);
+  void Snapshot(GtkSnapshot* snapshot, const RenderFrame& frame, const LinuxPlatformViews* platform_views = nullptr);
 
 public:
   struct Impl;

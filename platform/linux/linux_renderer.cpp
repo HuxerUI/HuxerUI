@@ -31,6 +31,7 @@
 #include "graphics/bitmap_internal.h"
 #include "graphics/external_texture_internal.h"
 #include "linux_external_texture_internal.h"
+#include "linux_platform_view.h"
 #include "graphics/path_internal.h"
 #include "graphics/paint_internal.h"
 #include "resources/resource_internal.h"
@@ -1878,7 +1879,8 @@ GskPath* CreateGskPath(const Path& path) {
 
 class SnapshotScenePainter final {
 public:
-  SnapshotScenePainter(LinuxRenderer::Impl& impl, GtkSnapshot* snapshot) : impl_(impl), snapshot_(snapshot) {}
+  SnapshotScenePainter(LinuxRenderer::Impl& impl, GtkSnapshot* snapshot, const LinuxPlatformViews* platform_views)
+      : impl_(impl), snapshot_(snapshot), platform_views_(platform_views) {}
 
   void Draw(const RenderScene& scene) {
     if (scene.root != nullptr) {
@@ -2020,9 +2022,12 @@ private:
     gtk_snapshot_restore(snapshot_);
   }
 
-  void DrawCommand(CairoBatch& batch, const PaintCommand&, const PlacePlatformViewCommand&) {
+  void DrawCommand(CairoBatch& batch, const PaintCommand&, const PlacePlatformViewCommand& command) {
     Flush(batch);
-    throw std::logic_error("HuxerUI Linux adapter does not support PlatformView composition yet");
+    if (!platform_views_) {
+      throw std::logic_error("HuxerUI GTK PlatformView composition requires its window host");
+    }
+    platform_views_->SnapshotView(snapshot_, command);
   }
 
   void Flush(CairoBatch& batch) {
@@ -2076,6 +2081,7 @@ private:
 
   LinuxRenderer::Impl& impl_;
   GtkSnapshot* snapshot_ = nullptr;
+  const LinuxPlatformViews* platform_views_;
 };
 
 } // namespace
@@ -2178,11 +2184,11 @@ std::unique_ptr<TextLayoutBackend> LinuxRenderer::CreatePlatformTextLayout(
   return std::make_unique<PangoTextLayout>(impl_->context, text, style, max_width, options);
 }
 
-void LinuxRenderer::Snapshot(GtkSnapshot* snapshot, const RenderFrame& frame) {
+void LinuxRenderer::Snapshot(GtkSnapshot* snapshot, const RenderFrame& frame, const LinuxPlatformViews* platform_views) {
   if (snapshot == nullptr) {
     throw std::invalid_argument("HuxerUI Linux renderer requires a GTK snapshot");
   }
-  SnapshotScenePainter(*impl_, snapshot).Draw(frame.scene);
+  SnapshotScenePainter(*impl_, snapshot, platform_views).Draw(frame.scene);
 }
 
 } // namespace huxerui::detail
