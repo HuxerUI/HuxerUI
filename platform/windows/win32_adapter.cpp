@@ -1491,8 +1491,12 @@ private:
           )) {
         throw std::runtime_error("HuxerUI could not apply its custom Windows frame");
       }
-      const DWM_WINDOW_CORNER_PREFERENCE preference = DWMWCP_ROUND;
-      HUXERUI_DISCARD(DwmSetWindowAttribute(window_, DWMWA_WINDOW_CORNER_PREFERENCE, &preference, sizeof(preference)));
+      // SDKs before 22000 do not declare the corner preference identifiers; the documented attribute and
+      // value preserve Windows 11 rounding and leave Windows 10, which ignores the attribute, unchanged.
+      constexpr DWORD dwm_window_corner_preference = 33;
+      constexpr DWORD dwm_window_corner_round = 2;
+      DWORD preference = dwm_window_corner_round;
+      HUXERUI_DISCARD(DwmSetWindowAttribute(window_, dwm_window_corner_preference, &preference, sizeof(preference)));
     }
     dpi_ = static_cast<float>(win32_api_.WindowDpi(window_));
     accessibility_.SetDpiScale(DpiScale());
