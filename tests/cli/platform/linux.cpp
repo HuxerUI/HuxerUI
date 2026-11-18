@@ -8,7 +8,9 @@ TEST_CASE("HuxerUICliLinuxEnvironmentDiagnosisOwnsToolChecks") {
   }
   const huxerui::cli::PlatformDriver* linux = huxerui::cli::FindPlatformDriver("linux");
   REQUIRE(linux != nullptr);
-  const std::vector<huxerui::cli::EnvironmentDiagnostic> linux_diagnostics = linux->DiagnoseEnvironment();
+  huxerui::cli::EnvironmentRequest request;
+  request.generator = "Unix Makefiles";
+  const std::vector<huxerui::cli::EnvironmentDiagnostic> linux_diagnostics = linux->DiagnoseEnvironment(request);
   const auto has_linux_diagnostic = [&linux_diagnostics](std::string_view id) {
     return std::any_of(
         linux_diagnostics.begin(),
@@ -17,7 +19,7 @@ TEST_CASE("HuxerUICliLinuxEnvironmentDiagnosisOwnsToolChecks") {
     );
   };
   REQUIRE(has_linux_diagnostic("pkg-config"));
-  REQUIRE(has_linux_diagnostic("pkg:gtk4"));
+  REQUIRE(has_linux_diagnostic("make"));
   REQUIRE(has_linux_diagnostic("pkg:epoxy"));
   REQUIRE(has_linux_diagnostic("pkg:gio-2.0"));
   REQUIRE(has_linux_diagnostic("pkg:libsoup-3.0"));
@@ -29,7 +31,7 @@ TEST_CASE("HuxerUICliLinuxEnvironmentDiagnosisOwnsToolChecks") {
       [](const huxerui::cli::EnvironmentDiagnostic& diagnostic) { return diagnostic.id == "pkg:gtk4"; }
   );
   REQUIRE(gtk_diagnostic != linux_diagnostics.end());
-  REQUIRE(gtk_diagnostic->label.find("gtk4 >= 4.14") != std::string::npos);
+  REQUIRE(gtk_diagnostic->required_version == "4.14");
   REQUIRE_FALSE(has_linux_diagnostic("pkg:x11"));
   REQUIRE_FALSE(has_linux_diagnostic("pkg:egl"));
   REQUIRE_FALSE(has_linux_diagnostic("pkg:glesv2"));

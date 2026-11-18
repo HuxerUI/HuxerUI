@@ -222,15 +222,17 @@ TEST_CASE("MacFileAccessRestoresTheSavedDirectoryInANewRuntime") {
     };
 
     {
+      std::optional<IoResult<void>> saved;
       BookmarkPlatform platform(data);
       UiWindow runtime(MacFileReferenceApp, platform);
       runtime.BuildFrame();
-      bool saved = false;
       auto reference = detail::MakeMacFileReference(temporary.ChildURL(@"project"), false);
       mac_file_reference_tasks.Launch([reference, &saved]() -> Task<void> {
-        saved = (co_await reference.RememberAsync("workspace/工程")).Succeeded();
+        saved = co_await reference.RememberAsync("workspace/工程");
       });
-      REQUIRE(RunMainLoopUntil([&] { return saved; }));
+      REQUIRE(RunMainLoopUntil([&] { return saved.has_value(); }));
+      INFO((saved->Succeeded() ? std::string{} : saved->Error().message));
+      REQUIRE(saved->Succeeded());
     }
 
     {

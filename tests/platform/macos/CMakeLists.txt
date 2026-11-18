@@ -3,6 +3,8 @@ huxerui_add_test_suite(huxerui_macos_tests HuxerUIMacOSTests
         LIBRARIES ${HUXERUI_TEST_LIBRARY}
         SOURCES "${HUXERUI_TEST_DIR}/support/builtin_resources.cpp"
 )
+# App-scoped bookmark tests need a signature even on Intel, where the linker can leave executables unsigned.
+target_link_options(huxerui_macos_tests PRIVATE "LINKER:-adhoc_codesign")
 target_sources(huxerui_macos_tests PRIVATE
         "${HUXERUI_PROJECT_DIR}/examples/platform_module/timer.cpp"
         "${HUXERUI_PROJECT_DIR}/examples/platform_module/apple_timer.mm"

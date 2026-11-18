@@ -245,7 +245,12 @@ IoResult<Bytes> MakeFileBookmark(NSURL* url, bool writable) {
                                 relativeToURL:nil
                                         error:&error];
   if (data.length == 0) {
-    return IoResult<Bytes>(FileAccessError(FileErrorCodeFor(error)));
+    IoError failure{FileErrorCodeFor(error), "HuxerUI could not create a file access bookmark"};
+    if (error != nil) {
+      failure.message += " (" + MakeString(error.domain) + " " + std::to_string(error.code) + "). " +
+                         MakeString(error.localizedDescription);
+    }
+    return IoResult<Bytes>(std::move(failure));
   }
   Bytes bookmark(data.length + 1);
   bookmark.front() = writable ? std::byte{1} : std::byte{0};
