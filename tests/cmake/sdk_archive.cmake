@@ -63,6 +63,7 @@ foreach (required_path IN ITEMS
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUISharedTargets.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIStaticTargets.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIApp.cmake"
+        "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIIosLink.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUICodegen.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUILibraries.cmake"
         "${INSTALL_LIBDIR}/cmake/HuxerUI/HuxerUIOptimization.cmake"

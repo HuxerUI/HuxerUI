@@ -96,6 +96,7 @@ install(FILES
         "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/HuxerUIConfigVersion.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIApp.cmake"
+        "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIIosLink.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUICodegen.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUILibraries.cmake"
         "${HUXERUI_PROJECT_DIR}/cmake/HuxerUIOptimization.cmake"

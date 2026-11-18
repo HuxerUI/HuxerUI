@@ -2,6 +2,7 @@ include_guard(GLOBAL)
 
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUILibraries.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIRuntimeDependencies.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIIosLink.cmake")
 
 function(_huxerui_configure_ios_app_core target_name)
     get_property(HUXERUI_IOS_APP_FRAMEWORK_TARGET
@@ -23,37 +24,18 @@ function(_huxerui_configure_ios_app_core target_name)
     set(HUXERUI_IOS_LINK_OPTIONS_FILE
             "${HUXERUI_IOS_CORE_DIRECTORY}/link.rsp"
     )
-    get_target_property(HUXERUI_IOS_LINK_LIBRARIES
-            ${HUXERUI_IOS_APP_FRAMEWORK_TARGET}
-            INTERFACE_LINK_LIBRARIES
+    _huxerui_generate_ios_link_manifest(${target_name}
+            "${HUXERUI_IOS_CORE_ARCHIVE}" "${HUXERUI_IOS_LINK_OPTIONS_FILE}"
+            HUXERUI_IOS_LINK_MANIFEST
     )
-    get_target_property(HUXERUI_IOS_LINK_OPTIONS
-            ${HUXERUI_IOS_APP_FRAMEWORK_TARGET}
-            INTERFACE_LINK_OPTIONS
-    )
-    if (NOT HUXERUI_IOS_LINK_LIBRARIES
-            OR HUXERUI_IOS_LINK_LIBRARIES MATCHES "-NOTFOUND$")
-        message(FATAL_ERROR
-                "huxerui_add_app() requires iOS platform link arguments"
-        )
-    endif ()
-    if (HUXERUI_IOS_LINK_OPTIONS MATCHES "-NOTFOUND$")
-        set(HUXERUI_IOS_LINK_OPTIONS)
-    endif ()
-    set(HUXERUI_IOS_LINK_OPTIONS_CONTENT
-            "-force_load\n\"${HUXERUI_IOS_CORE_ARCHIVE}\"\n"
-    )
-    foreach (HUXERUI_IOS_LINK_ARGUMENT IN LISTS
-            HUXERUI_IOS_LINK_LIBRARIES
-            HUXERUI_IOS_LINK_OPTIONS
-    )
-        string(APPEND HUXERUI_IOS_LINK_OPTIONS_CONTENT
-                "${HUXERUI_IOS_LINK_ARGUMENT}\n"
-        )
-    endforeach ()
-    file(MAKE_DIRECTORY "${HUXERUI_IOS_CORE_DIRECTORY}")
-    file(WRITE "${HUXERUI_IOS_LINK_OPTIONS_FILE}"
-            "${HUXERUI_IOS_LINK_OPTIONS_CONTENT}"
+    add_custom_command(
+            OUTPUT "${HUXERUI_IOS_LINK_OPTIONS_FILE}"
+            COMMAND "${CMAKE_COMMAND}"
+                    "-DHUXERUI_IOS_LINK_MANIFEST=${HUXERUI_IOS_LINK_MANIFEST}"
+                    -P "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/HuxerUIIosLink.cmake"
+            DEPENDS "${HUXERUI_IOS_LINK_MANIFEST}"
+                    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/HuxerUIIosLink.cmake"
+            VERBATIM
     )
 
     set(HUXERUI_IOS_CORE_INPUTS
@@ -85,7 +67,7 @@ function(_huxerui_configure_ios_app_core target_name)
             VERBATIM
     )
     add_custom_target(${target_name}_huxerui_ios_core
-            DEPENDS "${HUXERUI_IOS_CORE_ARCHIVE}"
+            DEPENDS "${HUXERUI_IOS_CORE_ARCHIVE}" "${HUXERUI_IOS_LINK_OPTIONS_FILE}"
     )
 endfunction()
 

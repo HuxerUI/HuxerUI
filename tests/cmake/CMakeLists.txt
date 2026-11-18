@@ -31,6 +31,15 @@ add_test(NAME HuxerUILibraryValidationTests
                 -P "${CMAKE_CURRENT_SOURCE_DIR}/library_validation.cmake"
 )
 
+add_test(NAME HuxerUIIosLinkTests
+        COMMAND "${CMAKE_COMMAND}"
+                "-DSOURCE_DIRECTORY=${HUXERUI_PROJECT_DIR}"
+                "-DWORK_DIRECTORY=${CMAKE_CURRENT_BINARY_DIR}"
+                "-DHOST_GENERATOR=${CMAKE_GENERATOR}"
+                "-DHOST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/ios_link.cmake"
+)
+
 if (NOT CMAKE_CONFIGURATION_TYPES)
     add_test(NAME HuxerUIAndroidAppIntegrationTests
             COMMAND "${CMAKE_COMMAND}"
