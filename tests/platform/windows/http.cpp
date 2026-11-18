@@ -51,8 +51,10 @@ public:
 
 class LoopbackHttpServer final {
 public:
-  LoopbackHttpServer(std::string response, std::size_t expected_body_size, bool hold_response = false)
-      : response_(std::move(response)), expected_body_size_(expected_body_size), hold_response_(hold_response) {
+  enum class Hold { None, BeforeResponse, BeforeClose };
+
+  LoopbackHttpServer(std::string response, std::size_t expected_body_size, Hold hold = Hold::None)
+      : response_(std::move(response)), expected_body_size_(expected_body_size), hold_(hold) {
     listen_socket_ = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (listen_socket_ == INVALID_SOCKET) {
       throw std::runtime_error("HuxerUI test failed to create a loopback socket");
@@ -78,7 +80,7 @@ public:
   }
 
   ~LoopbackHttpServer() {
-    ReleaseResponse();
+    Release();
     WakeListener();
     worker_.join();
     closesocket(listen_socket_);
@@ -99,15 +101,20 @@ public:
     return request_;
   }
 
-  void ReleaseResponse() {
+  void Release() {
     {
       std::scoped_lock lock(mutex_);
-      response_released_ = true;
+      released_ = true;
     }
     condition_.notify_all();
   }
 
 private:
+  void WaitForRelease() {
+    std::unique_lock lock(mutex_);
+    condition_.wait(lock, [this] { return released_; });
+  }
+
   void WakeListener() const noexcept {
     const SOCKET wake_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (wake_socket == INVALID_SOCKET) {
@@ -150,9 +157,8 @@ private:
     }
     condition_.notify_all();
 
-    if (hold_response_) {
-      std::unique_lock lock(mutex_);
-      condition_.wait(lock, [this] { return response_released_; });
+    if (hold_ == Hold::BeforeResponse) {
+      WaitForRelease();
     }
 
     std::size_t sent = 0;
@@ -163,6 +169,9 @@ private:
       }
       sent += static_cast<std::size_t>(result);
     }
+    if (hold_ == Hold::BeforeClose) {
+      WaitForRelease();
+    }
     shutdown(client, SD_BOTH);
     closesocket(client);
   }
@@ -172,13 +181,13 @@ private:
   unsigned short port_ = 0;
   std::string response_;
   std::size_t expected_body_size_ = 0;
-  bool hold_response_ = false;
+  Hold hold_;
   std::thread worker_;
   std::mutex mutex_;
   std::condition_variable condition_;
   std::string request_;
   bool request_ready_ = false;
-  bool response_released_ = false;
+  bool released_ = false;
 };
 
 class HttpCompletion final {
@@ -224,13 +233,11 @@ public:
     }
   }
 
-  void WaitForBodyEvent(std::size_t previous_events) {
+  bool WaitForBodyEvent(std::size_t previous_events, std::chrono::milliseconds timeout = std::chrono::seconds{5}) {
     std::unique_lock lock(mutex_);
-    if (!condition_.wait_for(lock, std::chrono::seconds{5}, [this, previous_events] {
-          return body_events_ != previous_events || complete_ || error_.has_value();
-        })) {
-      throw std::runtime_error("HuxerUI test timed out waiting for a WinHTTP body event");
-    }
+    return condition_.wait_for(lock, timeout, [this, previous_events] {
+      return body_events_ != previous_events || complete_ || error_.has_value();
+    });
   }
 
   void WaitForTerminal() {
@@ -287,7 +294,10 @@ void DrainResponse(const std::shared_ptr<detail::HttpTransportOperation>& operat
   while (!completion.Complete() && !completion.Error().has_value()) {
     const std::size_t events = completion.BodyEvents();
     operation->RequestRead();
-    completion.WaitForBodyEvent(events);
+    if (!completion.WaitForBodyEvent(events)) {
+      operation->Cancel();
+      throw std::runtime_error("HuxerUI test timed out waiting for a WinHTTP body event");
+    }
   }
 }
 
@@ -387,8 +397,32 @@ TEST_CASE("WindowsHttpTransportUsesPlatformResponseDecompression") {
   REQUIRE(completion.Body() == BytesFromString("compressed response"));
 }
 
+TEST_CASE("WindowsHttpTransportPublishesSseBeforeTheResponseCloses") {
+  LoopbackHttpServer server(
+      "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: x\n\n",
+      0, LoopbackHttpServer::Hold::BeforeClose);
+  const auto transport = detail::CreateWin32HttpTransport();
+  HttpCompletion completion;
+  const auto operation = transport->Start({.url = server.Url("/events")}, true, completion.Callbacks());
+
+  completion.WaitForResponse();
+  operation->RequestRead();
+  const bool received_while_open =
+      completion.WaitForBodyEvent(0, std::chrono::seconds{2}) && completion.BodyEvents() != 0;
+  if (!received_while_open) {
+    operation->Cancel();
+  }
+  REQUIRE(received_while_open);
+
+  server.Release();
+  DrainResponse(operation, completion);
+  REQUIRE_FALSE(completion.Error().has_value());
+  REQUIRE(completion.Complete());
+  REQUIRE(completion.Body() == BytesFromString("data: x\n\n"));
+}
+
 TEST_CASE("WindowsHttpTransportAppliesOneDeadlineToTheWholeRequest") {
-  LoopbackHttpServer server({}, 0, true);
+  LoopbackHttpServer server({}, 0, LoopbackHttpServer::Hold::BeforeResponse);
   const std::shared_ptr<detail::HttpTransport> transport = detail::CreateWin32HttpTransport();
   HttpCompletion completion;
 
@@ -405,11 +439,11 @@ TEST_CASE("WindowsHttpTransportAppliesOneDeadlineToTheWholeRequest") {
   completion.WaitForTerminal();
   REQUIRE(completion.Error()->code == HttpErrorCode::Timeout);
   operation->Cancel();
-  server.ReleaseResponse();
+  server.Release();
 }
 
 TEST_CASE("WindowsHttpTransportCancellationSuppressesLateCompletion") {
-  LoopbackHttpServer server({}, 0, true);
+  LoopbackHttpServer server({}, 0, LoopbackHttpServer::Hold::BeforeResponse);
   const std::shared_ptr<detail::HttpTransport> transport = detail::CreateWin32HttpTransport();
   HttpCompletion completion;
 
@@ -424,7 +458,7 @@ TEST_CASE("WindowsHttpTransportCancellationSuppressesLateCompletion") {
   (void)server.WaitForRequest();
 
   operation->Cancel();
-  server.ReleaseResponse();
+  server.Release();
   REQUIRE_FALSE(completion.WaitForAny(std::chrono::milliseconds{250}));
 }
 

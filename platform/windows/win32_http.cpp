@@ -185,8 +185,10 @@ private:
 
 class Win32HttpRequest final : public HttpTransportOperation, public std::enable_shared_from_this<Win32HttpRequest> {
 public:
-  Win32HttpRequest(std::shared_ptr<Win32HttpSession> session, HttpRequest request, HttpTransportCallbacks callbacks)
-      : session_(std::move(session)), request_(std::move(request)), callbacks_(std::move(callbacks)) {}
+  Win32HttpRequest(std::shared_ptr<Win32HttpSession> session, HttpRequest request, bool require_incremental_response,
+                   HttpTransportCallbacks callbacks)
+      : session_(std::move(session)), request_(std::move(request)),
+        require_incremental_response_(require_incremental_response), callbacks_(std::move(callbacks)) {}
 
   ~Win32HttpRequest() {
     if (request_handle_ != nullptr) {
@@ -328,7 +330,16 @@ public:
   }
 
   void RequestRead() override {
-    ReadBody();
+    if (!require_incremental_response_) {
+      ReadBody(static_cast<DWORD>(read_buffer_.size()));
+      return;
+    }
+    const DWORD error = WithRequestHandle([](HINTERNET request_handle) {
+      return WinHttpQueryDataAvailable(request_handle, nullptr) != FALSE ? ERROR_SUCCESS : GetLastError();
+    });
+    if (error != ERROR_SUCCESS) {
+      Finish(WinHttpError(error));
+    }
   }
 
   void Cancel() noexcept override {
@@ -373,8 +384,8 @@ private:
       return false;
     }
     constexpr DWORD callbacks = WINHTTP_CALLBACK_FLAG_SENDREQUEST_COMPLETE | WINHTTP_CALLBACK_FLAG_HEADERS_AVAILABLE |
-                                WINHTTP_CALLBACK_FLAG_READ_COMPLETE | WINHTTP_CALLBACK_FLAG_REQUEST_ERROR |
-                                WINHTTP_CALLBACK_FLAG_HANDLES;
+                                WINHTTP_CALLBACK_FLAG_DATA_AVAILABLE | WINHTTP_CALLBACK_FLAG_READ_COMPLETE |
+                                WINHTTP_CALLBACK_FLAG_REQUEST_ERROR | WINHTTP_CALLBACK_FLAG_HANDLES;
     if (WinHttpSetStatusCallback(request_handle_, StatusCallback, callbacks, 0) == WINHTTP_INVALID_STATUS_CALLBACK) {
       FinishUnattached(WinHttpError(GetLastError()));
       return false;
@@ -490,6 +501,16 @@ private:
     case WINHTTP_CALLBACK_STATUS_HEADERS_AVAILABLE:
       ReceiveHeaders();
       break;
+    case WINHTTP_CALLBACK_STATUS_DATA_AVAILABLE: {
+      if (status_information == nullptr || status_information_length != sizeof(DWORD)) {
+        Finish(WinHttpError(ERROR_INVALID_DATA));
+        return;
+      }
+      const DWORD available = *static_cast<const DWORD*>(status_information);
+      // Use a positive read to confirm EOF through READ_COMPLETE even when no bytes are available.
+      ReadBody(std::clamp(available, DWORD{1}, static_cast<DWORD>(read_buffer_.size())));
+      break;
+    }
     case WINHTTP_CALLBACK_STATUS_READ_COMPLETE:
       ReceiveBody(status_information, status_information_length);
       break;
@@ -684,10 +705,9 @@ private:
     }
   }
 
-  void ReadBody() {
-    const DWORD error = WithRequestHandle([this](HINTERNET request_handle) {
-      return WinHttpReadData(request_handle, read_buffer_.data(), static_cast<DWORD>(read_buffer_.size()), nullptr) !=
-                     FALSE
+  void ReadBody(DWORD byte_count) {
+    const DWORD error = WithRequestHandle([this, byte_count](HINTERNET request_handle) {
+      return WinHttpReadData(request_handle, read_buffer_.data(), byte_count, nullptr) != FALSE
                  ? ERROR_SUCCESS
                  : GetLastError();
     });
@@ -789,6 +809,7 @@ private:
 
   std::shared_ptr<Win32HttpSession> session_;
   HttpRequest request_;
+  const bool require_incremental_response_;
   HttpTransportCallbacks callbacks_;
   std::mutex mutex_;
   HINTERNET connection_handle_ = nullptr;
@@ -824,8 +845,9 @@ public:
   Win32HttpTransport() : session_(std::make_shared<Win32HttpSession>()) {}
 
   std::shared_ptr<HttpTransportOperation>
-  Start(HttpRequest request, bool, HttpTransportCallbacks callbacks) override {
-    auto operation = std::make_shared<Win32HttpRequest>(session_, std::move(request), std::move(callbacks));
+  Start(HttpRequest request, bool require_incremental_response, HttpTransportCallbacks callbacks) override {
+    auto operation = std::make_shared<Win32HttpRequest>(
+        session_, std::move(request), require_incremental_response, std::move(callbacks));
     operation->Start();
     return operation;
   }

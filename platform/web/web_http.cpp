@@ -162,7 +162,7 @@ EM_JS(void, StartWebHttpOperation, (emscripten::EM_VAL operation_handle, std::ui
 
     const fetchPromise = fetch(request.url, options);
     if (request.body.byteLength !== 0) {
-      Module._huxerui_web_http_upload(operation.nativeHandle, request.body.byteLength);
+      Module._huxerui_web_http_upload(operation.nativeHandle, BigInt(request.body.byteLength));
     }
     fetchPromise
         .then(async (response) => {
