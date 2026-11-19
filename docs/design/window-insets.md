@@ -455,12 +455,9 @@ The shared Runtime simulates safe content in `SafeArea` mode and owns edge-to-ed
 
 ## Desktop and Web mapping
 
-Windows, macOS, and Linux ordinary client areas submit zero safe-area insets.
-The new content mode therefore does not change their current application layout.
-Desktop custom title bars, caption buttons, and draggable regions belong to a later Window Chrome design.
+Windows, macOS, and Linux client areas submit zero safe-area insets. Custom title bars use separate title-bar metrics. [Window Chrome](window-chrome.md) defines `WindowTitleBar`, caption controls, and drag regions.
 
-The Web adapter can later read CSS `env(safe-area-inset-top)`, `env(safe-area-inset-right)`, `env(safe-area-inset-bottom)`, and `env(safe-area-inset-left)` when the document uses an appropriate viewport-fit policy.
-Browser chrome usually does not expose a portable runtime foreground control, so the platform system-bar operation may remain empty.
+The Web adapter submits the composition root's viewport with zero safe-area insets. The browser owns its chrome.
 
 ## Validation
 

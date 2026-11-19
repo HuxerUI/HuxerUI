@@ -1,45 +1,29 @@
 # HuxerUI Documentation
 
-The documentation is organized by audience.
-User guides describe the current public SDK, development guides cover this repository, and design documents record internal ownership and invariants.
-
 ## User guide
 
-- [Installation](guide/installation.md): install, upgrade, select, and remove an SDK.
-- [Getting Started](guide/getting-started.md): create, diagnose, build, and run an application.
+- Use [Installation](guide/installation.md) to install an SDK and switch versions.
+- Use [Getting Started](guide/getting-started.md) to create a project, prepare its toolchain, and run it.
+- Check [Platform Support](guide/platforms.md) for host requirements and backend capabilities.
+- Use [Packaging Applications](guide/packaging.md) to choose target ABIs, build distributable artifacts, and configure signing and runtime dependencies.
 - [Core Concepts](guide/core-concepts.md): Views, composition, state, identity, events, and Environment.
-- [System Tasks](guide/system-tasks.md) explains task selection, control, UI observation, platform setup, and the runnable Android/iOS example.
 - [Layout and Scrolling](guide/layout.md): constraints, responsive layout, scrolling, and virtualization.
 - [Components and Input](guide/components.md): controls, navigation, gestures, and text editing.
-- [Windowless UI Testing](guide/testing.md): real-Runtime queries, input, virtual frames, and structural captures.
 - [Themes and Presentation](guide/themes-and-presentation.md): themes, indication, animation, and layers.
+- [Resources and Images](guide/resources.md): packaged assets, localized strings, and image editing.
 - [Files and Storage](guide/files.md): application storage, external files, and pickers.
 - [HTTP Client](guide/http.md): buffered and streaming responses, transfer progress, Tasks, and errors.
+- [System Tasks](guide/system-tasks.md) explains task selection, control, UI observation, and platform setup.
 - [Extending HuxerUI](guide/extending.md): custom components, layouts, modifiers, and platform services.
+- [Windowless UI Testing](guide/testing.md): real-Runtime queries, input, virtual frames, and structural captures.
 - [C++20/23 modules and mcpp](../skills/huxerui-app-development/references/cpp-modules-and-mcpp.md): `import huxerui;` and `import std;`, module units, applications with no headers, and building with mcpp instead of CMake.
-- [Platform Support](guide/platforms.md): supported hosts, toolchains, and platform capabilities.
-- [Packaging Applications](guide/packaging.md): platform-native outputs, explicit runtime payloads, and custom Windows installer interfaces.
 
 ## Framework development
 
-- [Building HuxerUI](development/building.md): configure, build, test, and run repository examples.
-- [SDK Packaging](development/sdk-packaging.md): produce and validate release-ready SDK archives.
+- Use [Building HuxerUI](development/building.md) to configure the source tree, run tests, and build examples.
+- Use [SDK Packaging](development/sdk-packaging.md) to assemble, validate, and publish SDK archives and maintain host tools.
 - Find the private vulnerability reporting channel in the [Security Policy](../SECURITY.md).
 
 ## Design reference
 
-[Design Documents](design/README.md) indexes the internal contracts by subsystem.
-[Build System Integration (Draft)](design/build-system-integration.md) proposes common CLI intent, build options, generated results, and acceptance requirements for build-system integrations.
-[Scrolling](design/scrolling.md) defines input normalization, nested consumption, offset ownership, momentum, and overscroll.
-[External File Drop](design/file-drop.md) defines host file reception, hover lifecycle, and asynchronous reference delivery.
-[Date and Time Pickers](design/date-time-pickers.md) defines localized chrono-based calendar and clock controls.
-[Local Notifications](design/local-notifications.md) defines the shared authorization, scheduling, cancellation, and activation contract plus the Android, iOS, and macOS transports and remaining native boundaries.
-[Split and Docking Layouts](design/split-and-docking.md) defines controlled pane resizing and retained single-window docking workspaces.
-[System Tasks](design/system-tasks.md) defines platform admission, cooperative stopping, and UI observation for platform-scheduled, user-started finite, and ongoing work.
-Design documents are implementation references, not a public API stability guarantee.
-
-## Scope
-
-Documentation describes released behavior present in the repository.
-[Roadmap](roadmap.md) records the next capability areas without assigning release dates.
-Detailed proposals remain explicitly marked as future work until implemented.
+[Architecture](design/architecture.md) describes the application, window, and host boundaries. [Layout and Virtualization](design/layout.md) defines measurement, placement, and virtual item lifetime. [Design Documents](design/README.md) indexes the owning contracts and drafts. The [Roadmap](roadmap.md) records future capability areas.

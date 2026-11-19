@@ -2,23 +2,9 @@
 
 This document defines controlled refresh ownership, shared overscroll integration, retained presentation, Theme policy, and accessibility behavior.
 
-## Public contract
+## Controlled refresh
 
-`RefreshBox` owns one ordinary child declaration and one required controlled `refreshing` value:
-
-```cpp
-return RefreshBox(content, refreshing).OnRefresh([=] {
-  RequestRefresh();
-});
-```
-
-`OnRefresh` delegates to `RefreshEvents::Requested` and does not create another callback convention.
-The component rejects an empty child before mounting.
-It does not own application data, a Task, a controller, pull progress State, or an internal authoritative refresh flag.
-
-An armed direct-touch release and the localized accessibility Refresh action each emit one request.
-The next application-provided value decides the result: true holds the presentation at the refresh position, while false returns it to zero.
-Programmatic false-to-true changes present refreshing state without emitting a request.
+`RefreshBox` validates one nonempty child and emits `RefreshEvents::Requested` for an armed release or the semantic refresh action. The supplied `refreshing` value owns whether the retained presentation holds or settles. See the [RefreshBox guide](../guide/layout.md#refreshbox) for state and task handling.
 
 ## Mounted structure and identity
 
@@ -31,7 +17,7 @@ Pull and settle frames change descendant presentation only and do not recompose,
 
 ## Scroll ownership and handoff
 
-Runtime's generic nested-scroll transaction visits inner content offsets before selecting one terminal overscroll owner.
+The [nested scroll transaction](scrolling.md#nested-scroll-transaction) visits inner content offsets before selecting one terminal overscroll owner.
 RefreshBox enables only leading vertical overscroll and only for `ScrollSource::Drag`.
 Ordinary content scrolling therefore remains with the deepest compatible descendant until that content reaches its leading boundary.
 

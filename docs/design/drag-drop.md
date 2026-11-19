@@ -4,7 +4,7 @@ This document defines in-process typed drag-and-drop between mounted HuxerUI nod
 It extends the shared gesture ownership path with optional platform transport between windows in one application Runtime.
 
 The underlying recognizer and PointerSession rules remain defined by [Gesture Recognition and Arbitration](gestures.md).
-Layer ownership remains defined by [Architecture](architecture.md), and scrolling remains defined by [Incremental Layout and Rendering](incremental-rendering.md).
+Layer ownership remains defined by [Window Presentation](window-presentation.md), and scrolling remains defined by [Scrolling](scrolling.md).
 
 ## Goals
 

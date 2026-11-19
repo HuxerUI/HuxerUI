@@ -29,13 +29,10 @@ Mounted nodes store local bounds, parent-relative offsets, stable RenderNodes, a
 Ordinary mounted nodes also retain their input Constraints, measured size, placements, layout revisions, and measure and layout dirty state.
 Reconciliation compares built-in layout inputs by value and propagates changed child layout toward the root.
 An unchanged subtree reuses its measurement when its Constraints are equal, and an unchanged placement does not revisit its descendants.
-Linear layouts measure stretching children directly with the final cross-axis constraint when that axis is already tight; they retain the intrinsic-size pass only when the parent constraint leaves the stretched extent unresolved.
 Clean PaintSequences are retained across frames; declarative paint input changes, size and focus changes, and explicit NodeExtension invalidation rerecord only the affected sequence.
 RenderNodes retain local opacity, and platform renderers composite each node's content, children, and foreground as one group while replaying source-color PaintSequences.
 Each PaintSequence has a recording revision, and Runtime compares a lightweight snapshot of the committed scene to derive frame damage without retaining duplicate commands.
 `TextField` prepares geometry-dependent scroll state before paint, so paint and platform text-input queries only read committed geometry.
-`VirtualLayout` retains its committed realization and placements on clean frames.
-Viewport, source, constraints, and realized-child layout changes rerun its policy, while stable realized items reuse their cached measurements.
 
 The implementation remains conservative in several areas:
 
@@ -74,46 +71,11 @@ The mounted tree and render scene have different responsibilities:
 
 ## PlatformView composition foundation
 
-PlatformView extends the retained scene without adding another Runtime output tree.
-Its paintable leaf retains `PlacePlatformViewCommand` exactly as another node retains drawing commands, so compatible recomposition reuses the command when registration name, strongly typed Properties, property revision, controller-binding identity, mounted identity, and local bounds are unchanged.
-The command contributes no pixels and marks the exact RenderScene paint position at which the PlatformView hierarchy participates.
+The [PlatformView composition contract](platform-content.md#platformview) defines the shared placement order, candidate commit, and supported scene effects. Slice construction reads retained RenderNodes and PaintSequences. It emits at most one more HuxerUI slice than the number of PlatformViews. Compatible slices reuse their retained platform representation.
 
-One shared internal builder derives a `RenderComposition` from the committed scene before platform presentation.
-Adapters consume the result rather than duplicating traversal-order or state-boundary policy.
-Scene traversal accumulates the same transforms, clips, visibility, content, child, and foreground order used by raster replay.
-Each placement boundary closes the current nonempty HuxerUI render slice, emits the resolved PlatformView placement, and opens a following slice only when later drawing exists.
-For `p` mounted PlatformViews, the composition therefore contains at most `p + 1` HuxerUI slices, while a scene without PlatformViews remains on the existing single-surface path.
+Insertion, removal, and reordering invalidate changed boundaries and old and new visible bounds. macOS and Web intersect stable slice invalidation with DamageRegion and redraw the complete composition when sibling composition changes. Android invalidates the complete host View. On Windows, visible removed child HWNDs retire after the replacement surface is presented so the previous aperture remains filled during the commit-to-paint interval.
 
-Slice construction references retained RenderNodes and PaintSequences rather than copying or rerecording their commands.
-A compatible macOS, Web, or iOS slice retains its platform surface when its surrounding PlatformView boundaries and scene role remain stable.
-Android instead replays the committed command ranges into the host Canvas around ordinary child drawing.
-The Windows adapter retains the same ranges and ordering contract while traversing the scene once into one transparent DirectComposition surface; each placement becomes an ordered rectangular aperture exposing its child HWND below, and no surface is allocated per slice.
-The renderer enables that composition surface lazily on the first PlatformView and retains it for the rest of the window lifetime, so temporary unmounts do not rebuild the swap chain.
-Visible removed child HWNDs retire only after the replacement surface is successfully presented, keeping the previous aperture filled during the asynchronous commit-to-paint interval.
-Remaining adapters choose the platform-appropriate retained representation when implemented.
-Insertion, removal, or reordering invalidates only changed boundaries and the old and new visible bounds they affect at the shared composition level.
-The macOS and Web hosts intersect stable slice invalidation with the committed DamageRegion and escalate to a complete redraw only when sibling composition changes.
-Android retains shared DamageRegion calculation but currently invalidates its complete `HuxerUIView` when a committed frame changes.
-A PlatformView property revision updates its platform instance without marking unrelated HuxerUI PaintSequences dirty.
-EventBinding changes and incoming platform events do not change the property revision, while platform visual invalidation requests presentation through the adapter without writing application State.
-
-The RenderComposition is complete before platform hierarchy mutation begins.
-Adapters apply view creation, property updates, bounds, clipping, visibility, sibling order, slice reuse, and removals as one platform-thread commit, then present damaged HuxerUI slices.
-Paint callbacks only replay the already committed slice assigned to them and never mutate platform hierarchy.
-New PlatformView candidates remain inactive until they enter the committed hierarchy, while compatible factory updates apply in place and are not a rollback boundary.
-
-The first contract accepts translation, axis-aligned bounds, rectangular clipping, and visibility around PlatformView.
-A scene that would require rotation, path clipping, a group-opacity boundary spanning PlatformView and HuxerUI content, a backdrop filter, or another unsupported offscreen effect is rejected rather than flattened into a foreground or background plane.
-ExternalTexture remains an ordinary drawing command and follows the existing retained PaintSequence and DamageRegion rules without introducing shared RenderComposition slices.
-Android GPU-backed ExternalTextures are a platform-private exception at presentation time: the Canvas renderer calls an internal TextureView child at the command's exact replay position while the current Canvas transform, clip, and save-layer state remains active.
-That child is reconciled from GPU command occurrences independently of shared RenderComposition layers and does not acquire PlatformView identity, interaction, focus, semantics, or the PlatformView transform restrictions above.
-Apple Metal-backed ExternalTextures remain ordinary raster commands rather than native-view slices.
-UIKit and AppKit import each new immutable Metal snapshot through a device-specific Core Image context, cache the resulting `CGImage` by texture identity and revision, and draw it through the same Core Graphics path as pixel-buffer textures.
-Pruning an invisible renderer cache does not clear the texture mailbox, so returning through scrolling or clipping regenerates the current frame instead of presenting a blank native layer.
-
-There is one `RenderNode` per paintable mounted node.
-Non-painting structural nodes may either own an empty render node or be elided when doing so does not change clipping, transforms, opacity, hit testing, or stable scene identity.
-The implementation should prefer a predictable one-to-one mapping initially and optimize structural-node elision only after measurement.
+Properties revisions update the platform instance. Event binding changes leave the property revision and clean PaintSequences intact. ExternalTexture remains an ordinary draw command, with the [texture lifetime and damage rules](platform-content.md#externaltexture) applying across visible destinations.
 
 ## Local coordinate model
 
@@ -145,63 +107,13 @@ Window and screen coordinates are boundary queries.
 Hit testing, text-input geometry, accessibility, and PlatformView integration map a local point or rectangle through the current ancestor transform chain when they need those coordinates.
 The runtime may cache resolved transforms for one committed scene revision, but resolved host-view frames are derived data rather than layout ownership.
 
-The public mounted-node geometry API should use unambiguous names:
-
-```cpp
-Size LayoutSize() const;
-Rect Bounds() const;
-Rect ContentBounds() const;
-Point LayoutOffset() const;
-Rect PresentationBounds() const;
-Point LocalToWindow(Point point) const;
-std::optional<Point> WindowToLocal(Point point) const;
-Rect LocalToWindowBounds(Rect bounds) const;
-```
-
-`Bounds()` is local.
-`ContentBounds()` is the local rectangle remaining after resolved Padding is removed, with nonnegative dimensions.
-`LayoutOffset()` is parent-relative.
-`PresentationBounds()` is the transformed axis-aligned host-view logical bound intended for diagnostics and platform-boundary queries.
-`LocalToWindow()` and `WindowToLocal()` convert points through the same resolved transform, while `LocalToWindowBounds()` maps four corners and returns their axis-aligned host-view bound.
-Inverse conversion returns no value for a non-invertible transform.
-The ambiguous absolute `Frame()` contract is removed rather than retained as an alias.
+The [mounted geometry guide](../guide/layout.md#mounted-coordinate-spaces) describes the public coordinate queries. Geometry preparation sees the resolved presentation transform for the current frame, and recorded paint remains node-local.
 
 ## Layout ownership and caching
 
-Each mounted node retains:
+Mounted nodes retain the last measurement inputs, measured size, child placements, and separate measurement and placement dirty state. `MeasureNode()` reuses a result when the measure flag is clean and the incoming constraints, inherited safe-area insets, and title-bar geometry match exactly. Changes to layout policy, layout-relevant properties, or participating children mark the measurement path dirty. An invalidated ancestor can still reuse measurements from clean descendants.
 
-- Its most recent input `Constraints`.
-- Its measured size.
-- Its child placements.
-- Revisions for layout-affecting declarative inputs.
-- Whether its own layout or a descendant layout is dirty.
-
-A cached layout result is reusable when:
-
-- The node is not layout dirty.
-- Its input constraints equal the cached constraints.
-- Its layout policy identity is unchanged.
-- Its layout-affecting style revision is unchanged.
-- Its child structure and relevant child layout values are unchanged.
-- No measured child has invalidated the result.
-
-A layout invalidation propagates toward ancestors because a changed child size may change every ancestor that consumes it.
-Propagation stops at the root or at a future explicit layout boundary whose size contract is independent of descendant measurement.
-Runtime does not infer such boundaries automatically.
-
-When an ancestor is visited, unchanged children can still return their cached measurement for identical constraints.
-This keeps the propagation rule conservative without forcing complete subtree measurement.
-
-Layout output contains the node size and parent-relative child placements.
-Committing a new output compares it with the previous output:
-
-- A size change invalidates the parent's cached layout.
-- A child-offset change updates that child's render-node offset and hit-test transform.
-- An unchanged child size and offset leave its layout and paint caches intact.
-- A removed child contributes its previous paint bounds to damage before its render node is detached.
-
-The layout protocol should continue to expose child measurement through `LayoutContext`.
-It should not expose child internals or allow layouts to retain child references across reconciliation.
+Unchanged placement skips descendant visits. A changed parent-relative offset advances the node's layout revision for presentation and input without rerecording descendant paint. A new local size dirties the affected node's content and foreground paint. Geometry removed from the retained scene contributes its previous painted bounds to damage. [Layout and Virtualization](layout.md) defines the measurement and placement contracts.
 
 ## Invalidation model
 
@@ -430,22 +342,7 @@ These changes remain local to their owners.
 
 ## Virtual layout
 
-The public `VirtualLayoutContext` protocol continues to combine policy measurement with item requests.
-The runtime commits its result in three stages:
-
-- The virtual policy resolves container size, item metrics, and the requested item range.
-- The realization session reconciles that range and retires items no longer requested.
-- `LayoutNode` applies the committed parent-relative placements.
-
-Clean virtual nodes reuse the committed policy result, realization, and placements.
-Scrolling marks only the virtual viewport input dirty and reruns the policy and realization session without invalidating measurements of stable realized items.
-Pending virtual viewport invalidation marks the measurement path inside an unplaced subtree but does not propagate beyond its layout-participation boundary.
-The subtree retains that pending work until it participates in layout again.
-New items enter with layout and paint dirty.
-Retired items contribute their previous bounds to damage and preserve saveable state according to the existing virtual-state rules.
-
-Policy-specific realization remains inside the virtual-layout subsystem.
-Runtime does not branch on concrete virtual-list or grid types.
+Virtual offset changes dirty the viewport input and rerun the policy without dirtying the measurements of stable realized items. An unplaced subtree retains pending viewport invalidation until it participates again. That invalidation stops at the layout-participation boundary. The [virtual layout commit](layout.md#virtual-geometry-and-offset-corrections) determines the placements realized for the frame.
 
 ## Interaction, text input, and layers
 
@@ -492,6 +389,8 @@ schedule the returned deadline
 The platform receives the scene after frame construction completes.
 Frame construction mutates retained Runtime state in place, so exceptions are not a transactional recovery boundary and callers must not assume that the previous scene remains published.
 
+`BuildFrame()` propagates the original exception. The built-in hosts use `BuildFrameOrErrorPage()` to retire the failed window content and commit an independent error page for composition failures, including virtual item composition. Content replacement ends the active text-input session with `ClientRemoved`. Actual window retirement uses `RuntimeDestroyed`. Failures outside the composition boundary and failures building the error page still propagate to the host.
+
 The conceptual platform boundary is:
 
 ```cpp
@@ -537,21 +436,9 @@ Static frames report an empty region.
 Paint, presentation, clipping, insertion, removal, and stacking-order changes contribute their conservative old and new bounds, and touching or overlapping rectangles are merged.
 Non-finite bounds fall back to full viewport damage.
 
-## Implemented public and platform API changes
+## Public and platform boundaries
 
-This design introduced the following coordinated breaking changes:
-
-- Replace ambiguous mounted-node absolute geometry with local geometry queries.
-- Record `NodeExtension` painting through local `PaintContext` operations.
-- Replace the flat `UiWindow::BuildFrame()` DisplayList result with a committed RenderFrame containing `RenderScene` and `DamageRegion`.
-- Change every platform renderer from flat command iteration to retained scene traversal.
-- Keep `PaintCommand` as the platform-neutral immutable drawing primitive.
-
-These changes migrated public headers, Runtime, all current renderers, focused tests, examples that implement extensions, and rendering documentation together.
-No old-name aliases or parallel rendering entry points are retained.
-
-The common component API remains declarative.
-Applications do not receive render-node handles, call invalidation methods, or manage scene lifetimes.
+Applications write declarations and use borrowed `ViewNode` geometry in layout or extension callbacks. UiWindow owns invalidation, retained RenderNodes, and scene lifetime. `BuildFrame()` returns a committed `RenderFrame` with scene and damage data for platform presentation.
 
 ## Required invariants
 
@@ -582,6 +469,3 @@ Focused runtime tests must cover:
 
 Instrumentation used by these tests belongs in test support or internal debug counters.
 It is not part of the application API.
-
-Every adoption stage runs the full common test suite and all platform builds available on the development host.
-Scene-boundary changes require renderer audits for Windows, macOS, Web, Android, and iOS even when a platform cannot be built locally.

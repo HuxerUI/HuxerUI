@@ -1,18 +1,16 @@
 # Files and Storage
 
-HuxerUI provides platform-neutral URI values, application storage, lexical path operations, asynchronous file I/O, external file references, and file pickers.
-Application code does not depend on operating-system path, URL, bookmark, or browser handle types.
+Use `File` for paths the application can already access and `FileReference` for items supplied by a picker, file drop, or application activation. Static assets shipped with the app use [Resources and Images](resources.md).
 
 ## Application directories
 
-Use `UseApplication().Directories()` to obtain application-owned directories:
+Use `UseApplication().Directories()` to obtain application-owned directories.
 
-- data for durable application state;
-- cache for reproducible data;
-- temporary for disposable process or session data.
+- `data_directory` holds durable application state.
+- `cache_directory` holds reproducible data.
+- `temporary_directory` holds disposable process or session data.
 
-The platform adapter derives the physical location from the application identity and platform conventions.
-Do not construct these locations from environment variables in application code.
+The platform chooses their locations from the application identity and host conventions. When available, `executable_directory` gives the executable location. This can be read-only.
 
 ```cpp
 auto application = UseApplication();
@@ -20,17 +18,13 @@ File settings = application.Directories().data_directory.Child("settings.json");
 File working_directory = application.CurrentDirectory();
 ```
 
-`Directories()` returns the paths captured at initialization without I/O. A retained ApplicationHandle can query them outside composition and after Runtime destruction; copy the required File values into asynchronous work rather than retaining references to a temporary owner.
-A custom host without application directories causes `Directories()` to throw `std::logic_error`, not to invent writable paths.
-`CurrentDirectory()` queries the process working directory on every call, independently of application storage and Runtime lifetime. All Runtime instances in one process share it; HuxerUI does not expose an operation to change it.
+`Directories()` returns the paths captured at initialization. Copy the required `File` values into asynchronous work. A custom host without application directories reports `std::logic_error`. `CurrentDirectory()` queries the process working directory on each call.
 
 ## Paths and files
 
-`File` represents an application-accessible local path.
-Path joining and normalization are lexical; operations that touch storage report platform errors through typed results or exceptions documented by the API.
+`File` stores an absolute UTF-8 path. A relative input is resolved against the current working directory when the value is constructed. Use `Child()` for one name and `Resolve()` for a multi-segment relative path. These operations manipulate paths lexically. Use `Stat()` or `StatAsync()` when you need the current item type, size, or an error.
 
-Keep user-visible paths in UTF-8.
-Windows conversion to and from UTF-16 occurs inside the platform file implementation.
+Local writes create a missing file or truncate its existing contents before writing. Use `AppendString()` or `AppendBytes()` to add data at the end. Create missing parents explicitly with `CreateDirectories()`. `ListChildren()` returns immediate, unsorted entries, including hidden files. `CopyTo()` copies one ordinary file, and `MoveTo()` can fail across filesystems. Set `overwrite` explicitly to allow replacement. Use recursive deletion only on an intended application-owned subtree.
 
 ## URI values and local file conversion
 
@@ -56,74 +50,55 @@ Query, fragment, user-info, port, encoded separators, and platform-incompatible 
 Use `FileReference::AsFile()` to obtain a local path when the reference has one, then `File::ToUri()` if a file URI is needed.
 Do not reconstruct a path from a display name, Android content URI, or browser handle; the returned `File` does not take ownership of the reference's access capability.
 
-## Operation results
+## Reading, writing, and errors
 
-`Result<T, ErrorT>` from `<huxerui/data.h>` is the shared result container; `IoResult<T>` is an alias for `Result<T, IoError>`.
-Check `Succeeded()` before using `Value()` or `Error()`; accessing the wrong branch throws `std::logic_error`.
-Use `std::move(result).Value()` or `std::move(result).Error()` to move out an owned payload.
-Existing direct value/error construction remains available for distinct types; the explicit factories also support identical value and error types:
+Use `ReadBytes()` for arbitrary data and `ReadString()` for UTF-8. Text reads remove one leading BOM and preserve line endings. Both read the whole file. Asynchronous writes take ownership of the bytes or string across suspension.
 
-```cpp
-auto value = Result<std::string, std::string>::Success("contents");
-auto error = Result<std::string, std::string>::Failure("unavailable");
-auto done = IoResult<void>::Success();
-```
+`IoResult<T>` holds either a value or an `IoError`. Check `Succeeded()` before calling `Value()` or `Error()`. Use `std::move(result).Value()` to take a move-only value, such as a stream. An empty successful value can represent an empty file or directory. Convenience mutations such as `WriteString()` and `Delete()` return `bool`.
 
-`Result<void, ErrorT>` carries only success or an error, and `Value()` checks success without returning a payload.
-Results are `[[nodiscard]]` and have no public default constructor.
-The shared container does not change which existing File operations return results, bools, or streams.
-
-## Asynchronous operations
-
-File reads, writes, directory operations, copying, moving, and external imports use `Task` where blocking platform work must leave the Runtime thread.
-Continuation resumes on the owning Runtime thread, and cancellation prevents late delivery to an unmounted owner.
+The asynchronous forms run in a `Task` and resume on the owning Runtime thread. Prefer them for potentially slow storage operations. On Web, local work runs on the browser event loop. Canceling a task suppresses delivery, and a mutation already under way can still finish.
 
 ```cpp
 Task<IoResult<std::string>> LoadSettings(File data_directory) {
-  File file(data_directory, "settings.json");
-  co_return co_await file.ReadStringAsync();
+  co_return co_await data_directory.Child("settings.json").ReadStringAsync();
 }
 ```
-
-Use `Bytes` from `<huxerui/data.h>` for owned binary data and `std::span<const std::byte>` for borrowed binary input.
-Use byte operations for arbitrary payloads and string operations only for UTF-8 content.
-
-```cpp
-Task<IoResult<Bytes>> LoadPayload(File data_directory) {
-  File file(data_directory, "payload.bin");
-  co_return co_await file.ReadBytesAsync();
-}
-```
-
-Synchronous `WriteBytes()` and `AppendBytes()` borrow a span only for the call.
-Their asynchronous counterparts take `Bytes` by value so the operation owns the storage while suspended.
 
 ## Incremental streams
 
-Use `InputStream` and `OutputStream` when synchronous code should process a local file without retaining its complete contents.
-The caller supplies the buffer for `Read()` and `CopyTo()`, and `Close()` explicitly finalizes output:
+Use `InputStream` and `OutputStream` to process local files without buffering their complete contents. Supply the buffer to `Read()` or `CopyTo()` and call `Close()` to finalize output. This copy helper takes separate source and destination files.
 
 ```cpp
-IoResult<InputStream> opened_input = source.OpenRead();
-IoResult<OutputStream> opened_output = destination.OpenWrite();
-if (!opened_input.Succeeded() || !opened_output.Succeeded()) {
-  return false;
-}
+bool CopyFileContents(const File& source, const File& destination) {
+  IoResult<InputStream> opened_input = source.OpenRead();
+  if (!opened_input.Succeeded()) {
+    ReportIoError(opened_input.Error());
+    return false;
+  }
+  IoResult<OutputStream> opened_output = destination.OpenWrite();
+  if (!opened_output.Succeeded()) {
+    ReportIoError(opened_output.Error());
+    return false;
+  }
 
-InputStream input = std::move(opened_input).Value();
-OutputStream output = std::move(opened_output).Value();
-Bytes buffer(64 * 1024);
-auto copied = input.CopyTo(output, buffer);
-if (!copied.Succeeded()) {
-  ReportIoError(copied.Error());
-  return false;
-}
-auto closed = output.Close();
-if (!closed.Succeeded()) {
-  ReportIoError(closed.Error());
-  return false;
+  InputStream input = std::move(opened_input).Value();
+  OutputStream output = std::move(opened_output).Value();
+  Bytes buffer(64 * 1024);
+  auto copied = input.CopyTo(output, buffer);
+  if (!copied.Succeeded()) {
+    ReportIoError(copied.Error());
+    return false;
+  }
+  auto closed = output.Close();
+  if (!closed.Succeeded()) {
+    ReportIoError(closed.Error());
+    return false;
+  }
+  return true;
 }
 ```
+
+Local output opens truncate existing contents by default. Pass `FileWriteMode::Append` to `OpenWrite()` or `OpenWriteAsync()` to add data at the end.
 
 `AsyncInputStream` and `AsyncOutputStream` provide the same incremental contract for asynchronous sources and destinations.
 `ReadAsync(maximum_bytes)` returns at most the caller-selected maximum as owned `Bytes`, and an empty value means EOF.
@@ -131,12 +106,7 @@ if (!closed.Succeeded()) {
 Only one operation may be outstanding on each asynchronous stream.
 Call `CloseAsync()` after the final write; destroying an unclosed output requests cancellation or aborts it without promising durable output.
 
-Opening and operating file streams use the same `IoResult<T> = Result<T, IoError>` alias from `<huxerui/stream.h>`.
-`Read()` yields a byte count, `ReadAsync()` yields owned `Bytes`, `CopyTo()` yields the copied byte count, and writes/closes yield `IoResult<void>`; asynchronous operations wrap these results in `Task`.
-Check `Succeeded()` before consuming `Value()`; only successful zero-byte reads mean EOF.
-Copy errors preserve the source or destination error; a written prefix may remain, and a failed close does not finalize output.
-A failed stream cannot be reused. Task cancellation suppresses result delivery instead of returning an error or EOF.
-Native `File` asynchronous streams serialize their blocking operations through a worker sequence, while provider and browser streams retain their native asynchronous resource.
+Reads, writes, copies, and closes return `IoResult`. Check the result before treating an empty read as EOF. A failed copy may leave a written prefix, and a failed close leaves output unfinalized.
 
 Use `InputStream::FromReader()` or `AsyncInputStream::FromReader()` to read from an application-defined source. The synchronous reader fills a borrowed buffer and returns the byte count. The asynchronous reader takes a stop token and a maximum byte count, then returns a `Task<IoResult<Bytes>>`.
 
@@ -160,29 +130,11 @@ Android C++ callers that need a native fd can include `<huxerui/android/jni.h>` 
 
 ## External files and directories
 
-`FileReference` is a capability for one file or directory selected or opened outside application-owned storage.
-It may represent a path, security-scoped Apple URL, Android document URI, or browser file handle; only path-backed references expose a local `File` through `AsFile()`.
+Retain a `FileReference` to use the selected item's access. `Name()` can be empty when unknown, while `Size()` and `ContentType()` are optional. `Type()` describes the item at selection time. Operations can still fail if access is revoked or the provider has changed the item.
 
-External references can be read, imported into application storage, or used for a supported replacement operation.
-Their lifetime and persistence follow platform capability rules.
-`Name()` returns an empty string when the provider supplies no name; `Size()` and `ContentType()` return `std::nullopt` when unknown.
-An unknown name does not prevent reading or importing to an explicitly named destination, but recursive directory copying rejects children without valid names rather than inventing destination entries.
+Use `ReadBytesAsync()` or `ReadStringAsync()` for whole-file reads and `OpenReadAsync()` or `OpenWriteAsync()` for incremental I/O. The write stream replaces the selected file and requires explicit close. Use `ImportToAsync()` to copy into an existing local parent and `ReplaceWithAsync()` to write an application-owned file back through a writable reference.
 
-`OpenRead()` and `OpenWrite()` open synchronous sequential streams on the calling thread. `ReadBytes()` and `ReadString()` read the whole file into owned memory. Synchronous calls can block and do not require a TaskScope. Prefer asynchronous reference operations when available for the broadest Web compatibility. Providers without synchronous access, including browser selections on Web, report `Unsupported` before I/O or mutation.
-
-`OpenReadAsync()` and `OpenWriteAsync()` expose provider-backed `AsyncInputStream` and `AsyncOutputStream` values without importing the file or buffering it in full. Both sequential output forms replace the selected file and require explicit finalization with `Close()` or `CloseAsync()`. `ReadBytesAsync()` and `ReadStringAsync()` read complete contents asynchronously. `ImportToAsync()` and `ReplaceWithAsync()` keep their provider-native transfer paths.
-
-On Android, sequential reads through a reliable provider descriptor can report an I/O error when checking the end of the stream. Reliable providers also receive a close status when a write is finalized, fails, or is abandoned.
-
-`Type()` reports the item kind recorded when the reference was obtained; operations still check current storage state.
-Directory references have no `Size()` or `ContentType()` value.
-`ListChildren()` and `ListChildrenAsync()` return direct children, including hidden entries, without sorting or reading file contents.
-Children retain the selection's grant independently of the parent value, and cannot acquire more permissions than that parent.
-The grant restriction is distinct from an item's `CanWrite()` snapshot: a directory that cannot create children may still contain independently writable files, but a read-only selection keeps all derived references read-only.
-External renaming or replacement can invalidate later operations; a retained directory grant does not authorize an unrelated directory subsequently occupying its old path.
-
-Directory stream opens and whole-file reads fail with `IsDirectory`.
-Existing `ImportToAsync()` and `ReplaceWithAsync()` remain single-file operations and return `false` for directories.
+`ListChildrenAsync()` returns immediate children without sorting. A child retains the original grant after the parent value is released. The asynchronous methods have the broadest Web compatibility. Native providers also support the synchronous forms for compatible files and directories. Browser selections return `Unsupported` from those forms.
 
 ### Remembering access across restarts
 
@@ -198,7 +150,7 @@ Run these tasks on the application thread, including from an application task sc
 
 `FileReference::ForgetAsync(key)` deletes the record. An absent key counts as success. Already opened references and streams retain their normal lifetime rules; the operating system can deny subsequent access when a grant is released or revoked.
 
-Android provider selections with persistable grants, security-scoped bookmarks on iOS and macOS, and Web file system handles that can be stored in IndexedDB support this workflow. Android releases only permission modes acquired by HuxerUI that its other records no longer need. On Web, restore checks the browser's current permission and reports `PermissionDenied` when the browser requires a new grant. Temporary copies and browser uploads report `Unsupported`. Windows and Linux return `Unsupported`; applications using ordinary desktop filesystem access can save local paths instead.
+Android provider selections with persistable grants, security-scoped bookmarks on iOS and macOS, and Web file system handles that can be stored in IndexedDB support this workflow. On Web, restore checks the browser's current permission and reports `PermissionDenied` when the browser requires a new grant. Temporary copies and browser uploads report `Unsupported`. Windows and Linux return `Unsupported`; applications using ordinary desktop filesystem access can save local paths instead.
 
 Sandboxed macOS apps need the `com.apple.security.files.bookmarks.app-scope` entitlement to remember user-selected files or directories, in addition to the user-selected file access entitlement for their access mode.
 
@@ -219,11 +171,7 @@ The platform implementation obtains the value with its typed payload accessor:
 - iOS and macOS: `payload.fileReference()` returns `FileReference`; its `fileURL` is an `NSURL`, and ARC retains the underlying C++ access capability.
 - Web: `payload.requireFileReference()` returns `HuxerUI.FileReference`; `await reference.getFile()` resolves the browser `File`, and `close()` releases the wrapper's retained C++ share.
 
-Android and Web wrappers have idempotent `close()` methods and reject access after closing.
-The Apple wrapper releases through ARC.
-The projection preserves the original C++ capability and its access lifetime; it does not create persistent permission, start another Apple security scope, narrow read/write access, or add a platform `canWrite` property.
-Shared C++ code continues to inspect the captured `CanWrite()` metadata and perform writes through the existing `FileReference` operations.
-Do not serialize the HUXP bytes, cache a native URI or URL past the wrapper lifetime, or treat a browser `File` as permission to reopen the same external item later.
+Android and Web wrappers have idempotent `close()` methods and reject access afterward. The Apple wrapper releases through ARC. Keep the wrapper alive for native use of the URI or URL. The [PlatformPayload boundary](../design/platform-content.md#platformpayload-boundary) defines how the bridge retains access.
 
 ### Creating a reference in a platform library
 
@@ -266,25 +214,17 @@ Task<bool> WriteProjectSettings(FileReference project, std::string json) {
 Keep the original reference or a copy alive throughout path-based use when access depends on retained resources, such as macOS security-scoped selections and iOS temporary activation copies.
 Actual operations still require system permission; continue using `FileReference` I/O when its grant restrictions or coordination are needed.
 
-On Windows, an application needing only ordinary local-path behavior may keep the returned `File` and discard the `FileReference`.
-Retained native handles can prevent ancestor directories from being renamed; `AsFile()` does not release them, and all references sharing the grant, including derived children and pending operations, must release it before the handle closes.
-After release, the `File` remains a path value: moving the directory can invalidate that path, and replacing it makes subsequent path-based operations target the replacement rather than the previously selected object.
+On Windows, retained handles can prevent an ancestor from being renamed. Release the reference and any derived references or pending work when you need only ordinary local-path behavior.
 
 ## FilePicker
 
-Use the file picker service to open one or more files, select one directory, or save an application-owned file through the current platform.
-Picker cancellation, denied access, and unsuccessful or unsupported presentation use the existing compact empty or false result; capability queries let applications hide unavailable actions.
+Use `UseService<FilePicker>()` to get the window's picker. `OpenFileAsync()` returns one optional reference and `OpenFilesAsync()` returns a vector. `SaveFileAsync()` presents the platform save dialog and exports a local `File`. Cancellation, unsupported presentation, or other picker failure yields an empty selection or `false`. Use `CanOpenFiles()`, `CanOpenDirectories()`, or `CanSaveFiles()` before offering an action.
 
-Filters are portable hints.
-The platform picker may present them according to platform conventions, but application code must still validate selected content.
+A `FilePickerFilter` combines extension and MIME hints. Use suffixes without a leading dot. MIME patterns can be exact or wildcarded, such as `image/*`. Give a nonempty filter a display name and validate the selected contents separately.
 
-`OpenDirectoryAsync(bool writable = false)` selects one existing directory without file filters.
-The default reference and its children are read-only through reference operations even when the operating system grants broader rights; explicit `AsFile()` access follows ordinary `File` permissions instead.
-Passing `true` requests read/write access and never silently returns a read-only selection.
-`CanOpenDirectories(writable)` checks host support without opening UI or creating probe files; it does not guarantee approval for a particular location.
-`CanWrite()` on the returned directory advertises child creation, not permission to overwrite every existing child.
-Directory, file-open, and save requests share the same per-window operation queue.
-On Android, each admitted picker shares its native presentation queue with window-owned Java modules; see [Android Activity results](platforms.md#window-owned-java-modules-and-activity-results).
+`OpenDirectoryAsync()` selects one existing directory. Pass `true` to require write access. The default keeps the reference and its descendants read-only. On a writable directory, `CanWrite()` describes the ability to create children. It does not guarantee the ability to replace every existing item.
+
+Call Web pickers from a user action before asynchronous work consumes transient activation. Directory picking requires a browser with `showDirectoryPicker()` and live directory handles. Select source and destination from separate user actions. For embedded Android hosts, see [Android Activity results](platforms.md#window-owned-java-modules-and-activity-results).
 
 ## Receiving dropped files
 
@@ -319,16 +259,7 @@ Physical drop ends hover with `Exited` immediately, followed by deferred `Droppe
 Events run on the UI thread, and `Dropped`/`Failed` retain the target-local and window-local DIP coordinates from physical drop.
 Several accepted drops may complete independently; compatible recomposition uses the current handlers, while unmounting cancels pending delivery.
 
-Reception negotiates Copy, not Move or Link, and returns references restricted to reading through `FileReference` operations.
-It supports shell file lists on Windows, file URLs on macOS, file representations on iOS, content URIs on Android, GTK file lists with local capabilities on Linux, and identifiable ordinary browser files on Web.
-Provider temporary files may need a reference-owned copy; other files are not imported merely because they were dropped.
-Web reception requires the browser to distinguish file entries from directories during the native drop event.
-Native `PlatformView` regions retain ownership of their own drops.
-
-Android external drag permissions require API 24 or later and remain bounded by the granting Activity's lifetime.
-`HuxerUIActivity` installs the permission hook; custom hosts install `HuxerUIView.setFileDropPermissionRequester`, returning an `AutoCloseable` lease for the platform grant, and clear the hook during teardown.
-Android API 23 and hosts without this integration still use `FilePicker` normally.
-Provide a picker action for keyboard, touch, accessibility, and unsupported hosts; physical dragging must not be the only way to open files.
+A drop supplies read-only references. Keep a picker action available for keyboard, touch, and hosts without external drag support. See [External File Drop](../design/file-drop.md#native-access) for embedded-host integration and native access lifetime.
 
 ## Copying directory contents
 
@@ -348,33 +279,14 @@ The first failure returns an `IoError` with the operation stage and escaped rela
 Completed output remains after failure or cancellation; neither a tree transaction nor rollback of an overwritten file is promised.
 Cancellation stops subsequent work and attempts to close active I/O without resuming retired application code.
 
-Copying rejects identifiable links, cycles, and overlapping roots; potentially related roots whose relationship cannot be established safely are unsupported.
-The operation is not a snapshot and does not isolate external concurrent creation, renaming, or replacement.
-No-overwrite uses exclusive creation where available; browser/provider APIs without that primitive check collisions but cannot guarantee atomic exclusion of external writers.
-Applications must avoid concurrently modifying the source and destination during copying when those stronger guarantees are required.
+Keep the source and destination disjoint and avoid concurrent changes during copying. The operation rejects identifiable links, cycles, and overlaps. A provider can return `Unsupported` when it cannot verify containment. On Android, copying between two selected trees requires the same provider and Android API 29 or later.
 
 The runnable [directory-copy example](../../examples/directory_copy/main.cpp) demonstrates separate source and destination selection, copying to application storage, overwrite behavior, cancellation, and summaries through the same public API on every platform.
 
-On Android, copying from a separate provider into application-private storage is supported without broad storage access.
-Copying between selected trees requires the same provider and reliable containment checks (Android API 29 or later); unknown relationships return `Unsupported` instead of risking recursive self-copy.
-
 ## Web storage
 
-The Web backend uses browser-managed storage for application directories and browser file capabilities for external selections.
-The application identity determines its storage namespace.
+Web application directories use browser-managed storage associated with the application's identity. Reads can use the synchronous API. Use asynchronous methods for mutations in the persistent data and cache directories, including `CloseAsync()` for incremental output. Those operations report success after browser synchronization. Quota and browser storage policies apply.
 
-Browser persistence is asynchronous and subject to browser policy, quota, and user clearing.
-The file API does not pretend browser storage is an unrestricted host filesystem.
+Temporary files are memory-resident. Local copies also occupy memory even when transferred in bounded chunks. A browser-selected file or directory remains a separate `FileReference`.
 
-Directory selection requires `showDirectoryPicker()` and the requested access capability; an uploaded directory file list is not a substitute for a live directory grant.
-Start source and destination selection from separate user clicks, without earlier asynchronous work consuming transient activation.
-Copies use bounded transfer buffers rather than whole-file `ReadBytesAsync()` calls.
-This does not bound total memory when the destination is a local `File`: MEMFS/IDBFS retains file contents in memory, and persistent destinations complete only after synchronization succeeds.
-
-## Safety
-
-Validate user-selected content before parsing it.
-Keep recursive deletion within an application-owned directory or an explicitly granted capability.
-Treat external references as authority to the selected item, not to an arbitrary neighboring path.
-
-See [File and Application Storage Design](../design/files.md) and [URI and Local File URI Design](../design/uri.md) for exact conversion, result, cancellation, and platform contracts.
+See [File and Application Storage Design](../design/files.md) for ownership, cancellation, and backend guarantees.

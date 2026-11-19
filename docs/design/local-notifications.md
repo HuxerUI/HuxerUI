@@ -1,6 +1,6 @@
 # Local Notifications
 
-> Status: The shared public API, Windows desktop transport, Android transport, iOS/macOS User Notifications transports, and host-template presentation on Android and iOS are implemented. Linux and Web remain unavailable; Windows and macOS support only default presentation.
+> Status: Windows, macOS, Android, and iOS provide native notification transports. Windows, Android, and iOS support application-provided templates, and macOS provides default presentation. The shared API reports notification capabilities as unavailable on Linux and Web.
 
 This document defines the intended application-facing boundary for local operating-system notifications.
 It covers authorization, immediate presentation, one-shot scheduling, stable identifiers, cancellation, and application activation without introducing push delivery, a notification registry, or a fallback presentation channel.

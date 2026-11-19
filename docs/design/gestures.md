@@ -5,7 +5,7 @@ Pointer interception, repeated taps, long presses, single-pointer drags, and mul
 The model extends the interaction foundation without adding general event capture and bubbling or exposing raw pointer capture to applications.
 
 The mounted interaction and indication contract remains defined by [Interaction and Indication Design](interaction-indication.md).
-PlatformView composition and initial input ownership remain defined by [Architecture Design](architecture.md#platform-content-integration).
+See [PlatformView composition](platform-content.md#platformview) for drawing order and initial input ownership.
 
 ## Goals
 

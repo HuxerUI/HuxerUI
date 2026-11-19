@@ -1,28 +1,28 @@
 # Packaging Applications
 
 `huxerui package` builds an enabled platform and publishes its distributable output under `dist/<platform>`.
-Packaging uses the `release` configuration by default. Use `--config debug` to package a debug build.
+Packaging uses the `release` configuration by default. Choose a target supported by the current build host.
 
 ```bash
 huxerui package windows
-huxerui package macos,linux --config release
+huxerui package macos
+huxerui package linux
 ```
 
-Packaging uses the same application target, resources, libraries, and platform shell as `build` and `run`.
-Intermediate files stay under `.huxerui/package`, and the CLI replaces a platform's published directory only after the new artifacts are complete.
+Packaging uses the same application target and platform shell as `build`. Intermediate files stay under `.huxerui/package`. The CLI replaces a platform's published directory only after the new artifacts are complete.
 
-Desktop outputs are platform-native:
+## Artifacts and prerequisites
 
-- Windows produces one self-contained Burn setup executable containing the application MSI and a HuxerUI installer interface.
-- macOS produces one DMG containing the application bundle and an Applications link.
-- Linux produces an AppImage by default and can produce a DEB or RPM.
-- Android publishes the generated APK, iOS publishes its built application bundle, and Web publishes the generated deployment files.
+| Target | Published output |
+| --- | --- |
+| Windows | Burn setup executable containing the application MSI and the HuxerUI installer interface |
+| macOS | DMG containing the application bundle and an Applications link |
+| Linux | AppImage, DEB, or RPM |
+| Android | APK |
+| iOS | Built application bundle |
+| Web | Deployment files |
 
-Normal `build` and `run` do not build installer targets or require packaging tools.
-Windows downloads the pinned WiX v5 package dependencies only during `package` and verifies their SHA-256 hashes.
-Windows setup generation currently supports x64 applications.
-Running the restored WiX tool requires `Microsoft.NETCore.App` 6.0 or newer; HuxerUI reports this package-only prerequisite without requiring a system-wide WiX installation.
-macOS uses the system `otool`, `install_name_tool`, `lipo`, `codesign`, and `hdiutil`.
+Check packaging prerequisites with `huxerui doctor <platform> --operation package`. Windows builds an x64 installer and restores verified WiX v5 dependencies during `package`. WiX needs `Microsoft.NETCore.App` 6.0 or newer on that build host. macOS uses the system `otool`, `install_name_tool`, `lipo`, `codesign`, and `hdiutil`.
 
 ## Linux package formats
 
@@ -34,11 +34,9 @@ huxerui package linux -f rpm
 
 Use `--format` or `-f` with Linux as the sole packaging platform. The supported values are `appimage` (default), `deb`, and `rpm`. The selected format is published under `dist/linux` and replaces the previous Linux output on success.
 
-All three formats use the same CMake installation component and require `patchelf` 0.19.0 or newer and binutils on the build machine. AppImage needs `appimagetool`, DEB needs CPack and `dpkg-shlibdeps` from `dpkg-dev`, and RPM needs CPack and `rpmbuild` from `rpm-build`. Build DEB and RPM natively on the intended distribution family so its tools can resolve the system library dependencies. Use the current `platform/linux/huxerui.cmake` installation rules when adding DEB or RPM packaging to an existing project.
+All three formats use the same CMake installation component and require `patchelf` 0.19.0 or newer and binutils on the build machine. AppImage needs `appimagetool`, DEB needs CPack and `dpkg-shlibdeps` from `dpkg-dev`, and RPM needs CPack and `rpmbuild` from `rpm-build`. Build DEB and RPM natively on the intended distribution family so its tools can resolve the system library dependencies.
 
 DEB and RPM use the project ID as the package name and the CMake project version as the package version. APT and DNF install the distribution libraries needed by the package, including GTK 4.14 or newer. The package installs the desktop entry and icon in the system application and icon directories. The application, its resource sidecar, and its private libraries live together under `/usr/lib/<project-id>/`.
-
-Installation, desktop launch, and removal were verified on Ubuntu 24.04 LTS for DEB and Fedora 44 for RPM, both on x86_64.
 
 ## Target ABIs
 

@@ -1,44 +1,6 @@
 # Navigation Design
 
-This document defines explicit top app bars, page stacks, destination selection, application drawers, scoped navigation controllers, page transitions, Back routing, typed route paths, Web URL history, and application activation integration.
-
-Factory navigation is deliberately factory-driven and imperative at the navigation boundary.
-Typed-route navigation preserves the same private entry, mounting, transition, interaction, and Back engine without introducing route registries, URL concepts, or platform types into the shared UiWindow.
-
-Custom page transitions are implemented as described in [Page transition customization](#page-transition-customization).
-[Shared-element transitions](#shared-element-transitions) use the common navigation and local matching engine.
-
-## Goals
-
-- Present a retained stack of ordinary HuxerUI Views with Push, Pop, and Replace operations.
-- Preserve page-local state while another page covers it.
-- Keep navigation ownership local so independent and nested stacks do not share history accidentally.
-- Route Back through framework overlays, public layers, application handlers, and nested page stacks before invoking a platform fallback.
-- Drive page transitions through retained presentation state without per-frame recomposition, measurement, layout, or rerecording clean page content; optional decoration records as its sample changes.
-- Support reduced motion and deterministic animation tests through the existing AnimationSpec model.
-- Cancel input, focus, and text-input work when a page stops accepting interaction.
-- Define a platform-neutral predictive Back transaction that Android can drive immediately and other platforms can adopt when their host integration owns an equivalent gesture.
-- Add a typed controlled route path for browser URLs, deep links, restoration, and externally selected destinations without replacing the factory API.
-- Provide an explicit theme-owned TopAppBar without coupling its actions to page history or menu presentation.
-- Provide theme-owned NavigationBar and NavigationPane selectors without coupling selection to page history.
-- Provide controlled StartDrawer and EndDrawer content inside ordinary application layout.
-
-## Non-goals
-
-The current factory navigation implementation does not provide:
-
-- Named routes, string route tables, URI matching, or a destination registry.
-- A public `Page`, `Route`, or `NavigationEntry` base class.
-- A serializable or type-erased path inferred from retained factories.
-- Automatic synthesis of application bars, titles, Back buttons, overflow menus, or master-detail page composition.
-- Navigation-specific `OnAppear`, `OnDisappear`, or other component lifecycle callbacks.
-- Automatic cross-page layout animation or intermediate subtree reflow.
-- Automatic suspension or serialization of covered page state.
-- Browser History integration in the shared UiWindow.
-- An iOS edge gesture owned unconditionally by an embedded HuxerUI View.
-
-Saveable state, route serialization, and navigation-aware lifecycle effects build on this contract after their independent ownership rules are defined.
-Shared-element ownership follows the common animation contract and the navigation integration below.
+Navigation retains pages in the application tree. Factory operations own their entry history through a scoped controller, while typed navigation takes an application-owned path. Both share page identity, rendering, transition execution, and Back dispatch.
 
 ## Page stack design summary
 
@@ -77,11 +39,9 @@ Excess action content is clipped with its hit-test region rather than drawing ac
 Automatic overflow remains application policy.
 An arbitrary View cannot be converted reliably into a MenuItem because it may represent a composite control rather than a command with an icon, label, enabled state, and callback.
 Applications keep their direct action list intentionally small and use the existing Menu service for secondary actions.
-A future automatic overflow feature requires a reusable structured command model shared by toolbars, menus, and shortcuts rather than a TopAppBar-only item type.
 
 The [Window Insets and System Bars Design](window-insets.md) gives UiWindow one full-window geometry contract.
 TopAppBar consumes its top and horizontal insets when they remain available in edge-to-edge content and contributes its themed background to the status region without duplicating platform inset handling.
-Medium and Large two-row bars, scrolled-under colors, and pinned or collapsing behavior remain deferred until shared nested-scroll coordination exists.
 
 NavigationBar and NavigationPane share NavigationItem and NavigationEvents::Changed.
 They are controlled selection views: the selected index enters through construction and a requested index leaves through the typed event.
@@ -134,55 +94,7 @@ Back closes End before Start, preserving state continuity across viewport change
 
 ## Page stack public API
 
-The page-stack public API lives in `<huxerui/navigation.h>`:
-
-```cpp
-namespace huxerui {
-
-namespace detail {
-class NavigationCoordinator;
-}
-
-class NavigationController {
-public:
-  NavigationController() = default;
-
-  void Push(std::function<View()> page) const;
-
-  template <class Factory, class... Arguments>
-  void Push(Factory&& page, Arguments&&... arguments) const;
-
-  bool Pop() const;
-  void Replace(std::function<View()> page) const;
-
-  template <class Factory, class... Arguments>
-  void Replace(Factory&& page, Arguments&&... arguments) const;
-
-  [[nodiscard]] bool CanPop() const;
-  [[nodiscard]] std::size_t Depth() const;
-
-private:
-  explicit NavigationController(std::weak_ptr<detail::NavigationCoordinator> coordinator);
-
-  std::weak_ptr<detail::NavigationCoordinator> coordinator_;
-
-  friend View NavigationStack(std::function<View()> root);
-  friend NavigationController UseNavigation();
-  friend NavigationController UseRootNavigation();
-};
-
-View NavigationStack(std::function<View()> root);
-
-template <class Factory, class... Arguments>
-View NavigationStack(Factory&& root, Arguments&&... arguments);
-
-NavigationController UseNavigation();
-NavigationController UseRootNavigation();
-
-} // namespace huxerui
-```
-
-The API deliberately uses `Push`, `Pop`, and `Replace` rather than `PushPage` and `PopPage` because the controller type already establishes the navigation domain.
+The factory stack and controller APIs are declared in [navigation.h](../../include/huxerui/navigation.h).
 
 `Push` appends a new logical entry.
 `Pop` returns false when the logical stack contains only its root or when the controller is no longer connected.
@@ -228,8 +140,6 @@ View DetailPage(int document_id) {
 
 The public API does not return a page identifier because operations address the logical top of one scoped stack.
 LayerId remains necessary for independently addressable window presentation, while navigation does not expose arbitrary removal of middle entries.
-
-Pop-to, reset, and result-returning navigation remain deferred until concrete application use demonstrates the smallest coherent API.
 
 ## Why pages are factories
 
@@ -409,49 +319,35 @@ Automatic focus restoration is not supported because it could unexpectedly reope
 Dialogs and other trap-focus Layers continue to use their existing focus restoration semantics.
 Because layers route Back before page navigation, dismissing a dialog restores application focus without changing the page stack.
 
-## Theme-owned page motion
+## Page transition customization
 
-Navigation motion is a Theme value because Material, Flat, future iOS, and third-party themes may choose different page-transition geometry.
-The logical stack and controller never inspect a concrete Theme type.
+Page motion uses the shared `TransitionSpec` and retained progress engine defined in [Animation](animation.md#extensible-transitions). `NavigationStyle::motion` supplies the default policy for Push, Pop, and Replace. Flat uses a full-width slide and Material uses a parallax slide. Each configures a reversed Pop, and `NavigationStyle::Default()` supplies the generic slide policy.
 
-NavigationStyle::motion is an optional PageTransition, selecting independent Push, Pop, and Replace descriptions.
-An explicit page-root declaration overrides the complete theme policy; see [Page configuration](#page-configuration).
+### Page configuration
 
-The built-in themes use opaque SlideTransition effects by default.
-Flat moves the entering and covered pages by one full viewport in opposite directions.
-Material moves the entering page by one viewport and the covered page by a 0.2-viewport parallax offset.
-Both themes use Reversed() for Pop, with their own timing, and use the forward effect for Replace.
-NavigationStyle::Default() supplies a full-width slide with 0.3-second forward and 0.25-second reverse motion; a directly constructed empty NavigationStyle has no motion.
+Apply `PageTransition` to the ordinary page root. The last declaration on that root replaces the complete themed policy. Lookup crosses transparent Scope and Environment boundaries to the root and rejects a declaration on an arbitrary descendant. `PageTransition{}` explicitly selects immediate presentation for every operation. An absent theme policy also means immediate presentation.
 
-PresentationMotion continues to own window-level surfaces.
-PageTransition describes a pair of application pages and shares TransitionSpec with scene transitions without changing layer lifecycles.
+| Operation | Selected effect |
+| --- | --- |
+| Push | Incoming page's `push` |
+| Pop or predictive Back | Departing page's `pop` |
+| Replace or changed-path replacement | Incoming page's `replace` |
 
-An absent motion disables animation.
-Reduced-motion resolution uses the existing Theme and animation path and settles to the target without adding a Navigation-specific accessibility switch.
+The operation retains the selected configuration until completion. Recomposition or Theme changes supply defaults for later operations. Initial stack construction and initial deep paths display the final destination immediately.
 
-## Transition execution
+### Transition execution
 
-One retained extension owns the authoritative transition progress:
+One retained controller drives source and destination page presentation and shared elements. It advances before the page extensions read progress. Ordinary transitions animate through the selected timing. Predictive Back seeks normalized progress directly during the gesture. Settling begins at the current sample without the configured start delay. Commit settles to one and Cancel restores the original page by settling to zero.
 
-```text
-NavigationTransitionExtension
-    advances or seeks one MotionController
-        -> source NavigationPageExtension
-        applies source transform and opacity
-        -> destination NavigationPageExtension
-        applies destination transform and opacity
-```
+Active operations disable page content interaction and preserve container Back handling. Fragments are render data with no additional focus, hit-test, text-input, or semantic targets. Effect decorations can record independently of clean page content. A viewport change preserves page progress while evaluating effects against the new bounds. Captured shared pairs in the former coordinate space are released. Reduced motion reaches the same logical result immediately. Retirement releases retained presentation and controller work.
 
-The two pages must not own independent animation clocks.
-One shared progress guarantees synchronized page geometry, one completion condition, deterministic cancellation, and direct predictive Back seeking.
+An explicit Scene transition may include a mutation of the navigation path. Scene and page transitions have independent clocks. Selecting immediate page motion leaves the enclosing Scene effect as the only visual transition.
 
-Programmatic transitions advance progress through AnimationSpec.
-Predictive Update clamps platform progress to `[0, 1]` and sets progress directly.
-Cancel retargets the current value to zero, while Commit retargets it to one.
-Tween completion time scales with remaining distance where necessary, and SpringSpec preserves the existing retargeting behavior and velocity rules.
+## Shared-element transitions
 
-The parent transition extension advances before page extensions read progress in the same frame.
-Completion updates render retention and begins the next queued operation without asking either page to own frame scheduling.
+`SharedElement` and `SharedBounds` use the matcher, retention rules, and fallback defined in [Shared transitions](animation.md#shared-transitions). A navigation operation supplies its own progress to the matching session. It limits capture to its outgoing and incoming pages and excludes nested NavigationStacks. Immediate, initial, and reduced-motion navigation skip shared capture.
+
+Push and Replace select the destination configuration. Pop selects the departing configuration and samples the canonical curve in reverse. Successful pairs suppress their original drawing before page fragment capture. Shared visuals draw above the pages and below synchronized decoration and window layers, inside the navigation clip. A missing or unsupported pair uses ordinary page drawing. A later change that invalidates a pair ends only that pair while page motion continues.
 
 ## Incremental rendering
 
@@ -476,25 +372,7 @@ Offsets derive from the current NavigationStack size, so an in-flight transition
 
 ## Back event model
 
-The platform-neutral event is:
-
-```cpp
-enum class BackPhase {
-  Begin,
-  Update,
-  Cancel,
-  Commit,
-};
-
-struct BackEvent {
-  BackPhase phase = BackPhase::Commit;
-  float progress = 1.0F;
-
-  bool operator==(const BackEvent&) const = default;
-};
-```
-
-UiWindow retains `bool HandleBack()` as the ordinary Commit convenience and adds `bool HandleBack(const BackEvent& event)` for predictive integration.
+`BackEvent` in [event.h](../../include/huxerui/event.h) carries Begin, Update, Cancel, or Commit and normalized progress. The parameterless `UiWindow::HandleBack()` requests an ordinary Commit. The event overload drives a predictive transaction.
 
 UiWindow routes Back in this order:
 
@@ -510,17 +388,7 @@ UiWindow captures the selected consumer at Begin.
 Update, Cancel, and Commit target the same consumer rather than rerunning routing against a tree that may have changed during the gesture.
 If the captured mounted target disappears, UiWindow ends the transaction safely without dereferencing stale state or unexpectedly falling through to a system window close.
 
-NodeExtension gains a general Back capability instead of UiWindow checking for a Navigation component type:
-
-```cpp
-class NodeExtension {
-public:
-  [[nodiscard]] virtual bool OnBack(
-      ViewNode& node,
-      const BackEvent& event
-  );
-};
-```
+Retained behaviors participate through `NodeExtension::OnBack()`.
 
 Traversal visits enabled descendants before their parents and follows reverse paint order, allowing an active nested NavigationStack to Pop before its enclosing stack.
 An inner stack at its root returns false so routing continues to the enclosing stack.
@@ -569,10 +437,9 @@ If future application requirements need progress-aware custom Back visuals, the 
 
 ## Platform Back mapping
 
-Desktop and Web platforms initially produce Commit-only Back requests:
+Desktop and Web platforms produce Commit-only Back requests:
 
-- Windows maps Escape through ordinary key dispatch.
-- macOS maps Escape through ordinary key dispatch.
+- Windows, macOS, and Linux map Escape through ordinary key dispatch.
 - Web maps Escape through ordinary key dispatch and does not call browser history automatically.
 
 Android uses the richest available platform callback while retaining API 23 as the minimum:
@@ -587,8 +454,6 @@ An embedded HuxerUIView exposes the UiWindow Back operations but does not finish
 
 iOS does not install an unconditional edge recognizer.
 A full-screen integration may later map an owned edge-pan gesture to the same BackEvent phases, while an embedded View must not steal a UIViewController navigation controller's interactive-pop gesture.
-
-OHOS and future platforms map their platform navigation gestures or commands to the same shared transaction rather than adding platform-specific navigation state.
 
 ## Responsive layout
 
@@ -686,23 +551,7 @@ An application resolves a stable identifier through its own model or document se
 
 ### NavigationPath
 
-The public value is:
-
-```cpp
-template <class Route>
-class NavigationPath {
-public:
-  NavigationPath() = default;
-  NavigationPath(std::initializer_list<Route> routes);
-  explicit NavigationPath(std::vector<Route> routes);
-
-  [[nodiscard]] bool Empty() const noexcept;
-  [[nodiscard]] std::size_t Size() const noexcept;
-  [[nodiscard]] std::span<const Route> Routes() const noexcept;
-
-  bool operator==(const NavigationPath&) const = default;
-};
-```
+`NavigationPath<Route>` is a typed value containing the ordered destination data. The public API borrows these values through `Routes()`.
 
 The fixed root page is not an element of NavigationPath.
 An empty path displays only that root, and each route element adds one destination above it.
@@ -763,27 +612,8 @@ A routed controller mutates that State rather than a private logical stack.
 The private `NavigationCoordinator` retains non-authoritative requested and realized descriptor snapshots, resolved entries, internal identities, queued visual operations, and transition state needed to reconcile the controlled value without discarding exiting pages early.
 Controller `Depth()` is therefore the path size plus the fixed root entry, while `CanPop()` is true exactly when the path is non-empty.
 
-The routed controller surface is:
+`UseNavigation<Route>()` returns the typed controller. Its Push, Pop, Replace, and SetPath operations edit the authoritative path. The non-template `UseNavigation()` serves factory stacks.
 
-```cpp
-template <class Route>
-class RouteNavigationController {
-public:
-  void Push(Route route) const;
-  bool Pop() const;
-  void Replace(Route route) const;
-  void SetPath(NavigationPath<Route> path) const;
-
-  [[nodiscard]] bool CanPop() const;
-  [[nodiscard]] std::size_t Depth() const;
-};
-
-template <class Route>
-RouteNavigationController<Route> UseNavigation();
-```
-
-The concrete controller type is normally inferred with `auto`, while the existing non-template `NavigationController` and `UseNavigation()` continue to serve factory stacks.
-This avoids turning the existing controller into a `NavigationController<void>` specialization or accepting arbitrary route types through runtime type checks.
 Because the root is fixed and absent from the path, `Replace()` requires a non-empty path and throws `std::logic_error` when only the root is visible.
 
 A NavigationStack is either factory-driven or route-driven for its complete mounted lifetime.
@@ -923,12 +753,6 @@ The policy commits the accepted canonical browser location and the corresponding
 Nested URL routes may resolve to an application-owned aggregate containing a selected top-level destination and one or more nested path values.
 URL segment nesting does not force every visual component function to become a NavigationStack, and responsive layout changes do not alter the route solely because the same destination moves between panes.
 
-## Future work
-
-- Define saveable navigation state without implying that factory-only entries are serializable.
-- Add typed navigation results without introducing a second controller or route registry.
-- Extend adaptive navigation and platform transitions while preserving one authoritative path and application-owned URL policy.
-
 ## Failure and lifetime behavior
 
 Page factories execute during scoped composition and follow the same exception handling as other Scope factories.
@@ -957,234 +781,14 @@ The public files are:
 Runtime changes remain limited to generic Back routing, Back-session capture, and disabled-subtree input cleanup.
 Runtime must not include navigation entry types or branch on NavigationStack, NavigationController, MaterialTheme, FlatTheme, Web, or Android.
 
-A `navigation_internal.h` is justified only if multiple implementation files share a private contract that cannot remain behind NodeExtension or View declarations.
-Controller state alone does not justify another private header.
-
 ## Validation
 
-Shared navigation work requires focused Runtime tests for:
+The [navigation tests](../../tests/runtime/navigation.cpp) cover factory and routed stack ownership, keyed retention, lifecycle, Back, and transition policy. The [navigation UI tests](../../tests/runtime/navigation_ui.cpp) exercise destination selectors, drawers, Theme, and focus. The Web history adapter additionally needs browser validation for deep links, edits to the path, Back and Forward, and history feedback suppression. See [Application Activation](application.md) for activation delivery and file capability ownership.
 
-- A root-only stack and rejected root Pop.
-- Push, Pop, and Replace logical history.
-- Distinct identity when the same factory is pushed more than once.
-- Page-local State, ScrollController, and retained modifier preservation while covered.
-- Removal only after exit completion.
-- Predictive Cancel preserving both logical history and mounted state.
-- Nested stacks resolving the nearest controller.
-- Inner-root Back falling through to an enclosing stack.
-- Disconnected controller queries and mutations.
-- Deterministic operation serialization.
-- Empty factories and exception categories.
+Platform Back validation covers Android's API 34 predictive phases, the Commit-only callback on earlier Android versions, and embedded Android host ownership. Windows, macOS, Linux, and Web route Escape through the shared Commit path.
 
-TopAppBar tests verify Start and Center title geometry, excess-action constraints, action behavior, Heading semantics, required configuration, and built-in Theme styles.
-Destination selection tests verify collection hierarchy, accessible labels, selected and disabled states, semantic activation, identity stability, icon requirements, disabled keyboard traversal, and dynamic compact or expanded Pane composition.
-Drawer tests verify responsive inline fallback, controlled modal state, gesture and Back ordering, exit-time focus confinement, and built-in Theme styles.
+### Transition validation
 
-Transition and incremental-rendering tests verify:
+Navigation-specific coverage includes root override selection, queued operations, controlled path replacement, predictive seeking, cancellation, reduced motion, viewport changes, and retirement. Shared-element scenarios verify page-scoped matching, ordinary painting for unsupported pairs, clipping and decoration order, and the absence of a second input or accessibility owner. See [Animation](animation.md#implementation-and-acceptance) for shared effect validation.
 
-- One shared progress value controls both pages.
-- Stable frames do not recompose, remeasure, relayout, or rerecord clean pages.
-- Transform and opacity changes update conservative damage for old and new bounds.
-- NavigationStack clipping contains transformed drawing and hit testing.
-- Viewport changes preserve normalized progress and remeasure the active pair.
-- Reduced motion completes without continuing frame requests.
-- Tween, Spring, Cancel, Commit, and retarget behavior are deterministic under supplied frame times.
-
-Interaction tests verify:
-
-- Outgoing pointer capture and observers receive Cancel.
-- Hover and keyboard activation are cleared from an inactive page.
-- Focus leaves an inactive page.
-- An owned text-input session ends with FocusLost.
-- Covered pages cannot receive pointer, key, focus, or text-input events.
-- Predictive Cancel does not cause focus or IME churn.
-
-Back tests verify the complete order among TextSelectionOverlay, Layer entries, BackRequested, nested NavigationStacks, and platform fallback.
-
-Typed routed-navigation tests additionally verify:
-
-- Empty, single-route, duplicate-route, and heterogeneous variant paths.
-- `Push()`, `Pop()`, `Replace()`, and arbitrary `SetPath()` reconciliation.
-- Longest-equal-prefix retention and changed-suffix replacement.
-- Stable page state within an equal prefix and independent identity for duplicate equal routes.
-- One application-owned path as the logical source of truth while private render entries outlive an exit transition.
-- Initial deep paths committing their final destination without replaying intermediate transitions.
-- A routed stack rejecting factory operations and a factory stack exposing no route path.
-- Nearest and root controller lookup through nested stacks, including nested stacks with the same Route type.
-- Controller disconnection without retaining Runtime, mounted nodes, or a resolver cycle.
-- Total destination resolution and propagation of resolver composition failures through the existing frame exception boundary.
-
-Platform validation includes:
-
-- Android API 34 Begin, Update, Cancel, and Commit JNI and Java mapping.
-- Android API 33 Commit mapping.
-- Android API 23 through 32 Activity fallback.
-- Embedded Android View behavior without Activity ownership.
-- Windows, macOS, and Web Escape Commit behavior.
-- Available platform builds after shared Back API changes.
-
-Web URL integration requires browser tests for initial deep links, `Push()`, `Replace()`, `SetPath()`, Back, Forward, reload, invalid URLs, canonical encoding, duplicate routes, nested route projections, and suppression of history-update feedback loops.
-Application activation integration requires platform tests for cold-start delivery before first composition, warm delivery on the selected Runtime UI thread, session selection, Open With file capability lifetime, and rejection or routing policy without a committed Root View callback.
-
-## Invariants
-
-- NavigationStack is an application-tree container, not a Layer or root service.
-- TopAppBar actions remain ordinary Views and never imply navigation, menu, or automatic overflow policy.
-- A page is an ordinary View factory with an independent keyed RecomposeScope.
-- NavigationController resolves the nearest scoped stack and does not own Runtime or mounted nodes.
-- The stack scope is the only strong owner of the coordinator.
-- A routed stack has exactly one application-owned NavigationPath as its logical history.
-- Factory and routed entries never coexist in one NavigationStack.
-- Route values contain destination data, while private entry identifiers define mounted page identity.
-- A destination resolver is application-owned and total; Runtime owns no route registry or route-type branch.
-- Nearest and root lookup remain scoped to one inherited navigation chain and never become process-global lookup.
-- Entry identifiers, not factory identity or unkeyed position, define mounted page identity.
-- Covered entries retain state but do not receive input or contribute visible damage.
-- Only the active page or active transition pair participates in navigation layout.
-- One progress value drives both pages of a transition.
-- Animation frames change presentation state without page recomposition or layout.
-- Runtime routes Back through generic events and NodeExtension capabilities without concrete Navigation branches.
-- Layers consume Back before page navigation.
-- Explicit Pop is an authorized operation and does not invoke BackRequested recursively.
-- Navigation does not automatically restore TextField focus or reopen IME.
-- Factory entries make no serialization, URL, or restoration claim.
-- Route paths resolve into the same private page-entry engine rather than creating another navigator.
-- Application activation selects a target Runtime before it requests route state and never targets an arbitrary committed View.
-- Browser URL policy remains outside the shared Runtime and UiWindow host contracts.
-
-## Page transition customization
-
-Custom page motion uses reusable effects inside the existing navigation engine.
-The common `TransitionSpec`, effect evaluation, timing, reversal, and scene contract are defined in [Animation and Scene Transitions](animation.md#extensible-transitions).
-Navigation reuses that contract instead of introducing another effect interface or animation scheduler.
-
-### Page configuration
-
-`PageTransition` is both the complete page-transition configuration and a View modifier:
-
-```cpp
-struct PageTransition {
-  TransitionSpec push;
-  TransitionSpec pop;
-  TransitionSpec replace;
-
-  static const detail::ModifierDescriptor& Descriptor();
-  bool operator==(const PageTransition&) const = default;
-};
-```
-
-An application attaches the value directly to the root of an ordinary page:
-
-```cpp
-auto enter = TransitionSpec(LiftTransition{}, TweenSpec{0.28, Easing::EaseOut});
-auto product_transition = PageTransition{
-    .push = enter,
-    .pop = enter.Reversed(),
-    .replace = TransitionSpec(FadeTransition{}, TweenSpec{0.18, Easing::EaseInOut}),
-};
-
-return Column {
-  Text("Product"),
-  Text("Product details"),
-}.With(product_transition);
-```
-
-`LiftTransition` is the application-defined effect illustrated in the animation design.
-Page-transition policy uses View::With() without layout metadata, a public page wrapper, or a new generic View method.
-An internal retained check validates root placement; it owns no progress or effect execution.
-
-The declaration belongs to the page root.
-Compiler-generated Scope and transparent Environment boundaries may surround that root, but lookup does not search arbitrary layout descendants.
-A declaration on an unsupported descendant is diagnosed instead of silently controlling its containing page.
-Multiple declarations on the same root follow ordinary property-modifier ordering: the last complete value wins.
-
-`NavigationStyle::motion` is `std::optional<PageTransition>`.
-An explicit page declaration overrides the themed value as a whole; there is no per-field merge.
-`PageTransition{}` explicitly selects immediate Push, Pop, and Replace because a default `TransitionSpec` completes immediately.
-Without a page declaration, the resolved theme value applies; an absent themed value also means immediate presentation.
-Flat and Material themes explicitly supply their intended motion instead of depending on accidental aggregate defaults.
-
-| Operation | Selected configuration |
-| --- | --- |
-| Push | Incoming page's `push` |
-| Pop or predictive Back | Departing page's `pop` |
-| Replace or arbitrary changed-path replacement | Incoming page's `replace` |
-
-The selected configuration is captured when the operation starts and remains stable until it finishes.
-Recomposition or theme changes configure later operations without restarting an active transition.
-Initial stack construction and initial deep paths present their final active destination immediately.
-
-### Navigation execution and interruption
-
-The existing entry engine, operation queue, retained pages, and factory-versus-controlled-path ownership remain authoritative.
-Transition customization changes presentation, not when a controlled path becomes authoritative or how factory operations reserve and commit history.
-One normalized progress value drives the outgoing and incoming pages; shared elements consume the same value.
-Effects evaluate against the current stack bounds and update retained presentation without per-frame state writes, recomposition, measurement, layout, or rerecording clean page content.
-Optional foreground decoration records into its own PaintSequence as the sampled progress changes.
-
-Predictive Back seeks this same progress directly and ignores the configured start delay during gesture control.
-Commit settles toward one and Cancel settles toward zero using the existing controller.
-Velocity is handed through `Seek` only when a real velocity sample is available; the engine must not invent one from an absent platform value.
-At Cancel, source presentation and the original interaction ownership are restored.
-The departing page's Pop declaration supplies the effect for both interactive and ordinary Back.
-
-A viewport change preserves normalized page progress and reevaluates page effects in the new bounds after required layout.
-The shared-element contract ends pairs captured in the former coordinate space while page motion continues.
-Reduced motion takes the same logical navigation outcome without retaining animation frame work.
-Unmounting the owner releases all visual retention and controller work through the existing lifecycle.
-
-Custom effects do not bypass navigation's input, focus, IME, clipping, or page-activation rules.
-Both pages disable content interaction during an active navigation operation and restore the final page after completion or cancellation; the container still handles Back and predictive cancellation.
-Fragments only replicate render data, so there is no per-fragment hit-test, focus, or accessibility representation.
-Their transforms, source clips, and optional synchronized foreground decoration use the shared rendering primitives described in [Animation](animation.md#fragment-composition-and-decoration).
-No new completion event, transition-operation handle, result type, or public cancellation protocol is introduced.
-
-An explicit Scene transition whose mutation also changes navigation composes with page presentation.
-There is no automatic suppression based on which system began first.
-An application that wants only the Scene effect selects immediate page motion for that operation's participating page.
-Shared elements follow navigation progress, not the independent Scene clock.
-
-## Shared-element transitions
-
-SharedElement and SharedBounds are declared in animation.h and support both navigation and explicit local mutations.
-Their matching, custom bounds, retention, and fallback contract is defined in [Shared transitions](animation.md#shared-transitions).
-
-```cpp
-Image(product.image).With(SharedElement(product.id));
-Column {
-  Text(product.name),
-  Text(product.description),
-}.With(SharedBounds("product-details"));
-```
-
-NavigationContainerExtension owns its SharedTransitionSession and supplies the page operation's progress; shared elements do not allocate another page clock.
-Only the outgoing and incoming pages participate, including markers inside their local scopes, without crossing a nested NavigationStack.
-Initial presentation and immediate or reduced-motion navigation skip shared retention.
-Push and Replace select destination configuration/content; Pop selects departing-page configuration/content and samples the canonical curve in reverse.
-The existing predictive Back transaction, cancellation, page state retention, and input exclusion remain authoritative.
-
-Capture resolves canonical layout before page effects and suppresses successful pairs before page-fragment copying.
-Shared visuals draw above pages and their fragments, below synchronized effect decoration and window layers, within the navigation container's clipping boundary.
-They never duplicate interaction, semantics, focus, or IME ownership.
-A missing or unsupported pair keeps ordinary page drawing; later geometry/content changes end an affected pair while page motion continues.
-Source/destination mounted identities are independent from navigation entry identifiers.
-
-## Transition validation
-
-Common effect, timing, and Scene acceptance criteria remain in the animation design.
-Page-transition and shared-element validation covers these policy and execution boundaries:
-
-- Complete page override, theme fallback, explicit immediate defaults, modifier ordering, transparent page-root boundaries, and misplaced declarations.
-- Incoming Push and Replace selection, departing Pop selection, immutable active configuration, queued operations, and controlled path replacement.
-- Initial and deep-path presentation, independent nested stacks, retained page state, and absence of per-frame recomposition, layout, or rerecording clean page content.
-- Deterministic predictive seeking, velocity availability, commit, cancellation, reduced motion, interruption, viewport changes, and owner destruction.
-- Separate reconciliation and shared identities, duplicate and mismatched marker errors, and rejection of overlapping ancestor/descendant pairs.
-- One-time pairing, missing counterparts, unavailable images, unrealized virtual targets, late content, and independent fallback without stopping other pairs.
-- Custom bounds endpoints, finite geometry, overshoot handling, reversal, draw order, clipping, paint suppression, and restoration after replacement or removal.
-- Source and target state retention without duplicate input, focus, semantics, or IME ownership, including predictive cancellation.
-- Ordinary image and painted-content transitions, text scale/crossfade boundaries, native-content fallback, interruption, and resource release.
-- Explicit Scene-plus-navigation composition with independent clocks and intentional immediate page configuration.
-
-The standalone Shared Transitions example demonstrates cross-page titles and covers, local SharedElement/SharedBounds motion, custom bounds, interruption, and slow playback; Transition Studio focuses on whole-page and Scene effects.
-Predictive Back, reduced motion, interrupted transitions, and unsupported-content fallback need executable coverage beyond visual inspection.
-Changes to shared presentation or drawing require a renderer audit and every affected platform build available locally; unavailable platforms must be reported explicitly.
+The [Shared Transitions example](../../examples/shared_transition/main.cpp) exercises page and local matching, and [Transition Studio](../../examples/transition/main.cpp) covers whole-page and Scene effects.

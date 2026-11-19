@@ -198,6 +198,16 @@ This operation reads a ViewSpec plus Environment and returns the final current-n
 It must not mutate ViewSpec.
 Invalid combinations that depend on preceding modifiers or resolved defaults propagate from `BuildFrame()` before the declaration is committed.
 
+## Retained modifiers
+
+Property modifiers apply left to right on one declaration. `Frame` merges only its supplied axes and bounds. Measurement intersects them with parent constraints, resolves preferred outer dimensions, and then deflates the resulting size for padding. Parent allocation policies read typed layout metadata separately.
+
+Retained modifiers reconcile by descriptor and relative declaration position. A compatible modifier updates its existing `NodeExtension`. Frame and paint callbacks preserve declaration order, and extension hit testing walks the reverse order. An extension operates through its owner's callback-scoped `ViewNode`, so retained work uses node handles or ordinary value snapshots. Custom child measurement and placement use `Layout` or `VirtualLayout`.
+
+`NodeExtension::EmitEvent()` uses the current mounted node's typed binding. UiWindow binds it after construction and before mounted callbacks. Compatible reconciliation replaces the bindings in place, and extensions retire before their owner releases them. Value-returning events yield an optional result. Emission belongs to mounted input, semantic action, or frame callbacks on the owning thread. Component scopes use `UseEvents()` to emit across their explicit component boundary.
+
+The frame's borrowed `TextMeasurer` and the resolved node transform are available during `PrepareGeometry()`. Its snapshots drive subsequent paint and hit testing. See [paint and invalidation](incremental-rendering.md#nodeextension-invalidation) and [gesture arbitration](gestures.md) for callback ordering and pointer ownership.
+
 ## Incremental invalidation
 
 An Environment change does not automatically mark every descendant for measurement, layout, and paint.
@@ -274,37 +284,11 @@ Exact layout constraints and safe-area geometry remain layout inputs rather than
 
 ## Parent layout metadata across composition boundaries
 
-`Grow` is parent layout metadata: a parent layout reads it from a child to decide how that child participates.
-The public `Grow` modifier compiles to a private typed LayoutValue key rather than a ViewProperties field, so it uses the same declaration, reconciliation, and boundary lookup channel as other typed layout data.
-LayoutValue declarations remain on their owning ViewSpec and are not copied between mounted nodes.
-Frame, Padding, visual modifiers, events, semantics, keys, retained modifiers, Spacing, MainAlign, CrossAlign, and Align retain their existing node-local meaning.
-Spacing and the alignment properties remain strongly typed ViewProperties because a layout node reads them as its own generic policy; they are not metadata consumed from that node by its parent.
-
-A Scope exposes an effective parent layout value with boundary-override precedence:
-
-```text
-explicit value on the Scope
-  -> effective value from the Scope's single composed child
-  -> the ordinary default
-```
-
-The presence of the private Grow LayoutValue retains absence separately from an explicit zero.
-`Component().With(Grow(0.0F))` suppresses a Grow value declared by the component root, while a Scope with no explicit Grow exposes the root value.
-Other LayoutValue keys follow the same precedence.
-An empty Scope uses the explicit boundary value when present and otherwise exposes no LayoutValue and a zero Grow factor.
-
-An Environment boundary cannot declare View behavior or parent layout metadata, so it always exposes the effective value from its single child.
-Nested Scope and Environment boundaries resolve recursively without caching or copying the result.
-The mounted child remains the only source for its declarations, and compatible child reconciliation naturally makes changed effective values visible to the next parent measurement.
-
-This rule does not forward or duplicate modifiers.
-A modifier attached to a Scope remains owned by that Scope, and a modifier attached to the composed root remains owned by the root.
-Only effective LayoutValue queries cross the boundary; Grow participates through its private key.
-Runtime composition, retained modifier reconciliation, paint, semantics, hit testing, and Environment ownership do not gain a parallel forwarding path.
+Layout policies read effective parent-child metadata through Scope and Environment boundaries. [Parent layout metadata](layout.md#parent-layout-metadata) defines the lookup precedence and how it applies to `Grow` and `LayoutPriority`.
 
 ## Theme API
 
-Theme becomes an Environment boundary with direct View content:
+Theme is an Environment boundary with direct View content.
 
 ```cpp
 return MaterialTheme {
@@ -315,9 +299,7 @@ return MaterialTheme {
 };
 ```
 
-MaterialTheme, FlatTheme, their dark variants, and the generic Theme API become View-producing declarations.
-They accept a content View and optionally an explicit Theme definition where that API is meaningful.
-They do not require a content factory solely to make `UseTheme()` work.
+MaterialTheme, FlatTheme, their dark variants, and generic Theme are View-producing declarations. An explicit `ThemeSpec` establishes a complete token and style boundary. A `ThemeDefinition` with component overrides alone inherits unspecified styles and tokens. Built-in components project the effective Theme into resolved defaults, then property modifiers apply in order. Third-party components use typed style values through the same Environment lookup.
 
 Theme-aware built-in components store raw semantic inputs and resolve their styles while reconciling under the Theme boundary.
 A reusable component that directly calls `UseTheme()` for composition logic must instead be composable:
@@ -325,10 +307,13 @@ A reusable component that directly calls `UseTheme()` for composition logic must
 ```cpp
 [[huxerui::composable]]
 View BrandMark() {
-  const auto& theme = UseTheme();
-  return Text(theme.brand_name);
+  return Text("Settings").With(Foreground{UseTheme().colors.primary});
 }
 ```
+
+UiWindow seeds system brightness from the host before window hooks. Asynchronous adapters publish changes on the application thread, and Environment invalidates scopes subscribed through `UseSystemThemeBrightness()`. The host preference is independent of `ThemeSpec::brightness`, which describes the inherited palette. Subscriptions retain the original window identity and stop at retirement.
+
+`UseViewportClass()` observes the width class computed from `AppOptions::viewport_breakpoints`. Window metrics changes notify subscribers only when that class changes. Exact size and safe-area changes still flow through layout. Layer appearance uses the [captured Environment](window-presentation.md#captured-environment-and-appearance).
 
 ## Resource resolution
 
@@ -382,40 +367,7 @@ This deliberately avoids a partial C++ call graph: aliases, function pointers, m
 
 ## Virtual layout
 
-A VirtualLayout item factory remains a genuine deferred factory because items are realized on demand.
-It returns an Environment-independent ViewSpec tree or a Scope View produced by a composable function.
-Direct composition API calls inside the raw virtual factory remain invalid because the factory itself is not a RecomposeScope.
-
-Virtual mounted state retains the owner's effective Environment.
-Realizing or reconciling an item passes that Environment into the normal Runtime path; no special virtual Composer or automatically inserted Scope is introduced.
-Ambient and resource reads performed while a lazy declaration is compiled are retained by the nearest existing declaring RecomposeScope for that VirtualLayout node.
-Refreshing a compatible virtual source clears its deferred declarations and retained dependency set so realized items reconcile against the latest factory captures.
-This declaration refresh does not invalidate measured item extents: built-in virtual layout metrics reset only when their item count, axis, tracks, spacing, fixed or estimated extents, or span plan changes.
-Remeasured realized items update retained metrics incrementally, while unrealized items continue to use their previous measurement or the configured estimate.
-Candidate measurements do not commit corrected scroll offsets; the final layout placement commits and clamps the correction against the chosen viewport so a parent's provisional measurement cannot truncate scrolling.
-None of these retained records creates a Scope, an Environment observer object, or another composition lifetime for each item.
-
-Keyed items declare stable sibling identity on the factory's returned root View; duplicate realized keys are framework invariant failures.
-Unkeyed items use their logical index, so dynamic stateful sources should supply keys when inserting, deleting, or reordering.
-A keyed composable item preserves its state identity when it moves, leaves the realization window, or re-enters under a changed Environment.
-
-### Tree snapshots
-
-TreeView owns one Scope that reads the roots, item-info provider, and synchronous Children snapshots for the expanded structure.
-It invokes the row factory once for each expanded logical item and reads the returned root View's key without compiling its declaration or executing a nested Scope.
-Keys are unique among logical siblings and are internally qualified by parent identity before rows enter the flat virtual layout.
-Unkeyed rows use sibling position; moving a keyed row to another parent creates a new identity.
-The snapshot retains those declarations, resolved labels, controlled values, parent relationships, and event dispatch captures.
-It resolves an optional TreeView disclosure icon once per snapshot; each realized row presents it as an image View, applies the current foreground color to vector assets, and uses the retained Rotation animation for expansion.
-Scrolling requests retained declarations and executes only realized row Scope bodies; it never repeats business factories or Children traversal until the tree Scope is invalidated.
-Local hooks in row content belong in a composable function or explicit Scope, since the raw callbacks do not create a per-item composition lifetime.
-
-The initial layout uses fixed row extents and a bounded vertical viewport.
-Structural changes preserve the committed top item's identity and intra-row offset, falling back to its surviving parent or neighbor when it disappears.
-An explicit scroll change after that committed geometry takes precedence over anchor restoration in the next layout.
-A row containing the focused control remains realized outside the cache window; removing its logical branch releases that control and restores navigation focus to the tree.
-The snapshot and semantic frame cost O(V) for V expanded items; only mounting, nested composition, measurement, and drawing are limited to the viewport/cache rows plus the focused row.
-Immediate work inside an ordinary factory still costs O(V times factory work), so expensive row composition should be deferred in a composable function.
+Virtual item factories return deferred declarations that reconcile under the virtual owner's Environment. [Virtual item lifecycle](layout.md#virtual-item-lifecycle) defines dependency capture, identity, eviction, and state restoration. [Tree snapshots](layout.md#tree-snapshots) describes the separate expanded-tree source policy.
 
 ## Layers and overlays
 
@@ -470,13 +422,9 @@ Focused validation must cover:
 - A composable component reconciling under an updated mounted Environment.
 - An ordinary unmarked View helper remaining immediate and Environment-independent.
 - Code-generated composables matching explicit Scope state, key, Lifecycle, and TaskScope behavior.
-- Virtual items rejecting missing or duplicate root keys and preserving keyed state across recycling.
 - Layers observing exact changes through their captured Environment and retaining its last values after provider teardown.
 - TextSelection overlay, text input, debug overlay, and window controls resolving from the intended Environment.
 - Environment boundary nodes producing no paint, semantics, pointer target, or extra layout geometry.
-- Grow's private LayoutValue and other typed LayoutValue keys crossing generated Scope and Environment boundaries without copying child modifiers.
-- Explicit Scope Grow and LayoutValue declarations overriding component-root values, including an explicit zero Grow factor.
-- Compatible Scope recomposition propagating changed component-root parent layout metadata to ancestor layout.
 - Final-value equality avoiding unnecessary measure, layout, paint, semantics, and retained extension invalidation.
 - ViewSpec compilation exceptions leaving the failing node's mounted values and the previously published frame intact.
 

@@ -1,7 +1,6 @@
 # Installation
 
-HuxerUI releases provide portable SDK archives and installers for desktop development hosts and Android arm64-v8a devices running Termux.
-The SDK contains public headers, CMake package files, host tools, the `huxerui` CLI, framework resources, the HuxerUI application-development Skill, and target artifacts required by supported project platforms.
+Install the SDK for the machine that runs the CLI. The SDK contains the CLI, host tools, headers, CMake helpers, framework resources, and target libraries. Check [Platform Support](platforms.md) for the toolchain and runtime requirements of your application targets.
 
 ## Windows
 
@@ -27,10 +26,9 @@ curl -fsSL https://github.com/HuxerUI/HuxerUI/releases/latest/download/install.s
 The default installation directory is `~/Library/Developer/HuxerUI` on macOS and `~/.local/share/HuxerUI` on Linux and Android.
 The installer writes `HUXERUI_HOME` and the SDK `bin` directory to the current shell profile.
 
-Release archives are selected for macOS arm64 or x86_64, Linux aarch64 or x86_64, and Android arm64-v8a hosts.
-Android host installation currently supports Termux and uses the same `install.sh` entry point.
+The installer selects a macOS arm64 or x86_64 archive, a Linux aarch64 or x86_64 archive, or an Android arm64-v8a archive for Termux. The official Linux installer checks the [glibc requirement](platforms.md#linux) before it runs the installed CLI.
 
-Open a new terminal after installation, then verify the SDK:
+On either Windows or Unix, open a new terminal after installation and verify the SDK:
 
 ```bash
 huxerui doctor
@@ -76,7 +74,7 @@ Use `--yes` with `sdk use` or `sdk update` to skip confirmation. Version switchi
 
 For an installation at `<prefix>`, additional versions are stored at `<prefix>-versions/<version>`. The running CLI must belong to the SDK pointed to by `HUXERUI_HOME`.
 After a successful switch, `HUXERUI_HOME` and the corresponding `bin` entry on `PATH` point to the chosen SDK in new terminals. On Unix, switches reuse the shell profile already managing those SDK versions and print its path.
-Use `--sdk <path>` with a build command to select a different SDK for one invocation.
+To select another SDK for a single build, see [SDK selection](getting-started.md#select-an-sdk-for-one-invocation).
 
 ## Local archive
 
@@ -115,6 +113,4 @@ The installer refuses to remove a directory that does not contain a recognizable
 
 ## Toolchains
 
-Installing HuxerUI does not install platform SDKs, compilers, Android tooling, Emscripten, Xcode, or signing identities.
-Use `huxerui doctor [platform-list]` for read-only diagnostics, add `--json` for a machine-readable installation plan, and use `huxerui setup <platform-list>` to prepare the platform prerequisites. Both commands accept `--operation` to select build, run, device discovery, or packaging requirements. The official Linux SDK installer checks for glibc 2.38 or later before launching the downloaded CLI.
-See [Platform Support](platforms.md) for host-specific requirements.
+After installing HuxerUI, use [environment diagnosis and setup](getting-started.md#diagnose-the-environment) to check and prepare the external toolchain for your target.

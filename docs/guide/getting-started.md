@@ -1,7 +1,6 @@
 # Getting Started
 
-This guide uses an installed HuxerUI SDK.
-Repository contributors should use [Building HuxerUI](../development/building.md).
+Start with an [installed HuxerUI SDK](installation.md) and check the [platform requirements](platforms.md) for the targets you plan to build. For framework development, see [Building HuxerUI](../development/building.md).
 
 ## Create a project
 
@@ -10,25 +9,13 @@ huxerui create app hello_huxer --id dev.example.hello --platform windows,macos,l
 cd hello_huxer
 ```
 
-The command creates shared sources under `src`, resources under `resources`, the requested platform shells, and the HuxerUI application-development Skill under `.agents/skills`.
-Only build platforms supported by the current development host.
+The command creates `src/app.cpp`, the resource directories, the selected shells under `platform`, and the application-development Skill. The CMake scaffold enables all six shells by default. Use a subset with `--platform` and add another shell later with `huxerui platform add <platform-list>`.
 
-Use `--agent` to select a different Agent Skill directory:
+Use `--agent` to select where the SDK copies the Skill. To enable the Claude and ZCode directories, pass `--agent claude,zcode` when creating the project.
 
-```bash
-huxerui create app hello_huxer --platform windows --agent claude,zcode
-```
+`codex`, `antigravity`, `opencode`, `command-code`, `omp`, and `dsh` share `.agents/skills`. `claude` uses `.claude/skills` and `zcode` uses `.zcode/skills`. The default is `codex`. Use `all` for all three directories or `none` to omit the Skill.
 
-`codex`, `antigravity`, `opencode`, `command-code`, `omp`, and `dsh` share `.agents/skills`; `claude` uses `.claude/skills`; and `zcode` uses `.zcode/skills`.
-The default is `codex`, `all` writes all three directories, and `none` omits the Skill.
-
-Add another shell later with:
-
-```bash
-huxerui platform add web
-```
-
-A Library created without `--platform` remains a common C++ Library but includes an all-platform `examples/preview` application, so `huxerui run <platform>` from the Library tree runs that Preview on a compatible host.
+For a desktop C++ modules project, use `--build mcpp` and omit `--platform`. See [C++ Modules and mcpp](../../skills/huxerui-app-development/references/cpp-modules-and-mcpp.md).
 
 ## Diagnose the environment
 
@@ -37,7 +24,7 @@ huxerui doctor
 huxerui doctor web,android
 ```
 
-`doctor` reports the selected SDK, project configuration, compiler, platform tools, and actionable missing prerequisites without changing the machine.
+`doctor` reports SDK, project, and tool readiness without changing the machine. With no platform list it checks the common environment and, inside a project, the enabled targets available on the host. `--operation` defaults to `build`; select `run`, `devices`, or `package` to check a different workflow.
 
 For supported downloadable prerequisites:
 
@@ -45,11 +32,13 @@ For supported downloadable prerequisites:
 huxerui setup web,android
 ```
 
-Use `huxerui doctor android --json` to preview the installation plan without making changes. Use `--operation run`, `--operation devices`, or `--operation package` to check prerequisites for a specific operation. For example, `huxerui doctor linux --operation package --format deb` checks tools needed by DEB packaging.
+Use `huxerui doctor android --json` to get the read-only installation plan as JSON. Both commands accept `--sdk <path>` and the applicable `--generator`, `--abi`, `--java-home`, `--device`, or `--format` selectors. For example, `huxerui doctor linux --operation package --format deb` checks tools for DEB packaging.
 
-Setup rechecks the environment after each installation. You can rerun it after addressing a manual action or restarting the machine. `--yes` confirms the HuxerUI plan, while official installers retain their own license and privilege prompts.
+`setup` rechecks the environment after each installation and reuses compatible tools on subsequent runs. `--yes` confirms the HuxerUI plan. Vendor tools still handle license and privilege prompts. Both commands return `0` when ready, `1` for an incomplete check or failure, and `2` for invalid arguments. Setup also returns `3` for cancellation and `4` when a restart is required.
 
 ## Build and run
+
+Choose a target available on your host. For example, on Windows you can build or launch the native application or run the Web target.
 
 ```bash
 huxerui build windows
@@ -57,32 +46,23 @@ huxerui run windows
 huxerui run web
 ```
 
-Use `huxerui run <platform> --watch` to rebuild after edits and relaunch the application or refresh the Web page. A build failure leaves the current instance running. A successful reload starts a new application session and rebuilds in-memory state. Press Ctrl+C to end the watch session.
+Use `huxerui run <platform> --watch` to rebuild after edits and relaunch the application or refresh the Web page. A build failure leaves the current instance running. Each successful reload starts a new application session. Press Ctrl+C to end the watch session.
 
-Build and run use the `debug` configuration by default. Use `--config release` to select a release build.
-Use `--generator <name>` only when the host has multiple compatible CMake generators and an explicit selection is required.
-Use `--sdk <path>` to select an installed SDK or a HuxerUI source checkout for `build`, `run`, `package`, or `open ios`. A source checkout builds HuxerUI from source.
-Pass `--profile` with a [HuxerUI source checkout](../development/building.md#runtime-profiling) to enable performance recording support for `build`, `run`, or `package`.
+`build` and `run` default to `debug`. Use `--config release` for a release build or [package the application](packaging.md) to produce distributable output. `--generator <name>` selects a compatible CMake generator for macOS, Linux, or Web. Desktop builds honor `CMAKE_BUILD_PARALLEL_LEVEL`.
+
+### Select an SDK for one invocation
+
+Use `--sdk <path>` to try another installed SDK or build against a source checkout. The selection applies to that invocation and its child processes. CMake caches are separate for each framework location.
 
 ```bash
 huxerui run windows --sdk ../HuxerUI
 ```
 
-The selection applies only to that invocation and its build children. Without `--sdk`, the CLI looks for an installed SDK via `HUXERUI_HOME` or the CLI's own installation. Pass `--sdk` explicitly for a source checkout.
+Without `--sdk`, the CLI uses the installed SDK selected by `HUXERUI_HOME` or located next to the running CLI. Direct CMake builds of generated projects can select either layout with `-DHUXERUI_HOME=<path>`. Use a separate build directory for each location. To collect [Runtime profiling](../development/building.md#runtime-profiling), pass `--profile` with an explicit source checkout.
 
-Direct CMake builds of generated projects use `-DHUXERUI_HOME=<path>`. CMake loads the source checkout or installed package at that location. Use a separate build directory for each framework location; the CLI does this automatically.
+### Select an Android or iOS device
 
-The SDK CLI also provides an independent mcpp frontend for projects that own an `mcpp.toml` manifest:
-
-```bash
-huxerui mcpp build --project ../my-mcpp-project
-```
-
-`--project` defaults to the current directory. The CLI invokes mcpp directly, and the mcpp project owns its sources, dependencies, and framework integration.
-
-The CLI passes the selected framework home through its process environment and build arguments without writing it into platform configuration files. Direct Android Studio builds require `HUXERUI_HOME` in the IDE's environment; direct Xcode builds require it in the IDE's environment or explicit build settings, such as `Config/Local.xcconfig`. An already running IDE does not inherit the CLI's temporary environment or remember its last `--sdk` selection.
-
-Android and iOS accept a device selected from:
+List destinations before selecting a device for `run`.
 
 ```bash
 huxerui devices android
@@ -91,17 +71,17 @@ huxerui run android --device <id>
 huxerui run ios --device <id>
 ```
 
-Open the generated iOS project with:
+Desktop hosts use a ready Android device or emulator. Supply `--device` when several devices are ready. Pass `--java-home <path>` to select the JDK for the Gradle build. On Termux, `run android` opens the APK in the system installer on the local device. iOS can target a booted Simulator or a paired physical device. A plain `build ios` uses the generic Simulator destination.
+
+### Open a platform project in an IDE
+
+Use the CLI to open the generated iOS project.
 
 ```bash
 huxerui open ios
 ```
 
-Android and iOS commands first resolve the CMake library declarations so Gradle and Xcode can attach their platform packages before compiling. This graph-only configure does not require a host C++ compiler or host HuxerUI binaries. Keep library declarations and aliases available under `HUXERUI_LIBRARY_GRAPH_ONLY`; guard native target configuration and platform dependency discovery with `if (NOT HUXERUI_LIBRARY_GRAPH_ONLY)`. The generated library template already separates these operations. After changing library dependencies, run the CLI build command (or `huxerui open ios`) to refresh platform integration before building directly in the IDE.
-
-A library can call `huxerui_use_library()` on its own CMake target to declare a dependency. Pass `PUBLIC` when the library's public headers use the dependency's types or headers. Keep the declaration available during graph discovery as well as compilation. For iOS, the CLI attaches Swift products from all reachable libraries, and the application core archive includes their CMake static libraries.
-
-An iOS Swift package uses `platform/ios/<Swift product>/`, such as `platform/ios/Camera/` for `HuxerUI::Camera`. When migrating an existing library, move its `Package.swift`, `Sources`, and Swift package resources into the product directory together. The CLI uses the new path when generating the package or attaching it to an app.
+For direct Android Studio builds, set `HUXERUI_HOME` in the IDE's environment. For direct Xcode builds, set it in the environment or an explicit build setting such as `Config/Local.xcconfig`. After changing library dependencies, run `huxerui build android`, `huxerui build ios`, or `huxerui open ios` to refresh platform integration before building in the IDE.
 
 ## Application source
 
@@ -151,81 +131,44 @@ Composable code generation is enabled by the generated CMake project.
 
 ## Resources
 
-Place application resources in the generated resource tree:
+The scaffold loads typed keys from its `resources` directory. See [Resources and Images](resources.md) for package structure, localization, raw assets, and image editing.
 
-```text
-resources/
-  images/
-    logo.png
-    logo@2x.png
-    mark.svg
-  raw/
-    config.json
-  strings/
-    default.properties
-    zh.properties
+## Libraries
+
+Use `huxerui create library <name>` to scaffold a common C++ library. Its `examples/preview` application receives all platform shells by default. Pass `--platform` to scaffold selected platform integration and the corresponding preview shells. Commands such as `huxerui run <platform>` resolve to the preview when run from the library root.
+
+Use `--namespace` and `--target` to override the name-derived C++ namespace and public CMake target. For example, `--namespace scave::camera --target Scave::Camera` generates `<scave/camera.h>`, `scave::camera::Install`, and the public target `Scave::Camera`.
+
+Pass the dependency's public CMake target to `huxerui_use_library`. The consumer can be an application or another library.
+
+```cmake
+huxerui_use_library(my_app
+        TARGET CameraKit::CameraKit
+        PATH "${CMAKE_CURRENT_SOURCE_DIR}/libraries/CameraKit"
+)
 ```
 
-The build generates typed resource identifiers in `app_resources.h` and packages framework and application resources together.
-Raster density variants share one logical size; SVG resources are compiled to platform-neutral vector data.
-Static SVG resources may use paths and basic shapes, groups, file-local `defs`/`use` references, one-path `clipPath` geometry, solid or linear/radial gradient fills and strokes, transforms, and root `preserveAspectRatio` mapping.
-Gradients support local inheritance, object-bounds or user-space coordinates, `gradientTransform`, stop and paint opacity, and pad extension.
-The compiler rejects browser-dependent SVG features such as text, scripts, external styles, invalid gradient transforms, masks, filters, animation, and external references instead of approximating them differently on each renderer.
+For a Git dependency, use an HTTPS `URL` and either `COMMIT` with a full SHA or `TAG` with a Git tag. For an already declared CMake target, use `TARGET` alone. Linkage defaults to `PRIVATE`. Use `PUBLIC` when the consumer's public headers expose the dependency.
 
-```cpp
-#include <app_resources.h>
+Keep library targets, aliases, and `huxerui_use_library()` declarations available during `HUXERUI_LIBRARY_GRAPH_ONLY`. Put compilation and platform dependency discovery after that boundary. The CLI uses the declaration-only graph to attach Android Gradle projects and iOS Swift products. An iOS package lives at `platform/ios/<Swift product>/`, such as `platform/ios/Camera/` for `HuxerUI::Camera`.
 
-return Column {
-  Image(app::images::logo),
-  Text(app::strings::welcome),
-};
-```
-
-In an application-thread callback, `UseService<Resources>()->GetString(app::strings::welcome)` resolves a value immediately. Use the same service's `GetImage`, `GetVectorImage`, or `GetRawResource` for other resource types.
-
-To read a separate resource package, pass the directory produced by `hrc` to `Resources::OpenPackage(File("path/to/package"))`. The returned resolver can be shared across threads. String and image lookups use `en` and `1x` by default and accept an explicit `ResourceConfiguration`. Keep a copy of the `Resources` value alive while reading uncached raw assets.
+Use the [library integration design](../design/sdk-cli.md#libraries-and-platform-integration) for target naming and platform package rules, and [Extending HuxerUI](extending.md) for the runtime extension APIs.
 
 ## Project commands
 
-```text
-huxerui create app <name> [--id <project-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
-huxerui create library <name> [--namespace <cpp-namespace>] [--target <public-cmake-target>] [--id <project-id>] [-p|--platform <platform-list>] [--agent <agent-list>]
-huxerui platform add <platform-list>
-huxerui doctor [platform-list] [--operation build|run|package|devices] [--json]
-huxerui setup <platform-list> [--operation build|run|package|devices] [--yes]
-huxerui devices [platform]
-huxerui build [platform-list] [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
-huxerui mcpp build [--project <dir>] [--release] [--locked] [--offline] [--verbose]
-huxerui run <platform> [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>] [--watch]
-huxerui package <platform-list> [-d|--device <id>] [--config debug|release] [--generator <name>] [--sdk <path>] [--java-home <path>]
-huxerui open ios [--sdk <path>]
-```
+Run `huxerui --help` for the command list and supported options. `build`, `run`, `package`, and `open` also accept `--help` immediately after the command. `b`, `r`, and `pkg` are aliases for `build`, `run`, and `package`.
 
-Use `b`, `r`, and `pkg` as short forms of `build`, `run`, and `package`. These commands and `open` accept `-h` or `--help` immediately after the command name.
+| Task | Command |
+| --- | --- |
+| Create a project or add a platform shell | `huxerui create app <name>`, `huxerui create library <name>`, `huxerui platform add <platform-list>` |
+| Check or prepare a toolchain | `huxerui doctor [platform-list]`, `huxerui setup <platform-list>` |
+| Discover destinations | `huxerui devices [platform]` |
+| Build, launch, or distribute an application | `huxerui build [platform-list]`, `huxerui run <platform>`, `huxerui package <platform-list>` |
+| Open an iOS project | `huxerui open ios` |
+| Build an mcpp project through the bundled CLI | `huxerui mcpp build [--project <dir>]` |
 
-Build outputs stay outside the source tree under the project-owned `.huxerui` directory.
-Packaged application artifacts are collected under `dist/<platform>`.
-Desktop packages are a Windows setup executable, a macOS DMG, or a Linux AppImage by default. See [Packaging Applications](packaging.md) for Linux DEB and RPM packaging, runtime payloads, and the custom Windows installer interface.
-Use [`--abi <abi-list>`](packaging.md#target-abis) with `build`, `run`, or `package` to select target ABIs for one platform.
-Android builds accept `--java-home <path>` to use that JDK for the current CLI invocation without changing the shell or generated Gradle project.
-Desktop builds honor `CMAKE_BUILD_PARALLEL_LEVEL`; set it to a positive job count to limit concurrent compilation, including builds using `--sdk`. When unset, the selected build tool uses its default concurrency.
-The generated `CMakeLists.txt` keeps source discovery, target creation, resources, and library dependencies explicit.
-Its sibling `HuxerUIProject.cmake` contains the generated project plan, SDK discovery, and platform-shell connection details.
-New applications start at version `0.1.0`, independently of the HuxerUI SDK version; Android and iOS retain their own platform version settings.
-Native macOS projects default to macOS 12 before CMake initializes the toolchain, while an explicit deployment target, `MACOSX_DEPLOYMENT_TARGET`, or a supplied toolchain takes precedence.
-The macOS bundle records the actual executable name and the CMake project version.
-Web builds synchronize the HTML shell and icons even when no C++ source needs rebuilding.
+Use a comma-separated platform list or `all`. For `build`, `all` selects the enabled shells and an omitted list selects the host platform if enabled. Build intermediates live under `.huxerui`. For ABI selection, signing, and final artifacts, see [Packaging Applications](packaging.md).
 
-On Android, the application library defaults to `lib<cmake-target>.so` and statically links HuxerUI.
-The generated Gradle shell resolves the final CMake artifact name into `BuildConfig.HUXERUI_APP_LIBRARY`, which MainApplication passes to `System.loadLibrary`; changing `OUTPUT_NAME` or a configuration postfix does not require a second library-name setting in Gradle.
-All packaged ABIs must use the same application library name, and that name must not be `huxerui`.
-Custom Android hosts must load their application library before using HuxerUI Java services or creating a Runtime; HuxerUIActivity does not load application code on their behalf.
-Existing source-controlled shells are not rewritten by SDK updates: update their framework selection, STL, Gradle integration, and Application loading code together when adopting this contract.
-
-Library names remain repository and display identities.
-`--namespace` selects the exact generated C++ namespace, while `--target` selects an unqualified or single-package-qualified public CMake target.
-Package prefixes such as `HuxerUI::` are allowed; the generated targets must not collide with existing CMake targets.
-For example, `--namespace scave::camera --target Scave::Camera` generates `<scave/camera.h>`, `scave::camera::Install`, and the consumer target `Scave::Camera`.
-When omitted, both values retain the name-derived defaults.
+The `huxerui mcpp build` command delegates to the installed `mcpp` executable. `--project` selects the directory containing `mcpp.toml` and defaults to the current directory.
 
 Continue with [Core Concepts](core-concepts.md) and [Components and Input](components.md).

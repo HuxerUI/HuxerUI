@@ -2,9 +2,9 @@
 
 ## Constraints
 
-Parents measure children with minimum and maximum width and height constraints.
-A layout returns a constrained size and placements for the children it measured.
-Application code normally expresses intent with built-in containers and modifiers rather than fixed device dimensions.
+Parents give each child minimum and maximum dimensions in DIPs. A finite maximum bounds that axis. Express preferred and allowed dimensions with `Frame`, add inside space with `Padding`, and let the parent resolve the final size. A parent constraint can limit an explicit preferred size.
+
+For a bounded scrolling region, give it finite space through its parent or a `Frame`. A virtual list needs a bounded scroll axis. A virtual grid needs both dimensions bounded.
 
 ## Built-in layouts
 
@@ -34,11 +34,7 @@ return Column {
 );
 ```
 
-`Grow()` is parent-child layout metadata.
-It affects participation in a compatible parent layout and propagates across transparent composition boundaries such as scopes and Environment providers.
-`Row` and `Column` allocate finite remaining main-axis space by grow factor; an unbounded main axis preserves natural sizes instead.
-Growing children avoid speculative measurement when the cross axis does not stretch or its stretched size is already fixed by tight constraints.
-Stretching under loose cross-axis constraints still measures intrinsic cross sizes before allocating space.
+Use `Grow()` on a child to share remaining space in a bounded `Row` or `Column`. A larger factor gets a larger share. Use `Spacer()` to reserve some of that space without visible content. An unbounded main axis keeps natural sizes. `Grow()` on a component applies through transparent composition and Environment boundaries.
 
 ### Layout priority
 
@@ -51,9 +47,9 @@ return Row {
 }.With(Spacing(8.0F));
 ```
 
-`Row` and `Column` measure the children with loose main-axis constraints and use the stretched cross-axis extent when `CrossAlign(Stretch)` applies. If the sizes plus spacing fit, positive `Grow()` factors divide the surplus and add it to the measured sizes, up to each child's `Frame` maximum. If space is short, the layout reserves `Frame` minima first and gives each priority group, highest first, as much of its measured size as possible. Children with equal priority share that budget in proportion to the size each can give up. A child measured under a smaller maximum can wrap text or use less than its allocation. If the minima plus spacing exceed the available extent, the container still respects its own constraints and its existing overflow behavior applies.
+Use priority for children that should keep their measured size when space is tight. Use `Grow()` to distribute extra space. `Frame` minima still apply, so use a one-line limit, wrapping, or other appropriate overflow handling where the content can shrink.
 
-Use `child.LayoutValueOr<LayoutPriority>(0.0F)` to read the same metadata in a custom layout. The custom layout decides how to use it.
+Custom layouts can read the same metadata with `child.LayoutValueOr<LayoutPriority>(0.0F)`. See [linear allocation](../design/layout.md#linear-allocation) for the sizing rules.
 
 ## Resizable panes
 
@@ -80,13 +76,11 @@ return SplitLayout {
 });
 ```
 
-Separators reserve 8 DIPs before allocation. A zero Grow factor uses the preferred main-axis Frame dimension or the pane's natural size; positive factors share the remaining finite space while honoring minimum and maximum bounds. A growing pane's preferred dimension is not an additional size base. Remaining space can stay unused when there are no growing panes or all of them reach their maximum. Parent constraints take precedence if the requested sizes cannot fit. Unbounded main-axis measurement preserves natural sizing and disables resizing.
+Use a pane's `Frame` for its preferred size and bounds. A zero `Grow` keeps it fixed or naturally sized. Positive factors share the space after separators and fixed panes. Supply a bounded main axis to allow resizing.
 
-Dragging, focused arrow keys, Home/End, and accessibility adjustment emit one synchronous `SplitEvents::Changed` batch. Each `SplitChange` contains the complete proposed Frame/Grow and the pane's current flattened nonempty index. Apply all entries to controlled state; do not retain index batches across reordering. Rejecting a proposal leaves allocation unchanged. A proposal can coordinate other panes' weights or convert a growing pane to fixed sizing when needed to reproduce the requested geometry; write back both Frame and Grow. Window resizing and programmatic updates never emit Changed or overwrite the declared sizing preferences.
+Dragging, keyboard, and accessibility adjustments deliver one `SplitEvents::Changed` batch for the current pane order. Apply every entry's `Frame` and `Grow` together. A resize can change a pane's sizing mode. Window resizing and programmatic changes leave the declared preferences in application state.
 
-Cancel and Escape stop dragging without undoing accepted updates. Incompatible topology, orientation, enabled state, or geometry/configuration changes cancel the active drag. Panes are clipped to their allocations.
-
-The [SplitLayout example](../../examples/split_layout/main.cpp) demonstrates three controlled panes, optional inspector content, stable editor state, and vertical arrangement on compact windows. Build the `example_split_layout` target to run it.
+See the [SplitLayout example](../../examples/split_layout/main.cpp) for a controlled three-pane layout and [pane sizing rules](../design/split-and-docking.md#shared-size-rules) for the full allocation contract.
 
 ## Docking workspaces
 
@@ -164,6 +158,8 @@ Use `LocalToWindow()` and `WindowToLocal()` for point conversion; the inverse re
 The final transform for the current frame is available to `NodeExtension::PrepareGeometry()`.
 Earlier extension callbacks may still observe the previously resolved transform, and paint commands remain node-local even when geometry preparation retains a window-space value for a presentation boundary.
 
+To inspect committed layout, open the debug overlay and enable **Layout guides**. It shows resolved padding, gaps and alignment guides in linear layouts, and scroll and clip bounds. Enable `AppOptions::show_debug_overlay` if the overlay is disabled for your build.
+
 ## Responsive composition
 
 `UseViewportClass()` exposes the current compact, medium, or expanded width class.
@@ -184,14 +180,11 @@ Built-in adaptive components may select their documented presentation from the s
 
 ## Window insets
 
-Window content can use inset or edge-to-edge mode.
-The root receives viewport and safe-area data atomically from the platform adapter.
-Use the window-level mode and `SafeArea` behavior documented in [Window Insets and System Bars Design](../design/window-insets.md) rather than hard-coded status-bar or navigation-bar padding.
+For edge-to-edge window content, add `SafeAreaPadding` where controls need insets. Use its edge flags to leave some edges for descendants. The modifier adds to ordinary `Padding`. See [Window Insets and System Bars](../design/window-insets.md) for the window-level content modes.
 
 ## ScrollView
 
-`ScrollView` measures one content subtree and clips presentation to the viewport.
-It owns direct drag, wheel and trackpad consumption, kinetic motion, nested-scroll arbitration, overscroll, focus reveal, and semantic scroll actions.
+Use `ScrollView` to make one ordinary content subtree scrollable within a clipped viewport.
 
 ```cpp
 return ScrollView {
@@ -239,13 +232,7 @@ return ScrollView(content).With(ScrollPhysics{
 });
 ```
 
-Wheel and trackpad input scrolls nested containers independently on each axis and falls back to the host when HuxerUI consumes neither axis.
-Direct touch dragging may retain a temporary overscroll displacement after every nested consumer reaches its boundary.
-That displacement never changes controller metrics or the authoritative content offset.
-
-Use `ViewEvents::ScrollInput` only when a View needs the raw wheel or trackpad update before default scrolling, such as a zoomable canvas.
-Returning true consumes the complete two-dimensional update; returning false leaves it to built-in scrolling.
-Touch dragging remains pointer input and does not emit `ScrollInputEvent`.
+Use `ViewEvents::ScrollInput` when a View needs the wheel or trackpad update before default scrolling, such as a zoomable canvas. Return `true` to consume both components or `false` to let the built-in scroll dispatch handle them. Direct touch dragging uses pointer input. See [Scrolling](../design/scrolling.md) for nested dispatch and motion.
 
 ## RefreshBox
 
@@ -267,14 +254,7 @@ return RefreshBox(
 });
 ```
 
-The supplied `refreshing` value is authoritative.
-An armed release or the localized accessibility Refresh action emits `RefreshEvents::Requested`; setting `refreshing` to true holds the content at the Theme-defined refresh position, while leaving it false settles the pull immediately.
-Programmatically changing the value to true presents the same refreshing state without emitting an event.
-
-Only direct touch dragging can initiate the gesture.
-Wheel, trackpad, upward, trailing-edge, canceled, disabled, and unarmed input never requests refresh.
-The built-in indicator, pull resistance, maximum displacement, trigger distance, refresh position, and settle motion are resolved from `RefreshBoxStyle` in the active Theme.
-`RefreshBox` does not own a Task, controller, loading result, or application data.
+Set `refreshing` while your task runs, then clear it to settle the content. A direct touch pull at the leading vertical boundary can request refresh, as can the accessibility Refresh action. A programmatic change to `refreshing` changes presentation without emitting a request. Use `RefreshBoxStyle` to set the indicator and motion for the active Theme. See [RefreshBox design](../design/refresh-box.md) for the overscroll handoff.
 
 ## IndexedPages and Pager
 
@@ -283,12 +263,12 @@ Use `Pager` when the same retained pages also need animated controlled changes a
 
 ```cpp
 return Pager(
-           {
-               OverviewPage(),
-               ActivityPage(),
-               SettingsPage(),
-           },
-           selected_page
+    {
+        OverviewPage(),
+        ActivityPage(),
+        SettingsPage(),
+    },
+    selected_page
 )
     .ScrollAxis(Axis::Horizontal)
     .OnChanged([selected_page](std::size_t index) {
@@ -308,56 +288,60 @@ Pager does not map wheel or trackpad distance to page changes.
 
 ## ScrollController
 
-A `ScrollController` provides programmatic scrolling and observable metrics for one axis.
-Keep the controller stable across recomposition.
+Use `UseScrollController()` to keep one controller per axis across recomposition. Bind a single-axis view with `.Controller(controller)` and a two-axis view with `.Controller(axis, controller)`. Each bound axis needs a distinct controller.
 
-Bind a controller to a single-axis view with `.Controller(controller)`. Two-axis views use `.Controller(axis, controller)` for each axis that needs application control. Use distinct controllers when binding both axes.
-
-It can scroll to or by an offset and ask a supported virtual layout to scroll to an item.
-A disabled scroll container still accepts controller requests; drag, wheel, trackpad, momentum, and focus reveal stay rejected.
-This supports paint-only rails that mirror another scroll position without becoming interactive.
-Focus and text-input reveal use the same authoritative scroll position internally rather than a separate controller path.
-User input, animation, focus reveal, and controller requests all update one authoritative scroll position.
-Observe `Metrics()` for content-offset and extent changes instead of deriving position from raw scroll input.
-Nested consumption and overscroll do not add another observable scroll state.
+Observe `Metrics()` in composition to use the clamped offset, viewport extent, content extent, or maximum offset. Use `ScrollTo()` or `ScrollBy()` for offsets and `ScrollToItem()` with a supported virtual layout for item alignment. A disabled container still accepts its controller's requests, which can drive a noninteractive mirrored view.
 
 ## VirtualList
 
-Use `VirtualList` for long or variable-height sequences.
-The item factory receives a logical index and creates the item only when required by measurement or retained state.
+Use `VirtualList` for a long sequence. Supply a range or a count and an item factory. The range overload takes a snapshot of the item values. With a count, capture the data the factory needs for its lifetime.
 
 ```cpp
-return VirtualList(
-    records.size(),
-    [&records](std::size_t index) {
-      const Record& record = records[index];
-      return RecordRow(record).Key(record.id);
-    }
-);
+return VirtualList(records, [](const Record& record) {
+  return RecordRow(record).Key(record.id);
+}).EstimatedItemExtent(48.0F).With(Spacing(4.0F));
 ```
 
-Each reorderable stateful item needs a stable key.
-Virtual measurement can revisit an item while resolving its visible range, so factories must remain declarative and must not perform external side effects.
+Put a stable key on the factory's returned root when items can move. For item-local hooks, call a composable row function from the factory. Keep deferred factories free of external side effects. If work must continue after an item is evicted, own the task above the list.
 
-Variable extents are measured from the realized content.
-The layout keeps its scroll range and end anchoring consistent when estimates are replaced by measured extents.
+The list scrolls vertically by default. Select a horizontal list with `ScrollAxis(Axis::Horizontal)`. Use `ItemExtent()` for items with a known fixed extent, `EstimatedItemExtent()` when the list should refine its sizes, and `CacheExtent()` to tune how much content remains mounted offscreen. See the [virtual list example](../../examples/virtual_list/main.cpp) and the [horizontal list example](../../examples/horizontal_virtual_list/main.cpp).
 
 ## VirtualGrid
 
-`VirtualGrid` virtualizes an adaptive grid and supports item spans.
-Use it when the number of columns follows available width instead of describing every row manually.
-
-The grid, not the item, owns column geometry and placement.
-Item declarations remain keyed and declarative like `VirtualList` items.
+Use `VirtualGrid` for a vertically scrolling grid in a bounded viewport. Select `GridColumns::Fixed()` for a fixed column count or `GridColumns::Adaptive()` for a minimum column width. Use `RowExtent()` or `EstimatedRowExtent()` for row sizing, and `ItemSpans()` for items that span more than one column. The [virtual grid example](../../examples/virtual_grid/main.cpp) pairs an adaptive grid with variable item heights.
 
 ## Custom layout
 
-Derive from `Layout<Derived>` for a layout over ordinary children.
-Measure children only through `LayoutContext`, return a constrained size, and record placements in `LayoutResult`.
+Derive from `Layout<Derived>` to arrange ordinary children. Measure direct children through `LayoutContext` and place them through `LayoutResult`. Use the returned sizes while computing the layout. The context has already removed the owner's padding from its constraints, so return a content size and place children relative to the content origin.
 
-Derive from `VirtualLayout<Derived>` for a demand-driven logical item source.
-UiWindow owns item reconciliation, keys, saved state, clipping, input, semantics, scrolling, and cleanup; the custom layout owns visible-range selection and placement.
+```cpp
+class SimpleRow final : public Layout<SimpleRow> {
+public:
+  using Layout::Layout;
 
-For a two-axis layout, call the protected `EnableBothAxes()` in the derived constructor. Select the rows and columns intersecting `context.Viewport().Bounds()` and any layout-owned overscan. The [read-only virtual table example](../../examples/virtual_table/main.cpp) demonstrates this pattern with a million logical cells.
+  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
+    LayoutResult result;
+    float x = 0.0F;
+    float height = 0.0F;
+    for (ViewNode& child : node.Children()) {
+      const Size size = context.Measure(child, constraints.Loose());
+      result.Place(child, {x, 0.0F});
+      x += size.width;
+      height = std::max(height, size.height);
+    }
+    return result.SetSize(constraints.Constrain({x, height}));
+  }
+};
+```
 
-See [Extending HuxerUI](extending.md) for the extension contracts.
+Use `LayoutValue<Key>` to pass typed child metadata to a parent policy. Use child references, metadata pointers, and the layout context only for the callback that borrows them.
+
+## Custom virtual layouts
+
+Derive from `VirtualLayout<Derived>` to lay out logical items on demand. Use `context.Viewport()` to choose the indices to request, then obtain each item with `Item()`, measure it, and place it in content coordinates. Return the viewport size with `SetSize()` and the full logical extent with `SetContentSize()`. The single-axis result defaults to vertical. Use `SetAxis()` to select horizontal and implement `ScrollOffsetForItem()` to support item jumps.
+
+For both axes, call the protected `EnableBothAxes()` in the derived constructor. Request only the cells in the two-dimensional viewport and any extra cache range your policy uses. Implement `static std::optional<Rect> ItemBounds(ViewNode&, std::size_t)` to support `ScrollToItem()` without realizing the target. Return content coordinates or an estimate for the unrealized item. Each controller aligns that rectangle along its axis.
+
+Use `SetScrollOffset(float)` for a single-axis correction or `SetScrollOffset(Axis, float)` for a two-axis correction after sizes change. If your policy needs a stable anchor across candidate measurements, derive it from the controllers' committed metrics. The [10,000 × 100 read-only table example](../../examples/virtual_table/main.cpp) demonstrates two-axis realization, item jumps, and size changes.
+
+See [Layout and Virtualization](../design/layout.md) for constraint, placement, and item lifetime contracts.

@@ -1,32 +1,6 @@
 # Text Input and TextField Design
 
-This document defines the target text editing model, input session lifecycle, platform IME boundary, and built-in `TextField` behavior for HuxerUI. The design builds on the existing controlled control model, `UiWindow` focus ownership, its native text-input capability, retained `NodeExtension` state, typed events, and retained-scene rendering.
-
-The design also defines the extension boundary required by complex editable components. SweetEditor is the reference integration: it should reuse the HuxerUI focus and platform input path without replacing its document model with the built-in TextField state.
-
-This document records the implemented architecture and the remaining extension direction.
-
-## Goals
-
-- Provide a controlled built-in TextField with selection and composition state.
-- Support platform IME composition without inferring edits from full text snapshots.
-- Keep focus and input session ownership in `UiWindow`.
-- Keep platform input connection behavior in the native `PlatformTextInput` endpoint.
-- Let editable components own their text, selection, composition, and editing semantics.
-- Isolate delayed callbacks from ended text-input sessions.
-- Use one platform input path for TextField, SweetEditor, and future custom editable components.
-- Preserve UTF-8 strings in the public C++ API while using one explicit offset convention across platforms.
-- Grow the validated single-line foundation into multiline editing without changing the platform input protocol.
-
-The current design deliberately does not include:
-
-- A second application runtime for text input.
-- A full-document mirror owned by `UiWindow` or its native text-input endpoint.
-- Mutation inference by comparing two complete text snapshots.
-- A Flutter-style delta buffer and revision protocol.
-- Editor history, transactions, or linked-editing behavior in the common input protocol.
-- Platform-specific IME types in common public headers.
-- A temporary TextField that accepts characters but cannot represent IME composition.
+Editable components own their text, selection, composition, and editing semantics. UiWindow owns focus and the active logical input session. Platform adapters translate IME callbacks into commands for the current client. The public extension contract is declared in [text_input.h](../../include/huxerui/text_input.h).
 
 ## Architecture
 
@@ -55,7 +29,7 @@ UiWindow text input session
     |
 focused TextInputClient
     |                       |
-TextField reducer           SweetEditor bridge
+TextField reducer           Custom editor client
     |                       |
 TextEditingValue            EditorCore
 ```
@@ -68,53 +42,13 @@ The ownership boundaries are:
 | UiWindow | Focus ownership, session identity, routing, and stale callback rejection |
 | TextInputClient | Text state, edit semantics, context queries, and text geometry |
 | TextField | Controlled value, simple editing reducer, selection, caret, and painting |
-| SweetEditor | Document state, transactions, history, and editor-specific behavior |
+| Custom editor | Document state, transactions, history, and editor-specific behavior |
 
 `UiWindow` does not own text content. `PlatformTextInput` does not decide how an edit changes a value. An editable component does not call platform IME APIs directly.
 
 ## Text model
 
-The common types belong in:
-
-```cpp
-#include <huxerui/text_input.h>
-```
-
-A representative public model is:
-
-```cpp
-using TextOffset = std::int64_t;
-
-enum class TextAffinity {
-  Upstream,
-  Downstream,
-};
-
-struct TextRange {
-  TextOffset start = 0;
-  TextOffset end = 0;
-
-  [[nodiscard]] bool IsCollapsed() const noexcept;
-  [[nodiscard]] TextOffset Length() const noexcept;
-};
-
-struct TextSelection {
-  TextOffset anchor = 0;
-  TextOffset active = 0;
-  TextAffinity affinity = TextAffinity::Downstream;
-
-  [[nodiscard]] bool IsCollapsed() const noexcept;
-  [[nodiscard]] TextRange Range() const noexcept;
-};
-
-struct TextEditingValue {
-  std::string text;
-  TextSelection selection;
-  std::optional<TextRange> composition;
-
-  static TextEditingValue FromText(std::string text);
-};
-```
+`TextEditingValue` is the controlled value of the built-in TextField. It contains the UTF-8 string, a directed selection with affinity, and optional composition.
 
 The model follows these rules:
 
@@ -127,56 +61,13 @@ The model follows these rules:
 - Session identity and platform synchronization revisions are not part of `TextEditingValue`.
 - Invalid offsets, reversed ranges, and offsets inside a UTF-16 surrogate pair are rejected at protocol boundaries.
 
-UTF-16 offsets are an explicit interoperability choice. Windows input APIs, Apple text input APIs, Android, and SweetEditor already operate in this coordinate system. Keeping one offset convention prevents every adapter from inventing a different conversion policy.
+UTF-16 offsets are an explicit interoperability choice. Windows, Apple, and Android input APIs already operate in this coordinate system. Keeping one offset convention prevents every adapter from inventing a different conversion policy.
 
 Application code should not normally manipulate UTF-16 offsets directly. TextField and reusable text utilities provide validated range and movement operations.
 
 ## Input commands
 
-Platform input is normalized into typed commands:
-
-```cpp
-enum class TextInputCommandKind {
-  SetSelection,
-  BeginComposition,
-  UpdateComposition,
-  CommitText,
-  FinishComposition,
-  CancelComposition,
-  DeleteSurrounding,
-};
-```
-
-The command representation carries only fields relevant to its kind:
-
-```cpp
-enum class TextInputCoordinateSpace {
-  Text,
-  Composition,
-};
-
-enum class TextInputUnit {
-  Utf16CodeUnit,
-  UnicodeCodePoint,
-};
-
-struct TextInputCommand {
-  TextInputCommandKind kind;
-  TextInputCoordinateSpace coordinate_space =
-      TextInputCoordinateSpace::Text;
-  std::optional<TextRange> target;
-  std::optional<TextSelection> selection_after;
-  std::string text;
-  TextOffset delete_before = 0;
-  TextOffset delete_after = 0;
-  TextInputUnit delete_unit = TextInputUnit::Utf16CodeUnit;
-};
-
-struct TextInputCommandBatch {
-  TextInputSessionId session_id;
-  std::vector<TextInputCommand> commands;
-};
-```
+A `TextInputCommandBatch` combines the current session ID with an ordered list of text input commands. Each command carries the target, text, selection, or deletion lengths needed by its operation.
 
 `coordinate_space` applies to `target`. `selection_after` is always expressed in absolute UTF-16 offsets in the resulting text. A platform adapter converts platform-specific relative cursor placement before constructing the command.
 
@@ -186,7 +77,7 @@ The protocol has these semantics:
 - A batch is validated before any visible mutation occurs.
 - Commands execute in order against a staged state.
 - A later command sees the state produced by earlier commands in the batch.
-- A rejected command rejects the complete batch.
+- A rejected command rejects the complete batch. Validation covers command fields, non-negative deletion lengths, the active coordinate space, valid UTF-16 boundaries, resulting selection and composition, and editability.
 - The client publishes at most one resulting state change for a successful batch.
 - UiWindow rejects a batch whose session does not match the active client.
 - The platform adapter never reconstructs a command by diffing two full text snapshots.
@@ -205,52 +96,11 @@ The protocol has these semantics:
 
 `DeleteSurrounding` removes text around the current selection using the explicit unit supplied by the platform.
 
-The protocol does not include undo grouping, editor transactions, document revision IDs, linked editing, or full text buffers. Those are client concerns.
+The client owns undo grouping, editor transactions, document history, and any linked editing.
 
 ## Text input client
 
-`TextInputClient` is the common capability implemented by the built-in TextField and custom editable components:
-
-```cpp
-class TextInputClient {
-public:
-  virtual ~TextInputClient() = default;
-
-  [[nodiscard]] virtual TextInputConfiguration Configuration() const = 0;
-  [[nodiscard]] virtual TextInputState State() const = 0;
-
-  virtual TextInputState BeginTextInput(
-      TextInputSessionId session_id
-  ) = 0;
-
-  virtual TextInputApplyResult ApplyTextInput(
-      const TextInputCommandBatch& batch
-  ) = 0;
-
-  [[nodiscard]] virtual TextInputContext QueryTextInputContext(
-      TextInputSessionId session_id,
-      TextOffset start,
-      TextOffset length
-  ) const = 0;
-
-  [[nodiscard]] virtual TextInputGeometry QueryTextInputGeometry(
-      TextInputSessionId session_id,
-      TextRange range
-  ) const = 0;
-
-  [[nodiscard]] virtual TextInputPositionResult QueryTextInputPosition(
-      TextInputSessionId session_id,
-      Point point
-  ) const = 0;
-
-  virtual TextInputKeyResult HandleTextKey(const KeyEvent& event) = 0;
-
-  virtual void EndTextInput(
-      TextInputSessionId session_id,
-      TextInputEndReason reason
-  ) = 0;
-};
-```
+`TextInputClient` begins and ends a session, applies command batches, handles editing keys, and provides bounded context, state, and geometry queries.
 
 The result and state types are public because `TextInputClient` is a public extension point. Their required semantics are:
 
@@ -263,40 +113,15 @@ The result and state types are public because `TextInputClient` is a public exte
 `TextInputApplyResult` reports only the result code and any required platform input synchronization action.
 UiWindow derives whether state changed from `TextInputState` revisions instead of accepting a second, potentially inconsistent changed flag.
 
-A `NodeExtension` exposes the capability through one optional hook:
-
-```cpp
-virtual std::shared_ptr<TextInputClient> GetTextInputClient() noexcept {
-  return {};
-}
-```
+A `NodeExtension` exposes the capability through `GetTextInputClient()`.
 
 A focusable node can expose at most one client. Multiple text input clients on the same node are rejected instead of receiving an implicit modifier priority.
 
 The extension returns a stable shared client. UiWindow retains that client only for the active input session, allowing it to call `EndTextInput()` after the owning extension is reconciled away without retaining a raw extension pointer.
 
-The built-in TextField installs one retained extension. A future SweetEditor component installs its own retained extension and returns its bridge from the same hook.
-
 ## Text selection client
 
-Editable and read-only selectable content share selection gestures and overlay presentation without sharing IME ownership.
-`TextSelectionClient` is therefore a separate capability from `TextInputClient`:
-
-```cpp
-class TextSelectionClient {
-public:
-  virtual ~TextSelectionClient() = default;
-
-  virtual TextEditingActionStatus GetTextEditingActionStatus(TextEditingAction action, const Clipboard& clipboard) const;
-  virtual void PerformTextEditingAction(TextEditingAction action, const Clipboard& clipboard);
-
-  virtual bool ClearSelection() = 0;
-  virtual bool SelectWord(Point position) = 0;
-  virtual bool ExtendSelection(Point position, bool start_handle) = 0;
-  virtual std::optional<TextSelectionGeometry> QuerySelectionGeometry() const = 0;
-  virtual Color SelectionHandleColor() const noexcept = 0;
-};
-```
+Editable and read-only selectable content share `TextSelectionClient`. The capability exposes the selection geometry and editing actions needed by the selection overlay.
 
 Selection points and geometry use the owning node's local logical coordinates.
 `TextSelectionGeometry` contains independent optional `start`, `end`, and `toolbar_anchor` rectangles; an offscreen endpoint does not hide a visible handle or clear the logical selection.
@@ -313,55 +138,11 @@ TextField exposes both input and selection clients; `SelectionArea` exposes only
 `SelectionArea` prepares descendant text-layout and relative-transform value snapshots after presentation resolution.
 It does not retain descendant node pointers, and unchanged descendant geometry keeps its foreground PaintSequence clean.
 
+TextInteraction creates text-selection recognizers using the existing GestureRecognizer decision and deadline protocol. PointerInteraction retains their physical sequence and applies selection only through successful ownership acceptance, after revalidating the original target and any focus, IME, or competing-recognizer callbacks. Double-tap history belongs to TextInteraction, while the pointer owner and candidate binding belong to PointerInteraction. TextInteraction never reads PointerSession state. Touch focus and text recognition keep their explicit order before overlay geometry is published.
+
 ## Input configuration
 
-The client describes platform keyboard and submission behavior with typed configuration:
-
-```cpp
-enum class TextInputType {
-  Text,
-  Email,
-  Number,
-  Decimal,
-  Phone,
-  Url,
-};
-
-enum class TextCapitalization {
-  None,
-  Characters,
-  Words,
-  Sentences,
-};
-
-enum class TextInputAction {
-  Default,
-  Done,
-  Go,
-  Next,
-  Search,
-  Send,
-  Newline,
-};
-
-enum class SoftwareKeyboardPolicy {
-  Automatic,
-  Manual,
-};
-
-struct TextInputConfiguration {
-  TextInputType type = TextInputType::Text;
-  TextCapitalization capitalization = TextCapitalization::None;
-  TextInputAction action = TextInputAction::Default;
-  bool multiline = false;
-  bool secure = false;
-  bool autocorrect = true;
-  bool read_only = false;
-  SoftwareKeyboardPolicy keyboard_policy = SoftwareKeyboardPolicy::Automatic;
-};
-```
-
-Platform-specific behavior is not represented by untyped string properties. New common values can be added when at least one component and platform integration need them.
+`TextInputConfiguration` supplies the common input type, capitalization, submission action, multiline, secure and read-only modes, autocorrection, and software keyboard policy.
 
 Submission actions have common UiWindow semantics:
 
@@ -435,51 +216,13 @@ Platform input starts or updates after the current pointer dispatch completes. T
 
 Modal focus capture and restoration use the same lifecycle. Restoring focus to an editable node creates a new HuxerUI text-input session rather than reviving an old session ID.
 
+PointerInteraction requests keyboard presentation by node identity without obtaining text-input session IDs. SemanticTree routes text actions to TextInteraction, which invokes the original extension action, validates the client's resulting state, and synchronizes any active session. Semantic editing does not require the target to own focus or an active text-input session.
+
 ## Platform input capability
 
-Text input is a cohesive optional capability exposed by `UiWindow`. It should not expand the window base into a collection of unrelated per-command methods:
+UiWindow exposes an optional `PlatformTextInput` endpoint. `Start` opens native input for the selected session, `Update` refreshes it, `Restart` reconfigures it, and `Stop` retires it. Software keyboard presentation uses separate best-effort show and hide requests.
 
-```cpp
-class PlatformTextInput {
-public:
-  virtual ~PlatformTextInput() = default;
-
-  virtual void Start(
-      TextInputSessionId session_id,
-      const TextInputConfiguration& configuration,
-      const TextInputState& state,
-      const TextInputGeometry& geometry
-  ) = 0;
-
-  virtual void Update(
-      TextInputSessionId session_id,
-      const TextInputState& state,
-      const TextInputGeometry& geometry
-  ) = 0;
-
-  virtual void Restart(
-      TextInputSessionId session_id,
-      const TextInputConfiguration& configuration,
-      const TextInputState& state,
-      const TextInputGeometry& geometry
-  ) = 0;
-
-  virtual void Stop(TextInputSessionId session_id) = 0;
-
-  virtual void RequestShowKeyboard(TextInputSessionId) {}
-  virtual void RequestHideKeyboard(TextInputSessionId) {}
-};
-```
-
-`UiWindow` provides a nullable capability:
-
-```cpp
-virtual PlatformTextInput* TextInput() noexcept {
-  return nullptr;
-}
-```
-
-A test host, headless host, or incomplete platform does not need an empty input implementation. Hardware navigation can continue to use ordinary key events when no platform text input capability exists.
+A host without the capability still dispatches ordinary hardware key events.
 
 Focus, input-session ownership, and software-keyboard visibility remain separate. `Start` prepares native input. With `Automatic`, UiWindow requests the software keyboard after starting a session and after a confirmed tap or click on the focused editor. `Manual` suppresses these automatic requests. Changing only the policy neither restarts native input nor changes keyboard visibility.
 
@@ -536,8 +279,6 @@ optional composition
 
 Large document clients return only the requested surrounding context. TextField can return the complete short value when appropriate. Platform adapters must tolerate partial context and request another range when needed.
 
-The Web input proxy stores a surrounding slice and maps its DOM selection and edit offsets to document coordinates. It accounts for DOM line-break normalization while preserving the client's surrounding text. It requests more context when the current slice cannot cover the selection or composition. When no usable slice is available, it clears the proxy and makes it read-only until synchronization succeeds. The browser keeps its active composition while caret geometry updates, and the proxy refreshes its text after the composition ends.
-
 Client state changes outside an IME callback, including an authoritative controlled TextField update, increment the appropriate revisions.
 UiWindow synchronizes the new state after reconciliation.
 A configuration or ownership change requests a platform input restart; an ordinary selection change requests only an update and paint invalidation.
@@ -545,17 +286,7 @@ Client-owned geometry changes update candidate geometry without restarting an ac
 
 ## TextField API
 
-The built-in component is declared with the other fundamental Views in:
-
-```cpp
-#include <huxerui/view.h>
-```
-
-Normal application code continues to use the umbrella header:
-
-```cpp
-#include <huxerui/huxerui.h>
-```
+The built-in TextField is declared in [view.h](../../include/huxerui/view.h). Applications normally include the umbrella header.
 
 Representative use is:
 
@@ -576,19 +307,7 @@ View LoginForm() {
 }
 ```
 
-The component uses typed events:
-
-```cpp
-struct TextFieldEvents {
-  struct Changed : Event<void(const TextEditingValue&)> {};
-  struct Submitted : Event<void()> {};
-  struct TrailingIconClick : Event<void()> {};
-};
-```
-
-`TextFieldEvents` belongs in `event.h`, following the existing `ToggleEvents` convention.
-
-`OnChanged()`, `OnSubmitted()`, and `OnTrailingIconClick()` are convenience wrappers over the matching typed events.
+`OnChanged()`, `OnSubmitted()`, and `OnTrailingIconClick()` bind the matching typed `TextFieldEvents`.
 
 `Label()` and `Placeholder()` have separate presentation roles.
 When an empty field is unfocused, its label occupies the input line and its placeholder is hidden.
@@ -639,7 +358,7 @@ const ValidationResult validation = Validate(
 return TextField(email).Validation(validation);
 ```
 
-`ValidationResult` distinguishes `None`, `Valid`, `Invalid`, and `Pending` and retains its message as a StringVariant until mounted reconciliation. TextField consumes the resolved result only for presentation: an invalid result uses the Theme validation color, border width, and supporting message layout. It does not reject an edit, mutate the controlled value, or decide whether validation runs on change, focus loss, or submission. Those trigger policies remain application state and can later be coordinated by a Form layer without changing TextField.
+`ValidationResult` distinguishes `None`, `Valid`, `Invalid`, and `Pending` and retains its message as a StringVariant until mounted reconciliation. TextField consumes the resolved result only for presentation: an invalid result uses the Theme validation color, border width, and supporting message layout. The application owns the value and chooses when to validate it. TextField presents the supplied outcome through Theme.
 
 Synchronous rules return a `ValidationResult` and `Validate()` stops at the first result that is not valid. `Required` and `EmailAddress` use `validation_required` and `validation_email` from the built-in `huxerui` resource domain unless the application supplies another StringVariant. Custom callables remain equally supported. `Pending` is supplied by asynchronous application state and may display a neutral supporting message without the invalid border; TextField does not own asynchronous work.
 
@@ -660,7 +379,7 @@ return TextField(password)
 `Secure(bool)` configures `TextInputConfiguration::secure`, and its default argument enables secure entry.
 It does not create a second value model or a separate PasswordField component.
 
-The public API should expose one value model. It should not provide a second string-only TextField with different change events. Simple applications use `TextEditingValue::FromText()`.
+Use `TextEditingValue::FromText()` to construct a controlled value from plain text.
 
 ## Static text selection
 
@@ -829,68 +548,7 @@ Selection overlay intent is independent of its current visibility. Related drag,
 
 ## Theme
 
-TextField uses a semantic style key:
-
-```cpp
-struct TextFieldVariantStyle {
-  VisualFill background;
-  std::optional<VisualFill> disabled_background;
-  Color border;
-  Color hovered_border;
-  Color focused_border;
-  Color disabled_border;
-  CornerRadii corner_radii;
-  float minimum_height = 0.0F;
-};
-
-struct TextFieldStyle {
-  TextFieldVariant variant;
-  bool show_label = true;
-  TextFieldVariantStyle standard;
-  TextFieldVariantStyle filled;
-  TextFieldVariantStyle outlined;
-  TextStyle text_style;
-  TextStyle label_style;
-  TextStyle floating_label_style;
-  TextStyle placeholder_style;
-  Color disabled_text;
-  Color focused_label;
-  Color disabled_label;
-  Color error_label;
-  Color disabled_placeholder;
-  Color disabled_supporting_text;
-  Color leading_icon;
-  Color focused_leading_icon;
-  Color disabled_leading_icon;
-  Color error_leading_icon;
-  Color trailing_icon;
-  Color focused_trailing_icon;
-  Color disabled_trailing_icon;
-  Color error_trailing_icon;
-  Color selection;
-  Color caret;
-  Color error_caret;
-  Color composition;
-  float caret_width = 2.0F;
-  float border_width = 1.0F;
-  float focused_border_width = 2.0F;
-  EdgeInsets padding;
-  float leading_icon_size = 0.0F;
-  float trailing_icon_size = 0.0F;
-  float icon_spacing = 0.0F;
-  float label_spacing = 4.0F;
-  float label_cutout_padding = 0.0F;
-  double label_animation_duration = 0.0;
-  double caret_blink_interval = 0.5;
-  Color validation_error;
-  float validation_border_width = 1.0F;
-  float focused_validation_border_width = 2.0F;
-  TextStyle validation_text_style;
-  float validation_spacing = 4.0F;
-
-  static TextFieldStyle Default();
-};
-```
+`TextFieldStyle` in [theme.h](../../include/huxerui/theme.h) is the typed Theme value for field appearance. Its variant bundles supply fills, borders, corner radii, and minimum heights.
 
 Flat and Material Theme definitions provide their own TextField styles. Material defaults to a 56-unit Filled field and provides 56-unit Standard and Outlined alternatives. Flat defaults to a 40-unit Standard field, retains a 36-unit Outlined alternative, and provides a 44-unit Filled alternative. Both themes paint a 2-unit caret, while Material uses 24-unit leading and trailing icons and Flat uses 18-unit icons.
 
@@ -902,7 +560,7 @@ Each `TextFieldVariantStyle` owns one variant's `VisualFill` background, optiona
 
 `TextFieldStyle` belongs in `theme.h` with the existing built-in component styles. Its type is also its Theme override identity.
 
-Text input configuration, selection behavior, an explicit variant, label and placeholder content, and icon assets are not Theme values.
+Input configuration, an explicit variant, label and placeholder text, and icon assets belong to the component declaration.
 
 The selection overlay resolves handle colors from the focused control: `TextFieldStyle::caret` for editable text and the current Theme primary color for `SelectionArea`. Its horizontal toolbar reuses the active `MenuStyle` surface fill, foreground, corner radii, shadow, item geometry, separators, and indication without adopting the public Menu service lifecycle. Resource-backed surface fills resolve against the focused control's resource context and Locale before overlay painting. Cut, Copy, Paste, and Select All resolve from the built-in `huxerui` resource domain and use the inherited Locale for shaping. An explicitly provided `TextSelectionMenuLabels` Environment value overrides each non-empty field for that subtree, while empty fields continue to resolve their localized framework defaults. Editing actions execute on release; Cut, Copy, and Paste make the menu non-interactive until the indication exit animation finishes, while Select All retains the overlay, exposes range handles, and recomputes the remaining actions. The public Menu service keeps separate LayerStack lifecycle, anchoring, focus, and dismissal.
 
@@ -917,7 +575,7 @@ Text-producing input and control keys remain separate:
 - `KeyIntercept` runs along the active focus route before text editing so an explicit parent policy can override it.
 - The focused TextInputClient receives text-related keys before component and generic activation behavior.
 - An unhandled key continues through `NodeExtension::OnKey`, then the focused View's `KeyDown` or `KeyUp` decision event.
-- UiWindow and platform defaults run only after every earlier stage returns false.
+- Unhandled events reach the window shortcut handler before framework and platform defaults.
 - A platform adapter suppresses platform character events that duplicate an IME commit.
 
 Default behavior is:
@@ -944,6 +602,8 @@ Default behavior is:
 | Enter and Space activation | Not applied to TextField |
 
 Shift extends the selection for movement commands. macOS `NSTextInputClient` selectors retain their word, line, page, and document semantics when converted to common key events.
+
+## Editing actions and clipboard
 
 UiWindow maps Ctrl/Command+A, C, V, and X to typed `TextEditingAction` values and dispatches them through the same entry point as the touch selection menu. The focused editor owns its editing actions even when its read-only configuration closes the input session. UiWindow checks the current configuration before asking the selection client. Read-only input blocks Cut and Paste. Secure input blocks Copy and Cut. SelectionArea supports Select All and Copy. Editors retain ownership of their own history.
 
@@ -986,7 +646,7 @@ The Android adapter:
 - Forwards raw touch input while UiWindow owns long-press recognition, editing actions, and the HuxerUI-drawn selection overlay.
 - Uses password input type without suggestions and withholds surrounding, selected, and extracted text from secure input connections.
 
-The adapter can retain a bounded surrounding-text mirror for Android query behavior. It does not own an authoritative copy of a complete SweetEditor document.
+The adapter can retain a bounded surrounding-text mirror for Android query behavior. Document ownership remains with the client.
 
 `restartInput()` is used when client ownership or input configuration changes, or when an authoritative state replacement invalidates the current IME composition. Normal recomposition and selection changes use ordinary state updates.
 
@@ -1016,7 +676,7 @@ The host view remains first responder while one HuxerUI editable node transfers 
 
 ## Windows adapter
 
-The first Windows implementation uses IMM32:
+The Windows adapter uses IMM32:
 
 - `WM_IME_STARTCOMPOSITION` begins composition.
 - `WM_IME_COMPOSITION` publishes composing updates and committed results.
@@ -1025,7 +685,6 @@ The first Windows implementation uses IMM32:
 - `WM_IME_CHAR` and `WM_CHAR` paths are filtered to prevent duplicate commits.
 - Selection, deletion, and control keys continue through the key path where IMM32 does not provide a direct operation.
 
-TSF can replace or augment the native input bridge later without changing shared UiWindow logic, TextInputClient, TextField, or SweetEditor integration.
 
 ## Linux adapter
 
@@ -1054,6 +713,10 @@ The bridge:
 
 The implementation does not contain separate XIM, IBus, or Fcitx state machines. GTK's input-method module boundary owns those desktop-specific protocols.
 
+## Web adapter
+
+The browser adapter keeps an input proxy for the current session and translates DOM composition and input events into the same command batches. See [Browser text input and IME](web.md#browser-text-input-and-ime) for surrounding-text mapping, restart identity, and geometry.
+
 ## PlatformView focus
 
 An embedded PlatformView and a HuxerUI TextInputClient cannot own the same host input session.
@@ -1071,38 +734,11 @@ UiWindow remains authoritative for HuxerUI hit-test and focus ordering, while th
 These focus and IME lifecycle messages are internal adapter coordination rather than PlatformModule events.
 A library may emit a typed application event describing a platform focus change, but that event neither starts nor ends a HuxerUI text-input session.
 The macOS backend implements this transfer through AppKit first-responder synchronization. AppKit retains key-view traversal within one PlatformView subtree, while traversal across its boundary returns to UiWindow focus order. Android synchronizes global platform focus changes, UiWindow-directed focus, Tab traversal, and IME dismissal through its owning `HuxerUIView`. iOS synchronizes touch and UiWindow-directed focus; hardware-keyboard traversal across the PlatformView boundary is not supported.
-This follows the PlatformView ownership model in [`sdk-cli.md`](sdk-cli.md).
+See [PlatformView composition](platform-content.md#platformview) for the drawing and input boundary.
 
-## SweetEditor integration
+## Custom editors
 
-SweetEditor is a complex text input client, not a specialized TextField.
-
-Its HuxerUI component bridge implements `TextInputClient` and maps:
-
-| HuxerUI operation | SweetEditor operation |
-| --- | --- |
-| Begin client session | Begin EditorCore IME session |
-| Apply command batch | Apply ordered `ImeCommandBatch` |
-| Query state | Return EditorCore selection and composition |
-| Query context | Return bounded EditorCore text context |
-| Query geometry | Use SweetEditor layout geometry |
-| End client session | End EditorCore IME session with finish semantics |
-
-The bridge can map the HuxerUI session to an EditorCore session internally. HuxerUI session IDs remain the authority for UiWindow callback routing.
-
-SweetEditor keeps:
-
-- Document text.
-- Multi-selection policy.
-- Editor transactions and history.
-- Composition snapshot and recovery.
-- Linked editing.
-- Large-document context behavior.
-- Editor-specific command validation.
-
-The bridge does not build a complete `TextEditingValue`, copy the document into UiWindow, or use the built-in TextField reducer.
-
-SweetEditor's command path is the reference for ordered atomic platform input, session mismatch handling, bounded context queries, and finish or cancel semantics. Editor-specific buffer protocols and recovery policies do not become mandatory HuxerUI APIs.
+A custom editor exposes a stable `TextInputClient` through its retained node extension. The client can map the UiWindow session to its own editing session and supply bounded context and local layout geometry from its document model. The editor keeps its history, selection policy, transactions, and composition baseline. See the [custom editor example](../../examples/custom_editor/main.cpp) for a client that handles document editing and painting.
 
 ## Threading and reentrancy
 
@@ -1118,151 +754,6 @@ Destroying a host view invalidates every active session before destroying client
 
 ## Validation
 
-Protocol validation includes:
+The [text model tests](../../tests/unit/text_input.cpp) cover UTF-16 conversion, graphemes, atomic rejection, composition, and controlled replacements. The [session tests](../../tests/runtime/text_input.cpp) exercise focus and ownership, stale commands and queries, geometry synchronization, and software keyboard requests. The [TextField tests](../../tests/runtime/text_field.cpp) cover layout, editing behavior, masking, selection, and gestures.
 
-- Current session identity.
-- Valid command kind and required fields.
-- Non-negative deletion lengths.
-- Ordered ranges.
-- Ranges inside the declared coordinate space.
-- UTF-16 boundaries that do not split surrogate pairs.
-- A composition-relative command only when composition exists.
-- Resulting selection and composition inside the staged text.
-- No mutation for a read-only client.
-
-Validation failure returns a structured result and leaves client state unchanged. Platform adapters must not clamp arbitrary invalid commands into apparently valid mutations. Application-provided TextField values can use documented normalization helpers at the declarative boundary.
-
-## Testing
-
-The pure text input test suite covers:
-
-- Empty values and collapsed selections.
-- Forward and backward selections.
-- UTF-8 and UTF-16 offset conversion.
-- Emoji and surrogate-pair boundaries.
-- Combining marks and grapheme deletion.
-- Begin, update, commit, finish, and cancel composition.
-- Collapsed composition distinct from no composition.
-- Selection changes during composition.
-- Surrounding deletion in both supported units.
-- Ordered commands within one batch.
-- Atomic rejection without partial mutation.
-- Read-only rejection.
-- Controlled value acknowledgement.
-- Authoritative controlled replacement.
-- Authoritative replacement during composition.
-
-UiWindow tests use a fake `PlatformTextInput` and cover:
-
-- Focus begins one session.
-- Recomposition preserves the current session.
-- Focus transfer closes the old session and starts a new session.
-- Restored modal focus receives a new session.
-- Stale commands and context queries are rejected.
-- Unmount, disable, and read-only transitions stop input.
-- PlatformView focus closes the HuxerUI session.
-- Pointer caret placement occurs before platform state synchronization.
-- External value changes request update or restart as appropriate.
-- Key events do not duplicate committed text.
-- Candidate geometry includes node and presentation transforms.
-- Stable frames reuse the active-session geometry snapshot.
-- Internal editor scrolling updates candidate geometry without forcing layout.
-- Text position queries reject stale sessions and preserve UTF-16 affinity.
-
-TextField tests cover:
-
-- Caret painting and blink scheduling.
-- Placeholder visibility.
-- Selection painting.
-- Composition underline painting.
-- Horizontal caret visibility.
-- Pointer hit testing and drag selection.
-- Pointer cancellation when scroll gesture ownership changes.
-- Theme style resolution.
-- Disabled and focus interaction state.
-- Secure grapheme masking, geometry, clipboard restrictions, and editing history.
-
-Platform adapter tests and manual regression checks reuse the command-oriented portion of the SweetEditor IME regression matrix. Buffer-specific and linked-editing cases remain SweetEditor tests.
-
-## Public header ownership
-
-The new public headers are the common text input protocol and clipboard capability:
-
-```text
-include/huxerui/text_input.h
-include/huxerui/clipboard.h
-```
-
-Existing public headers retain their current ownership:
-
-```text
-include/huxerui/view.h        TextField
-include/huxerui/event.h       TextFieldEvents
-include/huxerui/theme.h       TextFieldStyle
-include/huxerui/huxerui.h     umbrella export
-```
-
-The design does not create one public header per range, selection, command, session type, or built-in control.
-
-Implementation files can be:
-
-```text
-src/text/text_input.cpp
-src/runtime/runtime_text_input.cpp
-src/runtime/runtime_text_selection.cpp
-src/components/text_field.cpp
-src/components/selection_area.cpp
-```
-
-Platform adapters remain in their existing platform directories. Generic input behavior must not move into Windows, Apple, or Android helper libraries.
-
-## Supported behavior
-
-The foundation contains:
-
-- Common ranges, selections, editing values, and validation utilities.
-- Input commands and atomic TextField reducer.
-- UiWindow session ownership and stale callback rejection.
-- Fake platform input capability and unit tests.
-
-The usable control contains:
-
-- Single-line and multiline controlled TextField.
-- Selection, caret, pointer placement, and drag selection.
-- Composition painting and cancellation.
-- Hardware navigation, deletion, and submission.
-- Internal text geometry queries.
-- Flat and Material TextField styles.
-- Clipboard editing actions and Android text selection interaction.
-- Automatic caret reveal when the Android IME reduces the viewport.
-- Nested wheel and touch scrolling for fixed-height multiline fields.
-- Bounded TextField-local undo and redo with composition grouping.
-- Static selection through `SelectionArea`.
-
-Windows, macOS, Android, and iOS now provide end-to-end platform IME adapters.
-
-## Final design constraints
-
-The implementation should preserve these constraints:
-
-- `TextEditingValue` is the declarative value of TextField, not the universal platform mutation protocol.
-- Platform text mutation uses typed ordered command batches.
-- One platform callback produces one atomic client mutation.
-- UiWindow owns focus; its private TextInteraction owns logical input session identity, protocol validation, geometry synchronization, editing actions, and the selection overlay.
-- The platform-derived UiWindow owns platform input connections and coordinate conversion.
-- Editable clients own text, selection, composition, and editing semantics.
-- UiWindow and its native input endpoint do not mirror complete editor documents.
-- Session IDs isolate delayed callbacks from previous clients.
-- UTF-8 text and UTF-16 offsets use one validated conversion policy.
-- TextField retains transient editing and animation state in a mounted extension.
-- Recomposition of the same TextField does not restart platform input.
-- Authoritative controlled updates are not converted into inferred edits.
-- Text geometry is based on real layout data, not average character width.
-- TextField and SweetEditor share the input protocol without sharing their state models.
-- PlatformView focus transfers IME ownership instead of creating two active clients.
-- Text input protocol types remain concentrated in `text_input.h`; TextField, its events, and its style follow the ownership of existing built-in controls.
-- TextField supports reliable single-line and multiline editing without becoming a document-editor abstraction.
-
-TextInteraction creates text-selection recognizers using the existing GestureRecognizer decision and deadline protocol. PointerInteraction retains their physical sequence and applies selection only through successful ownership acceptance, after revalidating the original target and any focus, IME, or competing-recognizer callbacks. Double-tap history belongs to TextInteraction, while the pointer owner and candidate binding belong to PointerInteraction. TextInteraction never reads PointerSession state. Touch focus and text recognition keep their explicit order before overlay geometry is published.
-
-PointerInteraction requests keyboard presentation by node identity without obtaining text-input session IDs. SemanticTree routes text actions to TextInteraction, which invokes the original extension action, validates the client's resulting state, and synchronizes any active session. Semantic editing does not require the target to own focus or an active text-input session.
+Platform validation checks candidate geometry, keyboard presentation, IME composition and cancellation, and handoff to embedded native editors on available hosts. Use mixed-direction text, emoji, and combining marks to verify offsets and hit testing across the boundary.

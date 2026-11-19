@@ -27,7 +27,7 @@ Repository examples generate directly runnable HTML, ES module, WebAssembly, and
 The backend has been exercised with stateful pointer interaction, wheel scrolling, secure single-line input, multiline input, packaged localized resources, and asynchronous image repaint in a Chromium-based browser.
 
 The current text layout is intentionally conservative and still requires broader complex-script, bidirectional, grapheme, and browser-consistency validation.
-Exact offscreen group-opacity compositing, clipboard operations outside browser editing events, embedded-page gesture arbitration, multi-browser automation, and real mobile-browser IME validation remain deferred.
+Exact offscreen group-opacity compositing, embedded-page gesture arbitration, multi-browser automation, and real mobile-browser IME validation remain deferred.
 
 ## Ownership
 
@@ -200,19 +200,15 @@ Touch scrolling over a TextField does not focus the hidden input merely because 
 
 ## Clipboard
 
-Browser clipboard events provide synchronous data during trusted copy, cut, and paste dispatch, while the asynchronous Clipboard API may require focus, user activation, and permission.
+`WebRuntime` supplies `PlatformClipboard` for asynchronous access. The adapter starts the browser request during the calling user action and returns a Task for its result. The browser governs focus, permissions, and supported representations. The adapter requires a secure context and reports unsupported access or a rejected request through the existing clipboard results.
 
-The Web backend does not expose `PlatformClipboard`, because its synchronous contract cannot truthfully represent the asynchronous browser Clipboard API. The Runtime-owned `Clipboard` service is still installed but reports unavailable and returns empty or failed results. Browser editing events on the hidden input continue to provide browser-managed copy, cut, and paste while the input is active.
-
-An application-triggered asynchronous clipboard operation cannot be represented as a completed synchronous read. The Web backend must not report unavailable pasted data or a rejected promise as synchronous success. A future clipboard expansion should add one shared asynchronous capability or an explicit Runtime command path only when TextField Cut, Paste, and application clipboard APIs require it.
+Synchronous clipboard service operations are unavailable on Web. Trusted copy, cut, and paste events on the hidden editing control provide synchronous event-scoped access for browser-managed text editing. See [clipboard usage](../guide/components.md#selection-and-clipboard) for calling asynchronous operations and choosing representations.
 
 ## Resources and locale
 
-Packaged resources follow [App Resources, Images, and Localization Design](resources.md). The ES module completes asynchronous transport before Runtime creation, then WebResources provides synchronous immutable reads from WebAssembly memory or the virtual filesystem.
+The ES module preloads the package before Runtime creation. See [Resource design](resources.md#runtime-resource-ownership) for payload and resolver ownership.
 
-Browser URLs are not ResourceIds. Network code fetches bytes asynchronously, constructs an ImageAsset or RawAsset, updates controlled application state, and uses ordinary recomposition.
-
-The initial locale derives from `navigator.language` and is normalized through the existing Locale model. Dynamic browser-language updates are not implemented by the Web backend; display-scale updates use `Runtime::UpdateResourceConfiguration()`.
+The initial locale derives from `navigator.language`. The Web backend updates display scale through resource configuration. The browser language is sampled at startup.
 
 ## PlatformModule
 

@@ -1,15 +1,14 @@
 # Design Documents
 
-These documents define internal ownership, invariants, platform boundaries, and extension contracts.
-They explain the current implementation and deliberately unsupported behavior, with approved but unimplemented extensions explicitly marked in their owning sections; they are not tutorials or a release roadmap.
-Proposals remain explicitly marked as drafts until accepted.
+These documents describe the current implementation, including ownership, invariants, platform boundaries, and extension contracts. Draft proposals and deferred behavior are marked explicitly.
 
 ## Runtime and composition
 
-- [Architecture](architecture.md): Runtime, mounted nodes, modifiers, Environment, layers, and extension ownership.
+- [Architecture](architecture.md) describes the application, window, and host ownership boundaries.
 - [UI Testing](ui-testing.md): windowless Runtime ownership, observation lifetime, captures, distribution, and carriers.
 - [View Composition and Environment](view-composition.md): declaration, compilation, reconciliation, and composition boundaries.
 - [Composable Code Generation](composable-codegen.md): marker transformation, diagnostics, and CMake integration.
+- [Layout and Virtualization](layout.md): constraints, placement, layout metadata, and virtual item lifetime.
 - [Incremental Layout and Rendering](incremental-rendering.md): retained geometry, invalidation, scene construction, and damage.
 - [Interaction and Indication](interaction-indication.md): interaction facts, visuals, paint ordering, and customization.
 - [Gesture Recognition and Arbitration](gestures.md): recognition, competition, ownership, velocity, and cancellation.
@@ -18,10 +17,12 @@ Proposals remain explicitly marked as drafts until accepted.
 - [Typed Drag-and-Drop](drag-drop.md): typed payloads, targets, previews, auto-scroll, and cancellation.
 - [External File Drop](file-drop.md): host file offers, hover targets, asynchronous delivery, and retained file access.
 - [Animation and Scene Transitions](animation.md): timing, controllers, synchronized transitions, frozen scenes, custom effects through TransitionSpec, and [shared transitions](animation.md#shared-transitions) across pages and local changes.
+- [Platform Content Integration](platform-content.md) covers factories, bridge lifetimes, PlatformView composition, and ExternalTexture publication.
 
 ## Application structure
 
 - [Application Activation and Lifecycle](application.md): cold start, later activation, lifecycle, and platform delivery.
+- [Window Presentation](window-presentation.md) covers layer ordering, captured Environment, focus, and dismissal.
 - [Navigation](navigation.md): stacks, typed routes, Back, URL history, activation integration, custom page transitions, and [shared-element transitions](navigation.md#shared-element-transitions).
 - [Indexed Pages](indexed-pages.md): retained peer pages and controlled selection.
 - [Pager](pager.md): controlled animated and directly draggable paging across retained peer pages.
@@ -50,9 +51,9 @@ Proposals remain explicitly marked as drafts until accepted.
 
 ## SDK and platforms
 
-- [SDK, CLI, Platform Shell, and Library](sdk-cli.md): installed SDK structure, project tooling, libraries, and platform integration.
-- [Build System Integration (Draft)](build-system-integration.md): proposed common CLI intent, build options, generated results, and acceptance requirements for build-system integrations.
+- [SDK, CLI, Platform Shell, and Library](sdk-cli.md) covers SDK selection, project ownership, environment planning, builds, and library integration.
+- [mcpp Build System](mcpp-build-system.md) covers the desktop module build and its relationship to CMake.
+- [Build System Integration (Draft)](build-system-integration.md) proposes a common contract for build-system integrations.
 - [Web Platform](web.md): browser lifecycle, rendering, input, resources, services, and integration limits.
 
-Deferred behavior remains in the owning design document only when its boundary affects current architecture.
-Cross-subsystem capability direction is summarized in the [Roadmap](../roadmap.md), while product scheduling and release plans belong in GitHub issues.
+See the [documentation index](../README.md) for application and contributor workflows.

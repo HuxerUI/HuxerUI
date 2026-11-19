@@ -235,7 +235,6 @@ The example supplies its own light ThemeSpec to MaterialTheme: neutral surfaces,
 
 ## Source and installed consumption
 
-The same application CMake contract supports a source checkout and an installed SDK.
-Consumers use `huxerui_add_app`, `huxerui_add_library`, `huxerui_add_resources`, and the exported `HuxerUI::huxerui` or `HuxerUI::huxerui_static` targets.
-Consumer projects never include private `src` headers or checkout-specific platform paths.
-On Windows, `huxerui_add_app` creates a GUI executable that keeps the portable `main()` entry and does not allocate a console on launch in either Debug or Release builds. Standard output and standard error have no automatically created console; use debugger output or application-owned logging when diagnosing a GUI application. Ordinary executables that only link HuxerUI, including CLI tools and tests, retain their own subsystem selection.
+The [CMake SDK contract](../design/sdk-cli.md#cmake-sdk) defines the public helpers and targets shared by source builds and installed packages. Consumer projects use public headers and those targets.
+
+For Windows applications created with `huxerui_add_app`, use debugger output or application-owned logging. The GUI subsystem does not create a console for standard output or standard error in either Debug or Release builds.

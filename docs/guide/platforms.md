@@ -115,9 +115,7 @@ If the producer device is removed, publish a replacement texture from a valid de
 
 ## macOS
 
-The macOS backend requires macOS 12 or later.
-The macOS backend uses AppKit, Core Graphics, Core Text, and `NSTextInputClient`.
-Build with Xcode 26 or later and the macOS SDK; release CI uses Xcode 26.2. This toolchain requirement does not raise the macOS 12 deployment target.
+The macOS backend targets macOS 12 or later and uses AppKit, Core Graphics, Core Text, and `NSTextInputClient`. Build with Xcode 26 or later and the macOS SDK.
 
 Custom chrome extends application content into the title bar while preserving AppKit traffic lights and window behavior.
 External file references preserve security-scoped access when required.
@@ -157,7 +155,7 @@ Padding, fixed frames, icons, and pointer coordinates do not acquire a separate 
 Install the corresponding development packages before configuring CMake.
 The SDK archive does not bundle distribution-owned GTK, libepoxy, Pango, Cairo, GIO, or libsoup libraries.
 Official Linux SDK binaries require glibc 2.38 or later.
-Release CI builds and tests on Ubuntu 24.04; meeting the glibc baseline alone does not establish validation on another distribution.
+Ubuntu 24.04 is the validated release build and test environment.
 Application packages retain the distribution-owned runtime stack and may require newer system ABI versions according to their binaries; see [Packaging Applications](packaging.md#desktop-system-requirements).
 
 Linux builds are provided for x86_64 and aarch64 hosts.
@@ -209,7 +207,7 @@ The Web backend uses Emscripten, WebAssembly, Canvas 2D, browser input events, h
 Generated projects use the Emscripten version pinned by the installed HuxerUI SDK.
 Run the generated output through `huxerui run web` or another HTTP server; loading the files directly with a `file:` URL is unsupported.
 On Termux, `huxerui run web` starts a Python standard-library server on an available loopback port and passes the generated entry URL to `termux-open`; it does not use ADB or Emscripten's Android-device mode.
-The pinned Emscripten tools, Python, and `termux-open` must be available on `PATH`.
+On Termux, make the pinned Emscripten tools, Python, and `termux-open` available on `PATH`. On desktop hosts, [environment setup](getting-started.md#diagnose-the-environment) can prepare the matching Emscripten tools.
 
 Web libraries include `<huxerui/web/external_texture.h>` and publish open WebCodecs `VideoFrame` objects through `web::VideoFrameTexture`.
 Pass the same shared texture to `Image`; `Publish()` clones the frame, so the caller may close its original immediately, and `Finish()` preserves the last published image while rejecting later publication.
@@ -231,10 +229,10 @@ HuxerUI-rendered content does not have a semantic DOM accessibility bridge; DOM 
 ## Android
 
 The Android backend requires API 23 or later and uses an Android View host, Canvas, StaticLayout, InputConnection, JNI, and platform accessibility APIs.
-The generated Gradle project links the SDK-provided Android shared library and application C++ library for each configured ABI.
+The generated Gradle project builds one application shared library per ABI with the HuxerUI static library linked in. The SDK's AAR supplies the Java host.
 On API 26 or later, `HuxerUIView` disables Android's default whole-host focus highlight because HuxerUI draws component focus indication; keyboard and IME focus remain enabled, and embedded native controls retain their own focus appearance.
 
-Build and run require an Android SDK, NDK, Java, Gradle wrapper dependencies, and a compatible emulator or device.
+Building requires an Android SDK, NDK, JDK, and the Gradle wrapper's dependencies. Running from a desktop host also requires a compatible emulator or device.
 Insets, system-bar appearance, lifecycle, activation, file pickers, HTTP, PlatformView, FileReference payloads, and ExternalTexture are translated at the Android host boundary.
 Camera and microphone requests use the Activity launcher and require manifest declarations owned by the application.
 Local notifications use `NotificationManager`, an application-created channel on Android 8 or later, and `POST_NOTIFICATIONS` on Android 13 or later.
@@ -295,7 +293,7 @@ Closing the wrapper releases only that Java share of the C++ capability; the pay
 
 An Android arm64-v8a host SDK provides the `huxerui` CLI, `hcg`, and `hrc` as native Bionic executables for Termux.
 Termux Android builds target the local `arm64-v8a` ABI, use the Termux `aapt2` executable, and still require an Android SDK platform and NDK layout compatible with Gradle `externalNativeBuild` on Termux.
-The SDK installer does not install Java, Gradle dependencies, `aapt2`, the Android SDK, or the Android NDK; use `huxerui doctor android` to inspect those application-build prerequisites.
+Use `huxerui doctor android` to check the local application-build prerequisites.
 Termux diagnosis and setup do not require `sdkmanager`, platform-tools, or ADB because they are not part of the local-device path.
 `huxerui run android` opens the generated APK in the Android system installer through `termux-open`; complete the confirmation and choose Open in the installer to start the application.
 
@@ -354,9 +352,9 @@ An Activity hosting several HuxerUI views forwards results until one consumes th
 ## iOS
 
 The iOS backend requires iOS 15 or later and uses UIKit, Core Graphics, Core Text, `UITextInput`, and UIKit accessibility.
-Build on macOS with Xcode 26 or later and an installed simulator runtime or paired device; release CI uses Xcode 26.2. This toolchain requirement does not raise the iOS 15 deployment target.
+Build on macOS with Xcode 26 or later and the appropriate platform SDK. Run on a booted Simulator or a paired device using the [device selection commands](getting-started.md#select-an-android-or-ios-device).
 
-The CLI generates an iOS bundle with a `UIApplicationSceneManifest` and one window scene by default. When upgrading an existing generated shell that predates scenes, add this dictionary to its own `App/Info.plist`:
+The generated Xcode shell opts into the scene lifecycle through `UIApplicationSceneManifest` in `App/Info.plist`:
 
 ```xml
 <key>UIApplicationSceneManifest</key>
@@ -367,12 +365,6 @@ The CLI generates an iOS bundle with a `UIApplicationSceneManifest` and one wind
 ```
 
 The HuxerUI application delegate supplies the scene configuration. Set the key to `true` to opt into [multiple windows](core-concepts.md#multiple-windows). The scene manifest is required for the scene lifecycle, including in applications that only open one window. See [Apple's migration guidance](https://developer.apple.com/documentation/uikit/transitioning-to-the-uikit-scene-based-life-cycle).
-
-```bash
-huxerui devices ios
-huxerui open ios
-huxerui run ios --device <id>
-```
 
 Physical-device builds use Xcode signing settings owned by the generated project and local developer configuration.
 External files preserve security-scoped access when required.

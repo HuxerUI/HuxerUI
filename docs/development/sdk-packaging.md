@@ -1,37 +1,26 @@
 # SDK Packaging
 
-SDK libraries are built with `HUXERUI_ENABLE_PROFILING=OFF`, independently of their Debug or Release configuration.
-The packaging scripts and release workflow explicitly disable the option, and library installation rejects a profiling-enabled build.
-Published SDK archives use `HUXERUI_OPTIMIZATION=default` and `HUXERUI_ENABLE_LTO=OFF`; applications select further optimization for source targets as described in [Packaging Applications](../guide/packaging.md#size-optimization).
-Source builds can explicitly enable the private diagnostics described in [Runtime profiling](building.md#runtime-profiling), which then record in `detailed` mode by default; application macros cannot enable diagnostics in a released SDK.
-
-Repository packaging scripts build a complete SDK for the current desktop host and include the Android and Web target artifacts consumed by generated projects.
-Release CI additionally cross-builds the Android arm64-v8a host SDK for Termux with the Android NDK.
-The macOS SDK additionally contains the static iOS XCFramework for device and Simulator application-core builds.
-They are release and integration tools, not prerequisites for ordinary source builds.
-
-The existing packaging scripts and release CI directly build the Android artifacts, without a separate Android build entry point.
-They build the production AAR through `:HuxerUI:assembleRelease -PhuxeruiBuildNative=false` (or the corresponding Debug task), verify that it is Java-only, and copy it unchanged.
-For each ABI they configure and build the root CMake project with static core and testing enabled and repository tests and smoke tests disabled, then call `cmake --install --component HuxerUILibraries` into the SDK's ABI directory.
-The packaging entry points select the ABI and installation prefix, while the source CMake install rules own library selection and locations; static archives retain the symbol and relocation information required by the final application link.
-The `:ui_testing` module is exclusively a test consumer; SDK production neither invokes its tasks nor depends on its runner or smoke resources.
-The Android NDK version, minimum API, STL, and ABIs come from `platform/android/gradle.properties`; set `ANDROID_HOME` or `ANDROID_SDK_ROOT` to the SDK containing that NDK.
+Use this workflow to build an SDK archive from a HuxerUI checkout. See [Installation](../guide/installation.md) to consume an SDK or [Packaging Applications](../guide/packaging.md) to publish an application.
 
 ## Native installation and SDK assembly
 
-`cmake/HuxerUIBuild.cmake` defines native targets and their `HuxerUILibraries` install rules for top-level source builds, independently of SDK assembly.
-`cmake/HuxerUISdk.cmake` owns the complete SDK's package metadata, headers, tools, resources, platform artifact collection, and CPack setup.
-Adding the source through `add_subdirectory` registers neither framework library installation nor SDK packaging, even when the testing library is enabled.
-An Android target build with the CLI disabled installs its libraries without requiring a host SDK or test runner; the Termux host SDK continues to consume the separately assembled Android target artifacts without installing duplicate core libraries.
-An iOS or Web native-library install is an intermediate artifact, not a complete SDK; XCFramework assembly and Web artifact naming remain owned by platform packaging.
+`cmake/HuxerUIBuild.cmake` defines the native `HuxerUILibraries` component for top-level builds. `cmake/HuxerUISdk.cmake` assembles the [installed SDK layout](../design/sdk-cli.md#sdk-home-and-discovery) from the native install output, headers, CMake metadata, host tools, resources, and platform artifacts. Profiling must be disabled for installation. Published archives use `HUXERUI_OPTIMIZATION=default` and `HUXERUI_ENABLE_LTO=OFF`. See [Runtime profiling](building.md#runtime-profiling) for source-build diagnostics.
+
+Desktop archive scripts assemble the SDK for their host and include the Android and Web artifacts. The macOS archive also includes the device and Simulator iOS XCFramework. Release CI additionally builds an Android arm64-v8a host SDK for Termux, reusing the separately assembled Android target libraries.
+
+### Android artifacts
+
+The package scripts and release CI run `:HuxerUI:assembleRelease -PhuxeruiBuildNative=false` (or its Debug equivalent) and verify that the resulting AAR is Java-only. For each ABI, they build the root CMake project with the static framework and testing library enabled, then install the `HuxerUILibraries` component into the ABI directory. Target-only installation works with the CLI disabled. The `:ui_testing` module supplies a test consumer.
+
+The Android NDK version, minimum API, STL, and ABI settings come from `platform/android/gradle.properties`. Set `ANDROID_HOME` or `ANDROID_SDK_ROOT` to the SDK containing that NDK.
 
 ## Requirements
 
-Packaging requires:
+Install the following tools before running the SDK packager.
 
 - the host compiler and platform SDK;
 - Android SDK, NDK, Java, and the repository Gradle wrapper requirements;
-- Emscripten 4.0.19;
+- the Emscripten version pinned by `HUXERUI_WEB_EMSCRIPTEN_VERSION` in `cmake/HuxerUISdk.cmake`;
 - Xcode when packaging on macOS;
 - CMake, Ninja for Android, and the host generator used by the script.
 
@@ -65,29 +54,29 @@ Packaging output belongs in a build directory and must not be written into the s
 
 ## Validate an archive
 
-Every SDK must contain the CLI, host code generators, public headers, framework resources, the canonical application-development Skill under `share/huxerui/skills`, CMake package metadata, Android artifacts, and the pinned Web library.
-Desktop SDKs additionally contain their host libraries; the Android host SDK consumes the packaged Android target artifacts instead of carrying a duplicate host library.
-The macOS SDK must expose the macOS `HuxerUIPlatform` Clang module beside its public headers and contain `share/huxerui/platform/ios/HuxerUI.xcframework` with `ios-arm64` and `ios-arm64_x86_64-simulator` slices.
-Both XCFramework slices must expose the iOS `HuxerUIPlatform` module, and Objective-C plus Swift import-and-link fixtures must pass against the packaged libraries.
-macOS libraries and host tools must declare macOS 12 as their minimum deployment version, while both XCFramework slices must declare iOS 15.
-Windows and Linux SDKs do not carry iOS binaries.
-Install the archive into a temporary prefix and validate at least:
+Verify its checksum and compare the extracted contents with the [SDK layout and platform artifacts](../design/sdk-cli.md#platform-release-forms). On macOS, verify the AppKit `HuxerUIPlatform` module and both iOS XCFramework slices. Check that the packaged libraries pass Objective-C and Swift import-and-link fixtures. macOS libraries and host tools must declare macOS 12 as their minimum deployment version, and both XCFramework slices must declare iOS 15.
+
+Install the archive into an isolated temporary prefix. Verify SDK discovery with `HUXERUI_HOME` pointing to that prefix and again with the variable unset while invoking the CLI from the installation. From a scratch directory on a desktop host, build a generated consumer against the archive.
 
 ```bash
 huxerui doctor
-huxerui create app sdk_smoke --platform <host>,web,android
-huxerui build <host>
+huxerui create app sdk_smoke
+cd sdk_smoke
+huxerui build
 ```
 
 The generated smoke project must contain `.agents/skills/huxerui-app-development/SKILL.md` copied from the installed SDK.
 
-The CLI embeds the SDK installers from the same source revision; no separate runtime script installation is required.
 `HuxerUISdkUpdateTests` uses local SDK fixtures and a stub release transport to check version comparisons, repeated switches in the same shell, default-version markers, profile preservation, checksum rejection, unsafe links, locking, and publication failure recovery.
 These tests must not query public releases or replace a developer's SDK.
 
 On macOS, also create an iOS-only smoke project and run `huxerui build ios --config release` so the installed XCFramework participates in a complete Simulator application-core build.
 
 CMake packaging changes require both an incremental build and a separate clean configure and build on the affected host.
+
+## Publish a release
+
+The `v<version>` tag must match the CMake project version. Release CI validates the complete archive and checksum set before uploading assets.
 Release CI produces Windows x86_64, macOS arm64 and x86_64, Linux aarch64 and x86_64, and Android arm64-v8a archives.
 Linux release CI rejects binaries that require symbols newer than GLIBC 2.38, GLIBCXX 3.4.32, or CXXABI 1.3.15.
 Release jobs rebuild their host tools from source before configuration instead of publishing the executables checked into the selected release ref.

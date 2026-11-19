@@ -1,186 +1,50 @@
 # Scrolling
 
-This document defines scroll input, nested consumption, authoritative offset ownership, momentum, overscroll, observation, and platform integration.
+This document defines mounted offset ownership, input consumption, and motion. See [Layout and Scrolling](../guide/layout.md#scrollview) for application usage and [Layout and Virtualization](layout.md#virtual-geometry-and-offset-corrections) for realization and offset commit.
 
 ## Ownership
 
-Each mounted scroll container owns one actual offset per supported axis.
-`ScrollController::Metrics()` is an observable projection of that offset and geometry, not another writable scroll position.
-Two-axis containers share one clip and viewport. Each axis has its own optional controller connection, motion, and overscroll displacement.
-Momentum owns only its current velocity, while overscroll owns only a temporary presentation displacement outside the clamped content range.
-Neither value is copied into `ScrollMetrics`.
+A mounted scroll container owns one clamped content offset per enabled axis. Two axes share the viewport and clip, with independent controller connections, momentum, and overscroll. `ScrollMetrics` observes offset and extents. A disabled container still accepts requests from its connected controller and rejects user scrolling and focus reveal.
 
-`ScrollView::FillViewport()` and the Tabs strip share the `ScrollFillViewport` measurement policy. On each scroll axis, it passes the bounded viewport extent or the incoming minimum to the child as its minimum extent. The child's maximum extent stays unbounded.
-
-UiWindow owns scroll recognition and coordination without branching on concrete component types.
-`ScrollView`, virtual layouts, and editable text configure the same mounted scroll state and use the same offset mutation path.
-Platform adapters normalize host input and report Runtime's consumption result; they do not implement nested scrolling or component behavior.
-A disabled container rejects every user-driven scroll source while still accepting `ScrollSource::Programmatic` from its connected `ScrollController`, including item alignment; focus reveal remains gated by the disabled state.
+Ordinary `ScrollView` measures its child with an unbounded maximum on enabled axes. `FillViewport()` also raises each of those minima to the bounded viewport extent, or preserves the incoming minimum on an unbounded axis. The Tabs strip shares this measurement policy. Ordinary offset changes update the retained children transform. Virtual offsets instead change the realized range and placements. Scrollbars retain only their own interaction, visibility, and paint state and derive thumb geometry from the owner's metrics.
 
 ## Platform scroll input
 
-`ScrollInputEvent` represents one platform-recognized wheel or trackpad update:
+Adapters normalize wheel and trackpad data to a window position and two signed content-offset deltas in DIPs. `UiWindow::HandleScrollInput()` returns the consumed components. The host can use an unconsumed update for its own default scrolling.
 
-```cpp
-struct ScrollInputEvent {
-  Point position;
-  float delta_x;
-  float delta_y;
-  KeyModifiers modifiers;
-};
-```
-
-`position` is in window logical coordinates and `delta_x` and `delta_y` are the requested content-offset changes in logical pixels.
-Touch dragging remains a pointer gesture and never produces `ScrollInputEvent`.
-
-The deepest enabled View with `ViewEvents::ScrollInput` receives the complete input directly:
-
-```cpp
-return canvas.On<ViewEvents::ScrollInput>([](const ScrollInputEvent& event) {
-  return ZoomCanvas(event.position, event.delta_y, event.modifiers.control);
-});
-```
-
-Returning true consumes both axes and suppresses built-in scrolling.
-Returning false runs default scroll coordination.
-The event does not capture, bubble, or join pointer-sequence arbitration.
-
-`UiWindow::HandleScrollInput()` returns the actual two-dimensional delta consumed by HuxerUI.
-Platform adapters suppress their host default only when at least one axis was consumed.
-An unconsumed wheel update remains available to a native parent, browser page, or platform default.
+Dispatch uses the committed hit route. A hit on a PlatformView leaves the update to the host. Otherwise the deepest enabled node with `ViewEvents::ScrollInput` receives the complete update once. A `true` result consumes both axes. A `false` result invokes the default scroll transaction without contacting another raw handler. Direct dragging uses pointer recognition.
 
 ## Nested scroll transaction
 
-Horizontal and vertical deltas run as independent transactions so a diagonal trackpad update may be split across differently oriented containers.
-For each nonzero axis Runtime uses the committed hit route and applies one ordered transaction:
+Each nonzero axis selects the eligible scroll containers along the route. On direct touch, reversing direction can consume existing overscroll first. Runtime then offers the remaining signed delta in this order.
 
-```text
-outer pre-scroll extensions
-        ↓
-inner-to-outer mounted scroll offsets
-        ↓
-inner post-scroll extensions
-        ↓
-one terminal direct-touch overscroll owner
-```
+- Pre-scroll callbacks run from outer to inner, in modifier declaration order.
+- Clamped offsets consume from inner to outer.
+- Post-scroll callbacks run from inner to outer, in reverse modifier order. They receive the amount already consumed and what remains.
+- On a direct-touch update, the outermost eligible container can accept the remaining delta as overscroll for that direction.
 
-Only retained extensions attached to participating scroll containers receive nested callbacks.
-Pre-scroll visits outer containers before inner containers.
-Normal offset consumption visits inner containers before outer containers.
-Post-scroll visits inner containers before outer containers.
-Modifier declaration order is used for pre-scroll and reversed for post-scroll, preserving ordinary nested wrapper order without another registry.
+Callbacks on retained extensions of participating scroll containers return the actual amount consumed. It must be finite, point in the available direction, and stay within the available magnitude. An invalid return is a framework invariant failure. A two-axis transaction can reach a boundary on one axis while the other continues consuming.
 
-The extension contract reports actual consumption:
+## Direct drag and fling
 
-```cpp
-float OnPreScroll(ViewNode& node, Axis axis, float available, ScrollSource source);
-float OnPostScroll(ViewNode& node, Axis axis, float consumed, float available, ScrollSource source);
-```
+The [pointer session](gestures.md) arbitrates direct scrolling after movement crosses slop. A single-axis recognizer competes in the dominant direction. A two-axis container can accept on either axis and dispatch both components along its committed route. Touch may accept at a boundary when overscroll is enabled for that direction. Mouse and pen need scroll capacity.
 
-`available` is the signed delta still available at that point.
-`consumed` passed to post-scroll is the amount already consumed earlier in the same transaction.
-A returned value must be finite, have the same direction as `available`, and have no greater magnitude.
-Runtime treats a violation as a framework invariant failure.
+After a fling-eligible release, pre-fling callbacks offer velocity from outer to inner before starting momentum. The momentum owner integrates its velocity through the same clamped offset path. At a boundary it offers the remaining velocity to its post-fling callbacks before the nearest compatible ancestor can continue it. Velocity consumption follows the same direction and magnitude rules as delta consumption and is independent on each axis.
 
-The transaction result is temporary bookkeeping only.
-It does not create another offset, connection, controller, dispatcher, or observable state.
+`ScrollPhysics` supplies thresholds, decay, resistance, and settlement. A modifier overrides the platform's default for that container. Theme resolves scroll bar visuals. Reduced motion stops momentum and clears settling overscroll on the next frame.
 
-## Direct drag and gesture ownership
+## Overscroll and activity
 
-Direct dragging remains one recognizer in `PointerSession`.
-After movement crosses slop on the recognizer's axis, the deepest compatible scroll recognizer owns the pointer sequence.
-Its committed route supplies the same pre-scroll, offset, and post-scroll transaction used by indirect input.
-Single-axis containers use the dominant direction to compete for the gesture. A two-axis container can win on either axis and then dispatch both components along its committed route.
+Overscroll is a separate presentation translation for clipped content, including PlatformViews. It preserves layout, realization range, clamped metrics, and semantic scroll position. Leading and trailing eligibility are tracked separately. Release and cancellation settle the displacement. Disablement, lost layout participation, or unmount clears active motion.
 
-Touch may accept at a content boundary when terminal overscroll is enabled for that container.
-Mouse and pen dragging require ordinary scroll capacity and do not acquire ownership solely for overscroll.
-Pointer cancellation ends the direct activity and settles any temporary overscroll displacement.
-
-## Fling coordination
-
-Fling uses the same scroll-container chain and a paired velocity contract:
-
-```cpp
-float OnPreFling(ViewNode& node, Axis axis, float available_velocity);
-float OnPostFling(ViewNode& node, Axis axis, float consumed_velocity, float available_velocity);
-```
-
-Pre-fling visits outer containers before the selected inner momentum owner.
-When that owner finishes or reaches a boundary, its post-fling extensions receive the remaining velocity before the nearest compatible ancestor may continue the momentum.
-Velocity transfer and overscroll settlement are independent for each axis.
-Consumption follows the same finite, direction, and magnitude invariants as scroll delta consumption.
-
-`ScrollPhysics` is the only scroll motion policy value.
-An explicit `ScrollPhysics` modifier overrides the platform adapter's default for that container.
-It owns fling thresholds and decay together with overscroll enablement, resistance, extent, and settle rate.
-Theme owns scrollbar visuals, not physical behavior.
-
-## Overscroll
-
-The actual content offset remains clamped from zero through the current maximum.
-After pre-scroll, every compatible mounted offset, and post-scroll have seen a direct touch delta, at most one terminal container may retain the remainder as overscroll displacement.
-The outermost reached container with overscroll enabled for the remainder's direction is the terminal owner.
-Leading and trailing edge eligibility are separate mounted capabilities so a retained behavior can accept only the edge it owns without introducing a component branch in Runtime.
-
-Overscroll is presentation-only.
-It translates clipped scroll content without changing measurement, virtual ranges, controller metrics, focus reveal, or semantic scroll position.
-PlatformViews follow the same translation and clipping as ordinary rendered content.
-Release, cancellation, disablement, removal from layout, and unmount settle or clear retained displacement.
-Reduced motion clears released overscroll and momentum on the next frame instead of retaining an animation.
-Settlement reports `ScrollSource::Overscroll` activity so retained presentation and text-input geometry follow every visual displacement without creating another observable position.
-
-Wheel and trackpad input do not create overscroll.
-This prevents an indirect input boundary from accidentally activating retained pull-to-refresh behavior intended for direct manipulation.
-
-A retained behavior may take over the committed overscroll displacement at the terminal `End` or `Cancel` notification.
-It clears the shared temporary offset and applies an equivalent descendant presentation transform in the same commit, then owns only its post-gesture animation.
-This handoff preserves the single authoritative scroll offset and avoids a one-frame jump without keeping two active overscroll owners.
-
-## Activity and observation
-
-`ScrollActivity` is a transient retained-extension notification:
-
-```cpp
-struct ScrollActivity {
-  ScrollSource source;
-  ScrollPhase phase;
-  Axis axis;
-  float delta;
-  ScrollMetrics metrics;
-};
-```
-
-It replaces separate offset-changed and direct-gesture notifications.
-Scrollbars and editing affordances use it for temporary presentation state, but it is not retained application state.
-`ScrollController::Metrics()` remains the single public observable for offset and extent changes.
-
-Application behavior such as loading more content observes controller or virtual-layout metrics.
-It does not infer content position from raw wheel input or create a second public changed-event stream.
-Visible item ranges and item-count thresholds belong to virtual-layout metrics when that API is introduced.
+`ScrollActivity` notifies mounted extensions of the axis, source, phase, delta, and current metrics. Settlement reports `ScrollSource::Overscroll` so geometry-dependent observers follow the visual motion. At a terminal direct notification, a retained behavior can take over the displacement and apply an equivalent descendant transform in the same commit. [RefreshBox](refresh-box.md#scroll-ownership-and-handoff) uses that handoff.
 
 ## Programmatic and semantic scrolling
 
-Controller requests, focus reveal, text-input reveal, scrollbar dragging, drag-and-drop auto-scroll, and accessibility actions all call the same clamped offset mutation path and publish the same metrics.
-They target the addressed container directly and do not automatically chain a remainder to ancestors.
-Only user scroll transactions and fling continuation perform nested consumption.
+Controller updates, focus and text-input reveal, scrollbar dragging, drag-and-drop auto-scroll, and semantic actions use the clamped offset mutation path. A direct offset request targets one container. Reveal can adjust several ancestors independently using the target's current geometry. In a two-axis container it uses the nearest offset exposing as much as fits on each axis. A target already covering the viewport leaves that axis in place. Drag auto-scroll selects compatible ancestors using their own edge geometry.
 
-Focus reveal in a two-axis container uses the nearest offset that exposes as much of the target as fits on each axis. A target that already covers the viewport leaves that axis in place.
+A controller can queue an initial request before its first connection. A detached controller never replays requests from its previous connection. Single-axis virtual item jumps can refine an estimated target until the measured placement agrees with it. A newer offset request or intervening scroll cancels pending alignment. A two-axis policy supplies `ItemBounds()` in content coordinates. Each controller aligns the same rectangle along its bound axis, and layout settles the requests together with the viewport.
 
-`ScrollToItem` retains a pending index and alignment until measured placement agrees with the requested offset. Newly realized variable-height items may change the estimated target, so completion occurs after layout rather than when the initial offset is applied. Direct scrolling, a newer offset request, disablement, or an invalidated target cancels the pending request; correction never becomes a competing scroll position. Requests accepted by an old connection are not replayed after rebinding or remounting.
+## Validation
 
-For a two-axis virtual layout, `ItemBounds` provides the item's content rectangle. UiWindow aligns that rectangle along the requesting controller's axis using the measured viewport. Both pending targets can be resolved during the same measurement.
-
-## Two-axis virtual measurement
-
-A two-axis virtual layout enables both axes before measurement so both initial offsets are available to `VirtualLayoutContext`. The Runtime clamps the candidate against the measured content and viewport, applying any layout correction or pending item alignment on each axis. When the viewport changes, the existing realization session measures again and commits only the placements for the settled viewport. A layout that keeps changing the viewport beyond the bounded refinement fails measurement instead of publishing mismatched geometry.
-
-## Invariants
-
-- A mounted scroll container is the sole owner of its actual offset.
-- `ScrollMetrics` is a projection and overscroll displacement is not content position.
-- Each axis has one ordered consumption transaction and at most one terminal overscroll owner.
-- Touch drag is pointer input; wheel and trackpad updates are `ScrollInputEvent`.
-- Direct input handlers decide only whether they consume the complete platform update.
-- Nested extensions return actual consumption and never mutate framework-owned offset bookkeeping.
-- Platform adapters normalize input and honor Runtime consumption without duplicating scroll policy.
-- Runtime remains independent of concrete scroll component types.
+[Scrolling tests](../../tests/runtime/scrolling.cpp) cover raw-input consumption, nested callback order, independent axes, overscroll settlement, controller requests, disabled interaction, and focus reveal.

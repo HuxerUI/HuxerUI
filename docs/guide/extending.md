@@ -24,51 +24,7 @@ Use `void` for notifications and a value result only for synchronous decisions o
 
 ## Custom layouts
 
-Derive from `Layout<Derived>` when behavior is a measurement and placement policy over ordinary children.
-The `ViewNode` interface provides geometry, interaction state, and layout metadata for a UiWindow-owned mounted node; application code does not create or own these nodes.
-
-```cpp
-class SimpleRow final : public Layout<SimpleRow> {
-public:
-  using Layout::Layout;
-
-  static LayoutResult Measure(LayoutContext& context, ViewNode& node, Constraints constraints) {
-    LayoutResult result;
-    float x = 0.0F;
-    float height = 0.0F;
-
-    for (ViewNode& child : node.Children()) {
-      const Size size = context.Measure(child, constraints.Loose());
-      result.Place(child, {x, 0.0F});
-      x += size.width;
-      height = std::max(height, size.height);
-    }
-
-    result.SetSize(constraints.Constrain({x, height}));
-    return result;
-  }
-};
-```
-
-Measure children only through the context and do not retain child references across reconciliation.
-
-`Children()` visits the current direct children; both const and mutable `ChildAt(index)` access throw `std::out_of_range` when `index >= ChildCount()`.
-Use typed `LayoutValue<Key>` metadata for semantics owned by the parent layout.
-
-## Custom virtual layouts
-
-Derive from `VirtualLayout<Derived>` for a demand-driven logical item source.
-The layout chooses items to realize and returns their geometry.
-In both ordinary and virtual layouts, `Measure()` updates the node's `LayoutSize()` even when the layout ignores the returned size.
-
-UiWindow owns declaration reconciliation, keys, retained item state, clipping, hit testing, scrolling, semantics, and cleanup.
-The layout must not maintain a second mounted item tree.
-
-A derived layout can call `EnableBothAxes()` during construction to scroll within a bounded width and height. Return the viewport size with `SetSize()`, the full logical extent with `SetContentSize()`, and item placements in content coordinates. `Viewport()` supplies the candidate offset and size for the current measure pass.
-
-Use `SetScrollOffset(Axis, float)` to correct an axis after an extent change. The same measure session can retry with the corrected viewport before committing placements. Use committed geometry, such as the bound controllers' published metrics, as the anchor reference so the correction survives repeated measurements with different constraints.
-
-To support `ScrollToItem()` on two-axis layouts, define `static std::optional<Rect> ItemBounds(ViewNode&, std::size_t)`. Return the item's bounds in content coordinates without realizing it, using an estimate when exact geometry is unavailable. The controller applies `ScrollAlignment` along its bound axis. Single-axis layouts continue to report their axis and scalar correction through `SetAxis()` and `SetScrollOffset(float)` and can implement `ScrollOffsetForItem()`.
+Use [Custom layout](layout.md#custom-layout) to measure and place ordinary children, or [Custom virtual layouts](layout.md#custom-virtual-layouts) to realize logical items on demand. Both policies receive UiWindow-owned `ViewNode` values.
 
 ## Modifiers and NodeExtension
 

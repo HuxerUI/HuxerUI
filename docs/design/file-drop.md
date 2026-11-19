@@ -3,38 +3,16 @@
 External file drop receives ordinary files from the host drag system into one mounted HuxerUI target.
 It reuses the file capabilities defined in [Files and Application Storage](files.md), while remaining independent of the PointerSession-owned value transfers in [Typed Drag-and-Drop](drag-drop.md).
 
-## Public contract
+## Acceptance rules
 
-`<huxerui/file_drop.h>` provides `FileDropTarget`, `FileDropOptions`, `FileDropOffer`, `FileDropEvent`, and `FileDropEvents`.
-Applications attach `FileDropTarget::Accepts(options)` through `.With(...)` and receive ordinary typed events through `.On<...>()`.
-An optional `Accepts(options, predicate)` predicate inspects advertised metadata only; it must be quick and free of side effects.
-There is no root service, controller, source modifier, public transfer object, or target registry.
+The [file-drop guide](../guide/files.md#receiving-dropped-files) owns modifier and event usage. Hover selection rejects only offers known to be ineligible using the advertised metadata. At physical drop, the receiver freezes the options and checks every prepared reference against them. An empty batch, non-file item, disallowed count, or final filter mismatch rejects the entire batch. Unknown final metadata cannot satisfy a configured filter without another matching fact.
 
-`FileDropOptions` contains `extensions`, `content_types`, and `allows_multiple`, which defaults to true.
-Extensions and MIME types form a union; empty lists accept any ordinary file.
-The syntax follows FilePickerFilter, but drop options do not contain a picker display label and final drop filtering is mandatory rather than an advisory native UI hint.
-Extensions match complete dot-prefixed suffixes with ASCII case folding, including compound suffixes such as `tar.gz`.
-MIME matching is ASCII case-insensitive and supports `type/*` and `*/*` without parameters.
-Filters do not inspect bytes or establish content safety.
-
-`FileDropOffer` reports an optional file count and the known advertised MIME types.
-Missing metadata means unknown, not an empty transfer or a proven match.
-Hover selection rejects only offers known to be ineligible; final delivery checks every file against the frozen options.
-An empty batch, a directory, an unsupported item, a disallowed count, or a nonmatching file rejects the complete batch without partial delivery.
-Unknown final metadata does not satisfy a nonempty filter unless another available fact matches it.
-
-`FileDropEvent` contains target-local `position` and host-local `window_position`, both in DIPs.
-It does not fabricate a pointer identifier or device kind for host-owned input.
-Received references use existing FileReference operations; retaining a callback argument requires copying its value.
-Applications decide whether to read, retain, import, project to a local path, or discard each reference.
-Receiving a drop neither imports its contents into application storage nor grants write access.
+Host adapters report position in window DIPs. The receiver converts to target-local DIPs without fabricating a pointer identity.
 
 ## Hover and delivery
 
 Entered, Moved, and Exited describe hover only.
 Every entered target receives Exited when hover ends, including physical drop, unless its mounted identity has already disappeared.
-This intentionally differs from the successful terminal Dropped event of in-process typed drag-and-drop.
-Applications drive hover feedback exclusively from Entered and Exited.
 
 Physical drop freezes the selected extension identity, target-local and window coordinates, and acceptance options before ending hover and auto-scroll.
 The adapter captures native access within the host callback's permitted lifetime, then prepares the file references asynchronously when required.
@@ -53,7 +31,7 @@ UiWindow retirement cancels its pending drop work, and late completions cannot a
 ## Shared ownership
 
 FileDropTarget is a retained modifier exposing a private NodeExtension capability.
-Runtime forwards normalized host input to its private FileDropReceiver, which owns hover and pending delivery and selects one target using the existing committed pointer hit route, deepest node first and reverse modifier order within a node.
+UiWindow forwards normalized host input to its FileDropReceiver, which owns hover and pending delivery and selects one target using the existing committed pointer hit route, deepest node first and reverse modifier order within a node.
 Layer ordering, clipping, pointer participation, enabled state, and presentation transforms keep their existing meaning.
 Native PlatformView regions retain native ownership rather than falling through to an ancestor file target.
 Coordinate conversion uses Node APIs.
@@ -70,32 +48,15 @@ Adapters negotiate Copy only when both the source and the target support it; Mov
 They reuse picker and activation reference factories rather than exposing native paths, URLs, objects, or handles as the portable payload.
 References retain the native grant or provider independently of the drag callback wherever the platform permits it.
 Temporary provider files are copied into reference-owned temporary storage only when their native lifetime requires it.
-This is neither a promise of zero-copy delivery nor a promise that every source remains accessible indefinitely.
 Operations still report revoked access, unavailable providers, and externally changed files through existing file results.
 
 Windows receives shell file lists through one OLE IDropTarget per host HWND, with balanced OLE initialization and registration.
 AppKit receives file URLs; UIKit receives asynchronous file representations and secures temporary-file ownership before provider callbacks return.
-Android receives content URIs with shared batch permission ownership on supported hosts; drag permissions remain bounded by the granting Activity's lifetime.
+Android API 24 and later can retain content URIs through a shared batch permission lease tied to the granting Activity. `HuxerUIActivity` supplies the hook. Embedded hosts use `HuxerUIView.setFileDropPermissionRequester` to return an `AutoCloseable` lease and clear the hook during teardown.
 GTK receives files through its native asynchronous drop controller and finishes each accepted native operation once data reception terminates.
 Web captures browser file capabilities during the drop event's readable data-store lifetime and does not suppress unrelated native drops.
 Unsupported items and unavailable grants fail explicitly rather than producing partial or path-shaped substitute references.
 
-## Scope and validation
+## Validation
 
-The initial contract accepts single or multiple ordinary files for reading and import.
-Directories, recursive drops, outgoing native transfers, Move, and general text, URL, or MIME transfer are not included.
-Applications provide an equivalent picker action for keyboard, touch, accessibility, and hosts without external drag support.
-
-Focused tests cover configuration validation, partial offer metadata, final filtering, nested targets, transformed coordinates, clipping, edge scrolling, disabled nodes, compatible updates, unmount, exception cleanup, deferred delivery, concurrent pending drops, preparation cancellation, and reference lifetime.
-Existing typed drag-and-drop and scrolling tests remain regression coverage rather than being rewritten to match external hover semantics.
-
-## Implementation boundaries
-
-The public file-drop header owns the receiving modifier and typed events.
-`runtime_file_drop.cpp` contains the modifier implementation, private capability, metadata filtering, and FileDropReceiver implementation. Its small collaborator declaration belongs to the existing `file_internal.h`; pending-operation state remains private to the implementation. There is no separate file-drop internal header, root service, or transfer controller.
-Tests verify filtering through delivered or failed events rather than exposing private validation functions.
-Platform declarations remain in existing file-integration headers; native implementations own only host callbacks, grants, and preparation.
-macOS and Web capture file capabilities alongside their existing file-reference implementations, while host event callbacks remain in the adapters.
-macOS drop preparation and delivered references share the existing security-scoped access owner without acquiring the same grant twice.
-The preparation callback returns best-effort cancellation directly, and Android drop completion does not pass through picker presentation control.
-File metadata validation is shared with the existing file module rather than introducing a separate filter module.
+[Runtime file-drop tests](../../tests/runtime/file_drop.cpp) cover routing, filtering, deferred delivery, cancellation, and reference lifetime. The [Files example](../../examples/files/main.cpp) provides equivalent picker and drop actions.

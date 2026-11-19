@@ -10,7 +10,6 @@ Current behavior is documented in the user guides, while detailed constraints li
 
 ## Platform integration
 
-- Add Linux `PlatformView` hosting while preserving shared composition ordering.
 - Complete iOS archive export, distribution signing, and embeddable host integration.
 - Add an OHOS backend through the existing platform boundaries.
 
