@@ -165,7 +165,7 @@ Its instance owns a strong reference to the unparented widget returned by the fa
 See `example_platform_view` for a controlled GtkEntry.
 
 Linux does not publish HuxerUI semantics through GTK. If the application or environment explicitly enables GTK accessibility, GTK exposes the embedded widgets through its own accessibility tree.
-System tray presentation requires an active StatusNotifierItem watcher and host; `IsAvailable()` tracks hosts appearing or disappearing at runtime.
+System tray presentation requires an active StatusNotifierItem watcher and host; `IsAvailable()` tracks hosts appearing or disappearing at runtime. Call `SystemTrayHandle::Show()` again to replace the icon or menu in place, including when the menu structure changes.
 
 Native libraries include `<huxerui/linux/external_texture.h>` for `linux::PixelTexture`, `linux::GlTexture`, and `linux::GdkTexture`.
 `PixelTexture` copies straight-alpha RGBA8888 or BGRA8888 rows and remains available to CPU producers.

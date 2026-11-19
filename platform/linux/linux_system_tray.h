@@ -3,6 +3,8 @@
 #include "linux_internal.h"
 
 #include <memory>
+#include <optional>
+#include <string>
 
 #include "application/system_tray_internal.h"
 
@@ -10,7 +12,7 @@ namespace huxerui::detail {
 
 class LinuxSystemTrayTransport final : public SystemTrayTransport {
 public:
-  LinuxSystemTrayTransport();
+  explicit LinuxSystemTrayTransport(std::optional<std::string> bus_address = std::nullopt);
   ~LinuxSystemTrayTransport() override;
 
   [[nodiscard]] bool IsAvailable() const noexcept override;
