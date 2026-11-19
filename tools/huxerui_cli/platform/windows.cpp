@@ -236,6 +236,7 @@ public:
         check.detail = error.what();
       }
     }
+    check.host_toolchain = true;
     return {std::move(check)};
   }
 
@@ -257,7 +258,7 @@ public:
   }
 
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
-    std::vector<GeneratedFile> files = RenderTemplateTree("platform/desktop/app", context);
+    std::vector<GeneratedFile> files = RenderTemplateTree(DesktopEntryTemplate(context), context);
     std::vector<GeneratedFile> platform_files = RenderTemplateTree("platform/windows/app", context);
     files.insert(files.end(), std::make_move_iterator(platform_files.begin()),
                  std::make_move_iterator(platform_files.end()));

@@ -52,8 +52,8 @@ These documents describe the current implementation, including ownership, invari
 ## SDK and platforms
 
 - [SDK, CLI, Platform Shell, and Library](sdk-cli.md) covers SDK selection, project ownership, environment planning, builds, and library integration.
-- [mcpp Build System](mcpp-build-system.md) covers the desktop module build and its relationship to CMake.
-- [Build System Integration (Draft)](build-system-integration.md) proposes a common contract for build-system integrations.
+- [mcpp Build System](mcpp-build-system.md) covers the mcpp build of the framework and applications on every supported platform and its relationship to CMake.
+- [Build System Integration (Draft)](../../buildtools/specs/build-system-integration.md) proposes a common contract for build-system integrations, which the [conformance suite](../../buildtools/cts/README.md) checks.
 - [Web Platform](web.md): browser lifecycle, rendering, input, resources, services, and integration limits.
 
 See the [documentation index](../README.md) for application and contributor workflows.

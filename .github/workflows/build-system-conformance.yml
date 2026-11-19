@@ -1,0 +1,851 @@
+name: Build System Conformance
+
+# Builds the conformance projects in buildtools/cts with every build-system
+# integration and checks the facts the build-system contract defines
+# (buildtools/specs/build-system-integration.md). Each checkpoint is its own
+# step, so a run shows which checkpoint passed and where one failed, and an
+# integration is checked only for what its support declaration states. The
+# expected facts belong to each project, so no integration is the reference;
+# the last job checks that the integrations agree on what has no fixed value,
+# such as the content of the final resource package. The sequence job builds
+# several targets in one checkout in turn, as a developer on one host does.
+#
+# The suite checks the build systems, not the framework, so the framework's
+# sources start no run. A pull request and a push to main run the jobs and
+# projects their changed paths can affect, each target on its primary host
+# (.github/workflows/scripts/conformance_plan.py): a conformance project's
+# change runs that project, a path one integration or target owns runs only
+# that integration or target, and the suite itself runs everything. The
+# comparison runs when both integrations ran. A manual dispatch runs every job
+# on every host; run one before a release.
+#
+# To verify a change on a few rows first, a pull request's head commit names
+# them on a `CTS-Only:` line, for example `CTS-Only: mcpp/ios@macos,
+# */android@linux` (`<integration>/sequence@linux` names a sequence job), and
+# every other job is skipped; a dispatch takes the same patterns as `only`.
+# Drop the line once they pass, so the next push runs the selection by path.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'buildtools/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'mcpp.toml'
+      - 'build.mcpp'
+      - 'modules/**'
+      - 'templates/**'
+      - 'tools/codegen/**'
+      - 'tools/resource_compiler/**'
+      - 'tools/huxerui_cli/**'
+      - 'tools/prebuilt/**'
+      - '.github/workflows/build-system-conformance.yml'
+      - '.github/workflows/scripts/conformance_plan.py'
+      # Last, because the later pattern wins: documentation is no input of any checkpoint.
+      - '!**.[mM][dD]'
+  pull_request:
+    paths:
+      - 'buildtools/**'
+      - 'cmake/**'
+      - 'CMakeLists.txt'
+      - 'mcpp.toml'
+      - 'build.mcpp'
+      - 'modules/**'
+      - 'templates/**'
+      - 'tools/codegen/**'
+      - 'tools/resource_compiler/**'
+      - 'tools/huxerui_cli/**'
+      - 'tools/prebuilt/**'
+      - '.github/workflows/build-system-conformance.yml'
+      - '.github/workflows/scripts/conformance_plan.py'
+      # Last, because the later pattern wins: documentation is no input of any checkpoint.
+      - '!**.[mM][dD]'
+  workflow_dispatch:
+    inputs:
+      only:
+        description: 'Run only these jobs: comma-separated <integration>/<target>@<host> patterns; empty runs all'
+        required: false
+        default: ''
+
+concurrency:
+  group: conformance-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  MCPP_VERSION: '2026.11.17.1'
+  XLINGS_NON_INTERACTIVE: '1'
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      jobs: ${{ steps.select.outputs.jobs }}
+      macos_jobs: ${{ steps.select.outputs.macos_jobs }}
+      sequence: ${{ steps.select.outputs.sequence }}
+      run_jobs: ${{ steps.select.outputs.run_jobs }}
+      run_macos_jobs: ${{ steps.select.outputs.run_macos_jobs }}
+      run_sequence: ${{ steps.select.outputs.run_sequence }}
+      compare: ${{ steps.select.outputs.compare }}
+      compare_macos: ${{ steps.select.outputs.compare_macos }}
+      projects: ${{ steps.select.outputs.projects }}
+      emscripten: ${{ steps.toolchains.outputs.emscripten }}
+    steps:
+      # The pull request's merge commit and its first parent, the base it is compared with.
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+
+      - name: Test the conformance runner and the plan
+        run: |
+          python3 -I tests/scripts/cts_test.py
+          python3 -I tests/scripts/conformance_plan_test.py
+
+      # The CLI requires the Emscripten version the framework is released with, so the jobs install that one.
+      - name: Read the pinned toolchain versions
+        id: toolchains
+        run: |
+          version=$(sed -n 's/^set(HUXERUI_WEB_EMSCRIPTEN_VERSION "\(.*\)")$/\1/p' cmake/HuxerUISdk.cmake)
+          test -n "$version"
+          echo "emscripten=$version" >> "$GITHUB_OUTPUT"
+
+      # The pull request's head commit is the merge commit's second parent.
+      - name: Select the jobs
+        id: select
+        env:
+          DISPATCH_ONLY: ${{ github.event.inputs.only }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          only=""
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            only=$(git log -1 --format=%B HEAD^2 | sed -n 's/^CTS-Only:[[:space:]]*//p' | tail -n 1)
+          elif [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            only=$DISPATCH_ONLY
+          fi
+          echo "only: ${only:-<everything selected>}" >&2
+          # A push compares with the commit main was at; one the checkout cannot reach selects everything.
+          base=""
+          if [ "${{ github.event_name }}" = pull_request ]; then
+            base=HEAD^1
+          elif [ "${{ github.event_name }}" = push ] && git fetch --depth=1 origin "$BEFORE" 2> /dev/null; then
+            base=$BEFORE
+          fi
+          if [ -n "$base" ]; then
+            git diff --name-only "$base" HEAD | tee /dev/stderr \
+              | python3 -I .github/workflows/scripts/conformance_plan.py --only "$only" >> "$GITHUB_OUTPUT"
+          else
+            python3 -I .github/workflows/scripts/conformance_plan.py --only "$only" < /dev/null >> "$GITHUB_OUTPUT"
+          fi
+          cat "$GITHUB_OUTPUT"
+
+  # Hosts are split so the comparison of one group does not wait for runners of the other. The rows are the
+  # plan's (ROWS in conformance_plan.py, with the integrations).
+  conformance:
+    name: ${{ matrix.integration }} (${{ matrix.row.target }} on ${{ matrix.row.host }})
+    needs: [plan]
+    if: needs.plan.outputs.run_jobs == 'true'
+    env:
+      # The projects the plan confines the run to, as the runner's `--project` arguments; empty for every project.
+      CTS_PROJECTS: ${{ needs.plan.outputs.projects }}
+    runs-on: ${{ matrix.row.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.jobs) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      # The CMake integration builds with the host's MSVC; mcpp provisions its own toolchain, so its rows run without
+      # it, which is what `huxerui doctor` reports for an mcpp project. The CLI's own build finds MSVC through the
+      # Visual Studio generator.
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        if: matrix.row.host == 'windows' && matrix.integration == 'cmake'
+
+      # The mcpp integration takes its GTK stack from the xlings payloads the
+      # manifest declares; only the virtual display comes from the machine.
+      - name: Install Linux prerequisites
+        if: matrix.row.host == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends xvfb xauth fonts-dejavu-core
+          if [ "${{ matrix.integration }}" = cmake ]; then
+            sudo apt-get install -y --no-install-recommends ninja-build ccache
+          fi
+          if [ "${{ matrix.integration }}" = cmake ] && [ "${{ matrix.row.target }}" = linux ]; then
+            sudo apt-get install -y --no-install-recommends \
+              libgtk-4-dev libepoxy-dev libsoup-3.0-dev pkg-config gcc-14 g++-14
+            echo "CC=gcc-14" >> "$GITHUB_ENV"
+            echo "CXX=g++-14" >> "$GITHUB_ENV"
+          fi
+
+      # CMake's Linux package deploys the runtime with patchelf 0.19 or newer and writes the AppImage with appimagetool.
+      - name: Install Linux packaging tools
+        if: matrix.integration == 'cmake' && matrix.row.target == 'linux'
+        run: |
+          tools="$RUNNER_TEMP/packaging-tools"
+          mkdir -p "$tools/bin"
+          curl --fail --location --silent --show-error --retry 3 --output "$RUNNER_TEMP/patchelf.tar.gz" \
+            https://github.com/NixOS/patchelf/releases/download/0.19.2/patchelf-0.19.2-x86_64.tar.gz
+          printf '%s  %s\n' 2abdc34fbe949c995a1baa4ec310896a085588a45a99cd0d726851bdfac2a4bb "$RUNNER_TEMP/patchelf.tar.gz" \
+            | sha256sum --check --status
+          tar -xzf "$RUNNER_TEMP/patchelf.tar.gz" -C "$tools"
+          curl --fail --location --silent --show-error --retry 3 --output "$tools/bin/appimagetool" \
+            https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          printf '%s  %s\n' ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0 "$tools/bin/appimagetool" \
+            | sha256sum --check --status
+          chmod +x "$tools/bin/appimagetool"
+          echo "$tools/bin" >> "$GITHUB_PATH"
+          # The runner has no FUSE; an AppImage then unpacks itself to run.
+          echo "APPIMAGE_EXTRACT_AND_RUN=1" >> "$GITHUB_ENV"
+
+      - name: Install Emscripten
+        if: matrix.row.target == 'web' && matrix.integration == 'cmake'
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ needs.plan.outputs.emscripten }}
+
+      # The NDK the HuxerUI CLI and its Android shell pin; an older one lacks parts of the C++20 library.
+      - name: Install the Android NDK
+        if: matrix.row.target == 'android' && matrix.integration == 'cmake'
+        run: |
+          # `yes` ends with a broken pipe once sdkmanager stops reading, which must not fail the step.
+          sdkmanager="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ "${{ matrix.row.host }}" = windows ]; then sdkmanager="$sdkmanager.bat"; fi
+          (yes || true) | "$sdkmanager" --install "ndk;29.0.14206865" > /dev/null
+          test -f "$ANDROID_HOME/ndk/29.0.14206865/build/cmake/android.toolchain.cmake"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+
+      # The Xcode the SDK release builds with; the runner's default lacks parts of the C++20 library.
+      - name: Install macOS prerequisites
+        if: matrix.row.host == 'macos'
+        run: |
+          if [ -d /Applications/Xcode_26.2.app ]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode_26.2.app/Contents/Developer" >> "$GITHUB_ENV"
+          fi
+          if [ "${{ matrix.integration }}" = cmake ]; then brew install ninja ccache; fi
+
+      # Every CMake build of a row -- each project's, and each `huxerui package` the CLI starts -- compiles the same
+      # framework; ccache reuses its objects across those build directories and across runs. The Web's compiler
+      # keeps its own cache, and MSVC's default debug information cannot be cached, so those rows compile in full.
+      - name: Use a compiler cache
+        if: matrix.integration == 'cmake' && matrix.row.host != 'windows' && matrix.row.target != 'web'
+        run: |
+          {
+            echo "CMAKE_C_COMPILER_LAUNCHER=ccache"
+            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"
+            echo "CCACHE_DIR=$HOME/.cache/ccache"
+            # Builds below the runner's work directory hash their paths relative to it, so the same source compiled
+            # in two build directories of one depth is one cache entry.
+            echo "CCACHE_BASEDIR=$(dirname "$RUNNER_TEMP")"
+            echo "CCACHE_NOHASHDIR=1"
+            echo "CCACHE_MAXSIZE=600M"
+          } >> "$GITHUB_ENV"
+
+      - name: Cache compiler output
+        if: matrix.integration == 'cmake' && matrix.row.host != 'windows' && matrix.row.target != 'web'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: conformance-ccache-${{ runner.os }}-${{ runner.arch }}-${{ matrix.row.target }}-${{ github.sha }}
+          restore-keys: |
+            conformance-ccache-${{ runner.os }}-${{ runner.arch }}-${{ matrix.row.target }}-
+
+      # The toolchains change with mcpp and the manifests; the build cache changes with every commit, so it is kept
+      # apart, saved on each run, and trimmed before it is saved.
+      - name: Cache xlings and mcpp
+        if: matrix.integration == 'mcpp'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.xlings
+            ~/.mcpp
+            !~/.mcpp/build-cache
+          key: conformance-mcpp-tools-${{ runner.os }}-${{ runner.arch }}-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
+          restore-keys: |
+            conformance-mcpp-tools-${{ runner.os }}-${{ runner.arch }}-${{ env.MCPP_VERSION }}-
+
+      - name: Cache mcpp build output
+        if: matrix.integration == 'mcpp'
+        uses: actions/cache@v4
+        with:
+          path: ~/.mcpp/build-cache
+          key: conformance-mcpp-build-${{ runner.os }}-${{ runner.arch }}-${{ matrix.row.target }}-${{ github.sha }}
+          restore-keys: |
+            conformance-mcpp-build-${{ runner.os }}-${{ runner.arch }}-${{ matrix.row.target }}-
+
+      - name: Install the pinned mcpp
+        if: matrix.integration == 'mcpp'
+        uses: mcpp-community/setup-mcpp@5c65c7d7258af3182188eda8aa070269475e3f32 # v1.0.1
+        with:
+          version: ${{ env.MCPP_VERSION }}
+
+      # The Android package comes from the Gradle shell for every integration; the Android Gradle plugin runs on
+      # JDK 17, which not every runner image selects by default.
+      - uses: actions/setup-java@v4
+        if: matrix.row.target == 'android'
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # The launch checkpoint starts the packaged APK here, and the package is built for the emulator's ABI. The
+      # emulator boots while the projects build; an emulator that does not boot leaves no device attached, which
+      # the checkpoint reports as unavailable.
+      - name: Start an Android emulator
+        if: matrix.row.target == 'android' && matrix.row.host == 'linux'
+        continue-on-error: true
+        timeout-minutes: 10
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules > /dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          image="system-images;android-34;google_apis;x86_64"
+          (yes || true) | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools "$image" > /dev/null
+          # avdmanager and the emulator must agree on where the AVD is; both read ANDROID_AVD_HOME.
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/avd"
+          mkdir -p "$ANDROID_AVD_HOME"
+          echo no | "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" create avd --force --name cts --package "$image"
+          emulator="$ANDROID_HOME/emulator/emulator"
+          if ! "$emulator" -list-avds | grep -qx cts; then
+            ini="$(find "$HOME" "$RUNNER_TEMP" -name cts.ini -path '*avd*' 2> /dev/null | head -n 1)"
+            test -n "$ini"
+            export ANDROID_AVD_HOME="$(dirname "$ini")"
+          fi
+          ls -l /dev/kvm
+          nohup "$emulator" -avd cts -no-window -no-audio -no-boot-anim -no-snapshot \
+            -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/emulator.pid"
+
+      # The package checkpoints run `huxerui package` as a developer does, so the suite builds the CLI.
+      - name: Build the HuxerUI CLI
+        run: |
+          cmake -S tools/huxerui_cli -B "$RUNNER_TEMP/cli" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/cli" --config Release --target huxerui_cli --parallel
+          cli="$(find "$RUNNER_TEMP/cli" -type f \( -name huxerui -o -name huxerui.exe \) | head -n 1)"
+          test -n "$cli"
+          if [ "${{ matrix.row.host }}" = windows ]; then cli="$(cygpath -w "$cli")"; fi
+          echo "CTS_CLI=$cli" >> "$GITHUB_ENV"
+
+      # Projects `huxerui create` writes are checked like the suite's own; created-projects.json declares where.
+      - name: Create projects with the CLI
+        run: |
+          ${{ matrix.row.python }} buildtools/cts/cts.py create --integration ${{ matrix.integration }} \
+            --target ${{ matrix.row.target }} --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: Build the conformance projects
+        run: |
+          ${{ matrix.row.python }} buildtools/cts/cts.py build --integration ${{ matrix.integration }} \
+            --target ${{ matrix.row.target }} --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: "Check: default build"
+        if: ${{ !cancelled() }}
+        run: |
+          ${{ matrix.row.python }} buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target ${{ matrix.row.target }} --check build --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: "Check: framework linkage"
+        if: ${{ !cancelled() }}
+        run: |
+          ${{ matrix.row.python }} buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target ${{ matrix.row.target }} --check linkage --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: "Check: final resource package"
+        if: ${{ !cancelled() }}
+        run: |
+          ${{ matrix.row.python }} buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target ${{ matrix.row.target }} --check resources --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: "Check: library-graph record"
+        if: ${{ !cancelled() }}
+        run: |
+          ${{ matrix.row.python }} buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target ${{ matrix.row.target }} --check libraries --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: Wait for the Android emulator
+        if: ${{ !cancelled() && matrix.row.target == 'android' && matrix.row.host == 'linux' }}
+        continue-on-error: true
+        timeout-minutes: 12
+        run: |
+          adb="$ANDROID_HOME/platform-tools/adb"
+          pid="$(cat "$RUNNER_TEMP/emulator.pid" 2> /dev/null || true)"
+          booted() { [ "$("$adb" shell getprop sys.boot_completed 2> /dev/null | tr -d '\r')" = 1 ]; }
+          for _ in $(seq 120); do
+            booted && break
+            { [ -n "$pid" ] && kill -0 "$pid" 2> /dev/null; } || break
+            sleep 5
+          done
+          if ! booted; then
+            tail -n 60 "$RUNNER_TEMP/emulator.log" || true
+            exit 1
+          fi
+          "$adb" shell getprop ro.product.cpu.abi
+
+      - name: "Check: distributable"
+        if: ${{ !cancelled() }}
+        run: |
+          ${{ matrix.row.python }} buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target ${{ matrix.row.target }} --check package --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      # After the distributable, whose release build the inapplicable driver option rebuilds without new work.
+      - name: "Check: exit codes and inapplicable options"
+        if: ${{ !cancelled() }}
+        run: |
+          ${{ matrix.row.python }} buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target ${{ matrix.row.target }} --check usage --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: "Check: environment diagnosis"
+        if: ${{ !cancelled() }}
+        run: |
+          ${{ matrix.row.python }} buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target ${{ matrix.row.target }} --check doctor --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      # On Android and iOS the application starts from the APK or bundle the distributable check published.
+      - name: "Check: startup and resource resolution"
+        if: ${{ !cancelled() }}
+        run: |
+          ${{ matrix.row.target == 'linux' && 'xvfb-run -a ' || '' }}${{ matrix.row.python }} buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target ${{ matrix.row.target }} --check launch --launch-timeout 120 --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: "Check: distributable without the standard shell"
+        if: ${{ !cancelled() }}
+        run: |
+          ${{ matrix.row.python }} buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target ${{ matrix.row.target }} --check package-shellless --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: Trim the build caches
+        if: always()
+        run: |
+          if [ "${{ matrix.integration }}" = mcpp ]; then
+            mcpp cache gc --max-size 1GiB || true
+          elif command -v ccache > /dev/null && [ -n "${CMAKE_CXX_COMPILER_LAUNCHER:-}" ]; then
+            ccache --show-stats || true
+          fi
+
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-${{ matrix.integration }}-${{ matrix.row.target }}-on-${{ matrix.row.host }}
+          path: ${{ runner.temp }}/cts/results
+          if-no-files-found: error
+
+      # A failed checkpoint reports only the tail of a platform build; its complete log is kept for that run.
+      - name: Upload the logs of a failed check
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.integration }}-${{ matrix.row.target }}-on-${{ matrix.row.host }}
+          path: ${{ runner.temp }}/cts/work/**/*.log
+          if-no-files-found: ignore
+
+  # One Linux host builds every target it declares in the same checkout, one after another, as a developer does:
+  # in-tree outputs of one target must not change what another records. Each target is checked as in its own job,
+  # `huxerui build` then builds the desktop and Web targets with one command, and the first target is built again
+  # last and must record what it recorded first.
+  sequence:
+    name: ${{ matrix.integration }} (linux, web, android in turn on linux)
+    needs: [plan]
+    if: needs.plan.outputs.run_sequence == 'true'
+    env:
+      # The projects the plan confines the run to, as the runner's `--project` arguments; empty for every project.
+      CTS_PROJECTS: ${{ needs.plan.outputs.projects }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.sequence) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Linux prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends fonts-dejavu-core
+          if [ "${{ matrix.integration }}" = cmake ]; then
+            sudo apt-get install -y --no-install-recommends ninja-build \
+              libgtk-4-dev libepoxy-dev libsoup-3.0-dev pkg-config gcc-14 g++-14 ccache
+            echo "CC=gcc-14" >> "$GITHUB_ENV"
+            echo "CXX=g++-14" >> "$GITHUB_ENV"
+            {
+              echo "CMAKE_C_COMPILER_LAUNCHER=ccache"
+              echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"
+              echo "CCACHE_DIR=$HOME/.cache/ccache"
+              # Builds below the runner's work directory hash their paths relative to it, so the same source compiled
+              # in two build directories of one depth is one cache entry.
+              echo "CCACHE_BASEDIR=$(dirname "$RUNNER_TEMP")"
+              echo "CCACHE_NOHASHDIR=1"
+              echo "CCACHE_MAXSIZE=600M"
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Install Emscripten
+        if: matrix.integration == 'cmake'
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ needs.plan.outputs.emscripten }}
+
+      - name: Install the Android NDK
+        if: matrix.integration == 'cmake'
+        run: |
+          (yes || true) | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;29.0.14206865" > /dev/null
+          test -f "$ANDROID_HOME/ndk/29.0.14206865/build/cmake/android.toolchain.cmake"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+
+      - name: Cache compiler output
+        if: matrix.integration == 'cmake'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: conformance-sequence-ccache-${{ runner.os }}-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: |
+            conformance-sequence-ccache-${{ runner.os }}-${{ runner.arch }}-
+
+      # The toolchains change with mcpp and the manifests; the build cache changes with every commit, so it is kept
+      # apart, saved on each run, and trimmed before it is saved.
+      - name: Cache xlings and mcpp
+        if: matrix.integration == 'mcpp'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.xlings
+            ~/.mcpp
+            !~/.mcpp/build-cache
+          key: conformance-mcpp-tools-${{ runner.os }}-${{ runner.arch }}-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
+          restore-keys: |
+            conformance-mcpp-tools-${{ runner.os }}-${{ runner.arch }}-${{ env.MCPP_VERSION }}-
+
+      - name: Cache mcpp build output
+        if: matrix.integration == 'mcpp'
+        uses: actions/cache@v4
+        with:
+          path: ~/.mcpp/build-cache
+          key: conformance-mcpp-build-${{ runner.os }}-${{ runner.arch }}-sequence-${{ github.sha }}
+          restore-keys: |
+            conformance-mcpp-build-${{ runner.os }}-${{ runner.arch }}-sequence-
+
+      - name: Install the pinned mcpp
+        if: matrix.integration == 'mcpp'
+        uses: mcpp-community/setup-mcpp@5c65c7d7258af3182188eda8aa070269475e3f32 # v1.0.1
+        with:
+          version: ${{ env.MCPP_VERSION }}
+
+      - name: Build the HuxerUI CLI
+        run: |
+          cmake -S tools/huxerui_cli -B "$RUNNER_TEMP/cli" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/cli" --config Release --target huxerui_cli --parallel
+          echo "CTS_CLI=$(find "$RUNNER_TEMP/cli" -type f -name huxerui | head -n 1)" >> "$GITHUB_ENV"
+
+      - name: Build and check every target in turn
+        run: |
+          python3 buildtools/cts/cts.py sequence --integration ${{ matrix.integration }} --targets linux,web,android \
+            --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: Trim the build caches
+        if: always()
+        run: |
+          if [ "${{ matrix.integration }}" = mcpp ]; then
+            mcpp cache gc --max-size 1GiB || true
+          elif command -v ccache > /dev/null && [ -n "${CMAKE_CXX_COMPILER_LAUNCHER:-}" ]; then
+            ccache --show-stats || true
+          fi
+
+      # Named apart from the conformance results, so the comparison jobs do not read a host's builds twice.
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sequence-${{ matrix.integration }}-on-linux
+          path: ${{ runner.temp }}/cts/results
+          if-no-files-found: warn
+
+  # One job per integration builds its selected macOS targets in turn (macos_jobs in conformance_plan.py): GitHub's
+  # macOS runners are few, and a job that waits for one too long is cancelled unrun, so a run asks for as few as it
+  # can. CMake's job uses an Intel runner because the arm64 runners are the most constrained; mcpp's toolchain supports
+  # arm64 macOS only. rerun-unassigned.yml starts the jobs no runner took again.
+  conformance-macos:
+    name: ${{ matrix.integration }} (${{ matrix.title }} in turn on macos)
+    needs: [plan]
+    if: needs.plan.outputs.run_macos_jobs == 'true'
+    env:
+      # The projects the plan confines the run to, as the runner's `--project` arguments; empty for every project.
+      CTS_PROJECTS: ${{ needs.plan.outputs.projects }}
+      # The targets each checkpoint runs for, in turn, through .github/workflows/scripts/each_target.sh.
+      CTS_TARGETS: ${{ matrix.targets }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.macos_jobs) }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Emscripten
+        if: contains(matrix.targets, 'web') && matrix.integration == 'cmake'
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ needs.plan.outputs.emscripten }}
+
+      # The NDK the HuxerUI CLI and its Android shell pin; an older one lacks parts of the C++20 library.
+      - name: Install the Android NDK
+        if: contains(matrix.targets, 'android') && matrix.integration == 'cmake'
+        run: |
+          # `yes` ends with a broken pipe once sdkmanager stops reading, which must not fail the step.
+          (yes || true) | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;29.0.14206865" > /dev/null
+          test -f "$ANDROID_HOME/ndk/29.0.14206865/build/cmake/android.toolchain.cmake"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/29.0.14206865" >> "$GITHUB_ENV"
+
+      # The Xcode the SDK release builds with; the runner's default lacks parts of the C++20 library.
+      - name: Install macOS prerequisites
+        run: |
+          if [ -d /Applications/Xcode_26.2.app ]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode_26.2.app/Contents/Developer" >> "$GITHUB_ENV"
+          fi
+          if [ "${{ matrix.integration }}" = cmake ]; then brew install ninja ccache; fi
+
+      # Every CMake build of a target -- each project's, and each `huxerui package` the CLI starts -- compiles the
+      # same framework; ccache reuses its objects across those build directories and across runs. The Web's compiler
+      # keeps its own cache, so each_target.sh runs the Web without the launcher.
+      - name: Use a compiler cache
+        if: matrix.integration == 'cmake'
+        run: |
+          {
+            echo "CMAKE_C_COMPILER_LAUNCHER=ccache"
+            echo "CMAKE_CXX_COMPILER_LAUNCHER=ccache"
+            echo "CCACHE_DIR=$HOME/.cache/ccache"
+            # Builds below the runner's work directory hash their paths relative to it, so the same source compiled
+            # in two build directories of one depth is one cache entry.
+            echo "CCACHE_BASEDIR=$(dirname "$RUNNER_TEMP")"
+            echo "CCACHE_NOHASHDIR=1"
+            echo "CCACHE_MAXSIZE=1500M"
+          } >> "$GITHUB_ENV"
+
+      - name: Cache compiler output
+        if: matrix.integration == 'cmake'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ccache
+          key: conformance-ccache-${{ runner.os }}-${{ runner.arch }}-macos-host-${{ github.sha }}
+          restore-keys: |
+            conformance-ccache-${{ runner.os }}-${{ runner.arch }}-macos-host-
+
+      # The toolchains change with mcpp and the manifests; the build cache changes with every commit, so it is kept
+      # apart, saved on each run, and trimmed before it is saved.
+      - name: Cache xlings and mcpp
+        if: matrix.integration == 'mcpp'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.xlings
+            ~/.mcpp
+            !~/.mcpp/build-cache
+          key: conformance-mcpp-tools-${{ runner.os }}-${{ runner.arch }}-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
+          restore-keys: |
+            conformance-mcpp-tools-${{ runner.os }}-${{ runner.arch }}-${{ env.MCPP_VERSION }}-
+
+      - name: Cache mcpp build output
+        if: matrix.integration == 'mcpp'
+        uses: actions/cache@v4
+        with:
+          path: ~/.mcpp/build-cache
+          key: conformance-mcpp-build-${{ runner.os }}-${{ runner.arch }}-macos-host-${{ github.sha }}
+          restore-keys: |
+            conformance-mcpp-build-${{ runner.os }}-${{ runner.arch }}-macos-host-
+
+      - name: Install the pinned mcpp
+        if: matrix.integration == 'mcpp'
+        uses: mcpp-community/setup-mcpp@5c65c7d7258af3182188eda8aa070269475e3f32 # v1.0.1
+        with:
+          version: ${{ env.MCPP_VERSION }}
+
+      # The Android package comes from the Gradle shell for every integration; the Android Gradle plugin runs on
+      # JDK 17, which not every runner image selects by default.
+      - uses: actions/setup-java@v4
+        if: contains(matrix.targets, 'android')
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # The package checkpoints run `huxerui package` as a developer does, so the suite builds the CLI.
+      - name: Build the HuxerUI CLI
+        run: |
+          cmake -S tools/huxerui_cli -B "$RUNNER_TEMP/cli" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/cli" --config Release --target huxerui_cli --parallel
+          echo "CTS_CLI=$(find "$RUNNER_TEMP/cli" -type f -name huxerui | head -n 1)" >> "$GITHUB_ENV"
+
+      # Projects `huxerui create` writes are checked like the suite's own; created-projects.json declares where.
+      - name: Create projects with the CLI
+        run: |
+          .github/workflows/scripts/each_target.sh python3 buildtools/cts/cts.py create --integration ${{ matrix.integration }} \
+            --target {target} --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: Build the conformance projects
+        run: |
+          .github/workflows/scripts/each_target.sh python3 buildtools/cts/cts.py build --integration ${{ matrix.integration }} \
+            --target {target} --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: "Check: default build"
+        if: ${{ !cancelled() }}
+        run: |
+          .github/workflows/scripts/each_target.sh python3 buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target {target} --check build --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: "Check: framework linkage"
+        if: ${{ !cancelled() }}
+        run: |
+          .github/workflows/scripts/each_target.sh python3 buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target {target} --check linkage --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: "Check: final resource package"
+        if: ${{ !cancelled() }}
+        run: |
+          .github/workflows/scripts/each_target.sh python3 buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target {target} --check resources --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: "Check: library-graph record"
+        if: ${{ !cancelled() }}
+        run: |
+          .github/workflows/scripts/each_target.sh python3 buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target {target} --check libraries --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: "Check: distributable"
+        if: ${{ !cancelled() }}
+        run: |
+          .github/workflows/scripts/each_target.sh python3 buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target {target} --check package --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      # After the distributable, whose release build the inapplicable driver option rebuilds without new work.
+      - name: "Check: exit codes and inapplicable options"
+        if: ${{ !cancelled() }}
+        run: |
+          .github/workflows/scripts/each_target.sh python3 buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target {target} --check usage --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: "Check: environment diagnosis"
+        if: ${{ !cancelled() }}
+        run: |
+          .github/workflows/scripts/each_target.sh python3 buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target {target} --check doctor --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      # On Android and iOS the application starts from the APK or bundle the distributable check published.
+      - name: "Check: startup and resource resolution"
+        if: ${{ !cancelled() }}
+        run: |
+          .github/workflows/scripts/each_target.sh python3 buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target {target} --check launch --launch-timeout 120 --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      - name: "Check: distributable without the standard shell"
+        if: ${{ !cancelled() }}
+        run: |
+          .github/workflows/scripts/each_target.sh python3 buildtools/cts/cts.py check --integration ${{ matrix.integration }} \
+            --target {target} --check package-shellless --cli "$CTS_CLI" --out "$RUNNER_TEMP/cts" $CTS_PROJECTS
+
+      # The checks build for the Simulator. A device build is compiled and linked as Xcode builds a project opened in
+      # it, with the settings `huxerui build ios` writes for the shell; it is not signed, since the runner holds no
+      # signing identity.
+      - name: Build for an iOS device without signing
+        if: ${{ !cancelled() && contains(matrix.targets, 'ios') }}
+        working-directory: buildtools/cts/projects/app_minimal
+        run: |
+          if [ ! -d platform/ios ]; then
+            echo "app_minimal was not built in this run"
+            exit 0
+          fi
+          if [ "${{ matrix.integration }}" = mcpp ]; then
+            "$CTS_CLI" build ios --abi arm64 --build-system mcpp
+          else
+            "$CTS_CLI" build ios --abi arm64 --sdk "$GITHUB_WORKSPACE"
+          fi
+          project="$(ls -d platform/ios/*.xcodeproj)"
+          xcodebuild -project "$project" -scheme "$(basename "$project" .xcodeproj)" -configuration Debug \
+            -destination generic/platform=iOS -derivedDataPath "$RUNNER_TEMP/ios-device" CODE_SIGNING_ALLOWED=NO build
+
+      - name: Trim the build caches
+        if: always()
+        run: |
+          if [ "${{ matrix.integration }}" = mcpp ]; then
+            mcpp cache gc --max-size 1GiB || true
+          elif command -v ccache > /dev/null && [ -n "${CMAKE_CXX_COMPILER_LAUNCHER:-}" ]; then
+            ccache --show-stats || true
+          fi
+
+      # One artifact holds every target's results; the comparison reads them as it reads one target's.
+      - name: Upload the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-${{ matrix.integration }}-on-macos
+          path: ${{ runner.temp }}/cts/results
+          if-no-files-found: error
+
+      # A failed checkpoint reports only the tail of a platform build; its complete log is kept for that run.
+      - name: Upload the logs of a failed check
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.integration }}-on-macos
+          path: ${{ runner.temp }}/cts/work/**/*.log
+          if-no-files-found: ignore
+
+  compare:
+    name: Integrations agree
+    runs-on: ubuntu-24.04
+    needs: [plan, conformance]
+    if: always() && needs.plan.outputs.compare == 'true'
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: conformance-*-on-linux
+          path: results
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: conformance-*-on-windows
+          path: results
+
+      - name: Build matrix
+        run: python3 buildtools/cts/cts.py matrix results
+
+      - name: "Compare: final resource package"
+        if: ${{ !cancelled() }}
+        run: python3 buildtools/cts/cts.py compare --check resources results
+
+      - name: "Compare: library-graph record"
+        if: ${{ !cancelled() }}
+        run: python3 buildtools/cts/cts.py compare --check libraries results
+
+  compare-macos:
+    name: Integrations agree (macOS hosts)
+    runs-on: ubuntu-24.04
+    needs: [plan, conformance-macos]
+    if: always() && needs.plan.outputs.compare_macos == 'true'
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: conformance-*-on-macos
+          path: results
+
+      - name: Build matrix
+        run: python3 buildtools/cts/cts.py matrix results
+
+      - name: "Compare: final resource package"
+        if: ${{ !cancelled() }}
+        run: python3 buildtools/cts/cts.py compare --check resources results
+
+      - name: "Compare: library-graph record"
+        if: ${{ !cancelled() }}
+        run: python3 buildtools/cts/cts.py compare --check libraries results

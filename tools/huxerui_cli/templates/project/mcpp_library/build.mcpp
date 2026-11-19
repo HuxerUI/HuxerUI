@@ -1,0 +1,9 @@
+// The build program: huxerui.rules arrives through the huxerui dependency and schedules the composable transform
+// for the library's sources and the resource compiler for its resources.
+
+import mcpp;
+import huxerui.rules;
+
+int main() {
+    return huxerui::rules::configure({}) ? 0 : 1;
+}

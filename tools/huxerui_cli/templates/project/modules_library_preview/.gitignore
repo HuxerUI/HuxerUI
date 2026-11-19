@@ -1,0 +1,12 @@
+/.huxerui/
+/dist/
+/build/
+/cmake-build-*/
+/.cache/
+
+/.idea/
+/.vscode/
+/.vs/
+
+.DS_Store
+Thumbs.db

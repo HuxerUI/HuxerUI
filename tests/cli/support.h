@@ -45,6 +45,25 @@ private:
   std::filesystem::path path_;
 };
 
+// Replaces PATH for one scope, so that which tools a test finds does not depend on the machine running it.
+class ScopedPath final {
+public:
+  explicit ScopedPath(const std::filesystem::path& directory)
+      : previous_(huxerui::cli::ReadEnvironmentVariable("PATH").value_or("")) {
+    huxerui::cli::SetProcessEnvironmentVariable("PATH", directory.string());
+  }
+
+  ~ScopedPath() {
+    huxerui::cli::SetProcessEnvironmentVariable("PATH", previous_);
+  }
+
+  ScopedPath(const ScopedPath&) = delete;
+  ScopedPath& operator=(const ScopedPath&) = delete;
+
+private:
+  std::string previous_;
+};
+
 struct Invocation {
   int result = 0;
   std::string output;

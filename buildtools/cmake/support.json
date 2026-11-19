@@ -1,0 +1,109 @@
+{
+  "schema": 1,
+  "integration": "cmake",
+  "declaration": "CMakeLists.txt",
+  "cli_arguments": [
+    "--sdk",
+    "{repository}"
+  ],
+  "targets": {
+    "linux": {
+      "hosts": [
+        "linux"
+      ],
+      "checks": [
+        "build",
+        "linkage",
+        "resources",
+        "libraries",
+        "launch",
+        "package",
+        "usage",
+        "doctor"
+      ],
+      "capabilities": []
+    },
+    "windows": {
+      "hosts": [
+        "windows"
+      ],
+      "checks": [
+        "build",
+        "linkage",
+        "resources",
+        "libraries",
+        "launch",
+        "package",
+        "usage",
+        "doctor"
+      ],
+      "capabilities": []
+    },
+    "macos": {
+      "hosts": [
+        "macos"
+      ],
+      "checks": [
+        "build",
+        "linkage",
+        "resources",
+        "libraries",
+        "launch",
+        "package",
+        "usage",
+        "doctor"
+      ],
+      "capabilities": []
+    },
+    "web": {
+      "hosts": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "checks": [
+        "build",
+        "linkage",
+        "resources",
+        "libraries",
+        "launch",
+        "package",
+        "usage",
+        "doctor"
+      ],
+      "capabilities": []
+    },
+    "android": {
+      "hosts": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "checks": [
+        "build",
+        "linkage",
+        "resources",
+        "libraries",
+        "launch",
+        "package",
+        "usage"
+      ],
+      "capabilities": []
+    },
+    "ios": {
+      "hosts": [
+        "macos"
+      ],
+      "checks": [
+        "build",
+        "linkage",
+        "resources",
+        "libraries",
+        "launch",
+        "package",
+        "usage"
+      ],
+      "capabilities": []
+    }
+  }
+}

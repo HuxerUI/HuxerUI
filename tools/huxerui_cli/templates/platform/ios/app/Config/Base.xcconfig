@@ -1,3 +1,7 @@
+// The integration the CLI last built this shell with and the framework it resolved, so a build from Xcode itself
+// matches the CLI's; Local.xcconfig, included last, overrides them.
+#include? "../../../.huxerui/generated/ios/integration.xcconfig"
+
 PRODUCT_NAME = @PROJECT_NAME@
 PRODUCT_BUNDLE_IDENTIFIER = @PROJECT_ID@
 MARKETING_VERSION = 0.1.0
@@ -17,5 +21,7 @@ HUXERUI_CORE_BUILD_DIR = $(DERIVED_FILE_DIR)/huxerui-core
 HUXERUI_LINK_OPTIONS_FILE = $(HUXERUI_CORE_BUILD_DIR)/huxerui-ios/@TARGET_NAME@/link.rsp
 HEADER_SEARCH_PATHS = $(inherited) "$(HUXERUI_HOME)/include"
 OTHER_LDFLAGS = $(inherited) @"$(HUXERUI_LINK_OPTIONS_FILE)"
+
+#include? "Local.xcconfig"
 
 #include? "Local.xcconfig"

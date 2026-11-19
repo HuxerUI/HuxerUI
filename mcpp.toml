@@ -1,25 +1,18 @@
 # HuxerUI as a native mcpp package.
 #
 # Additive: nothing in the CMake build reads this file, and deleting it plus
-# `build.mcpp` and `mcpp/` returns the repository to a CMake-only project.
-# `docs/design/mcpp-build-system.md` is the design; `mcpp/README.md` is how to
+# `build.mcpp` and `buildtools/mcpp/` returns the repository to a CMake-only project.
+# `docs/design/mcpp-build-system.md` is the design; `buildtools/mcpp/README.md` is how to
 # drive it.
-
-[workspace]
-# The packages `mcpp build --workspace` can build, and only those.
-# huxerui-build-rules is absent on purpose: it imports mcpp, so it compiles only
-# inside a build program's compile and a fan-out dies on it. huxerui-tools is
-# present despite pinning c++23, which a member that declares the key keeps.
-members = ["mcpp/huxerui-source-select", "mcpp/huxerui-tests", "mcpp/huxerui-tools",
-           "tools/codegen", "tools/resource_compiler"]
 
 [package]
 name        = "huxerui"
 namespace   = "huxerui"
 version     = "0.5.0"
-# The SDK ABI baseline. Do not raise it: mcpp applies the root standard to the
-# whole module graph, so this is imposed on every consumer too.
-standard    = "c++20"
+# mcpp's default. A build program is compiled at its package's standard, and the
+# official `mcpp:plugins` members the rules import need C++23. CMake keeps its
+# own C++20 floor.
+standard    = "c++23"
 description = "HuxerUI declarative cross-platform UI framework"
 license     = "Apache-2.0"
 repo        = "https://github.com/Sunrisepeak/HuxerUI"
@@ -36,12 +29,18 @@ path = "modules/huxerui.cppm"
 # huxerui/huxerui_static pair is the author's.
 kind = "lib"
 
+# The entry an application selects on the Web and Android, where the platform layer starts it; see the file. mcpp
+# never compiles a target's `main` as an ordinary source, and `src/*/*.cpp` does not reach it in either integration.
+[targets.platform-entry]
+kind = "entry"
+main = "src/application/entry/platform_entry.cpp"
+
 [build]
 # Mirrors the core glob in cmake/HuxerUIBuild.cmake; `huxerui-build-check`
 # asserts the two agree. modules/huxerui.cppm re-exports the public headers'
 # names, so `import huxerui;` and `#include <huxerui/huxerui.h>` name the same
 # entities -- compiling it here is what makes the module importable.
-sources                 = ["src/*/*.cpp", "!src/runtime/profiling.cpp", "modules/huxerui.cppm"]
+sources                 = ["src/*/*.cpp", "modules/huxerui.cppm"]
 include_dirs            = ["include", "src"]
 # `src` is implementation-only, as CMake's PRIVATE vs PUBLIC says.
 private_include_dirs    = ["src"]
@@ -50,12 +49,13 @@ cxxflags                = ["-Wall", "-Wextra", "-Wpedantic"]
 # clang records the thread model in the BMI and refuses one that disagrees with
 # the importing translation unit, which reads as every name in
 # `import huxerui;` being undefined. It has to be here rather than under
-# cfg(linux) -- mcpp allows only build INPUTS in a conditional section and
+# cfg(all(os = "linux", not(env = "android"))) -- mcpp allows only build INPUTS in a conditional section and
 # clang records the thread model in the BMI and refuses one that disagrees with
 # the importing translation unit, which reads as every name in
 # `import huxerui;` being undefined.
 dialect_cxxflags        = ["-pthread"]
 macos_deployment_target = "12.0"
+ios_deployment_target   = "15.0"
 
 # BUILD-dependencies: none of these reaches the artifact. hcg and hrc run on the
 # build machine and produce sources; the rule module is compiled into build.mcpp
@@ -64,26 +64,25 @@ macos_deployment_target = "12.0"
 [build-dependencies]
 huxerui-codegen           = { path = "tools/codegen",           tools = ["hcg"], reexport = true }
 huxerui-resource-compiler = { path = "tools/resource_compiler", tools = ["hrc"], reexport = true }
-huxerui-build-rules       = { path = "mcpp/huxerui-build-rules", host-module = true, reexport = true }
+huxerui-build-rules       = { path = "buildtools/mcpp/huxerui-build-rules", host-module = true, reexport = true }
 
-# WiX, for projects that build a Windows installer.
-#
-# HOST axis, not target: wix.exe RUNS on the build machine, and mcpp's rule for
-# which table a tool belongs in is exactly that -- the target axis is for what
-# the produced code is compiled or linked against. The GTK payloads below are
-# the other case.
-#
-# A payload declared here reaches this package's own build program. It does NOT
-# reach a CONSUMER's build program: mcpp passes `MCPP_XPKG_*_DIR` for what the
-# building package declared, so an application that asks huxerui.rules for an
-# installer declares this line too. The rule says so when the lookup comes back
-# empty.
-[xlings.workspace]
-"xim:wix" = { windows = "5.0.2" }
+# The runtime's internal performance diagnostics, CMake's HUXERUI_ENABLE_PROFILING:
+# `huxerui build --profile` opens it as `<huxerui dependency>/profiling`. Its
+# source leaves the default build.
+[features]
+profiling = { defines = ["HUXERUI_ENABLE_PROFILING=1"], sources = ["src/runtime/profiling.cpp"] }
+
+# What an Android package of an application built on HuxerUI carries from the
+# framework: its Java host and its manifest entries. dist-apk reads this table
+# from every package in the application's resolved graph.
+[package.metadata.dist-apk]
+package      = "org.huxerui"
+java_sources = ["platform/android/huxerui/src/main/java"]
+manifest     = "platform/android/huxerui/src/main/AndroidManifest.xml"
 
 # ---------------------------------------------------------------- Linux ----
 # Sources mirror cmake/platform/Linux.cmake.
-[target.'cfg(linux)'.build]
+[target.'cfg(all(os = "linux", not(env = "android")))'.build]
 sources = ["platform/linux/*.cpp"]
 
 # THE GTK STACK COMES FROM XLINGS, NOT FROM THE MACHINE.
@@ -106,7 +105,7 @@ sources = ["platform/linux/*.cpp"]
 # cost is that `mcpp emit xpkg` derives a descriptor's consumer dependencies
 # from the top-level table only, so a PUBLISHED package carries none of this --
 # see docs/design/mcpp-build-system.md.
-[target.'cfg(linux)'.xlings.workspace]
+[target.'cfg(all(os = "linux", not(env = "android")))'.xlings.workspace]
 "xim:cairo" = "1.18.4"
 "xim:expat" = "2.6.2"
 "xim:fontconfig" = "2.15.0.1"
@@ -169,19 +168,49 @@ libraries = ["advapi32", "d2d1", "d3d11", "dwrite", "dwmapi", "dxguid", "dxgi",
              "dcomp", "windowsapp", "crypt32", "propsys",
              "kernel32", "gdi32", "winspool", "uuid", "comdlg32"]
 # ---------------------------------------------------------------- macOS ----
+# Android. Sources and system libraries mirror cmake/platform/Android.cmake; the
+# options that keep the JNI entry points in an application's shared library are
+# emitted by build.mcpp, because they belong to the application's link.
+[target.'cfg(env = "android")'.build]
+sources = ["platform/android/huxerui/src/main/cpp/*.cpp"]
+
+[target.'cfg(env = "android")'.runtime]
+libraries = ["android", "EGL", "GLESv2", "log"]
+
+# The Web. Sources mirror cmake/platform/Web.cmake. Exceptions are a property of
+# the whole module graph on this target, so the framework states the
+# requirement and the application's manifest grants it under
+# `[target.'cfg(os = "emscripten")'.abi]`; the link options an application
+# needs are emitted by build.mcpp.
+[target.'cfg(os = "emscripten")']
+requires_abi = { exceptions = true }
+
+[target.'cfg(os = "emscripten")'.build]
+sources = ["platform/web/*.cpp"]
+
 [target.macos.build]
 # `.mm` is a first-class source kind but is not in the default glob.
 sources  = ["platform/macos/*.mm"]
 cxxflags = ["-fobjc-arc"]
-# `-weak_framework` has no neutral spelling; [runtime] frameworks covers only
-# ordinary linkage.
+# `-weak_framework` has no neutral spelling; `frameworks` covers only ordinary
+# linkage.
 ldflags  = ["-weak_framework", "UniformTypeIdentifiers"]
 
-# frameworks is a TOP-LEVEL [runtime] key -- the per-target vocabulary is
-# `libraries` only, and a [target.macos.runtime] frameworks entry is ignored,
-# failing at link on macOS alone. Unconditional is correct: the engine renders
-# it only for Mach-O.
-[runtime]
+# Frameworks are stated per platform: AppKit and Carbon do not exist on iOS, and
+# UIKit does not exist on macOS.
+[target.macos.runtime]
 frameworks = ["AppKit", "AVFoundation", "Carbon", "Contacts", "CoreBluetooth",
               "CoreGraphics", "CoreImage", "CoreLocation", "CoreText", "CoreVideo", "EventKit", "ImageIO",
               "Foundation", "Metal", "MetalPerformanceShaders", "Photos", "QuartzCore", "UserNotifications"]
+
+# iOS. Sources, options and frameworks mirror cmake/platform/IOS.cmake.
+[target.'cfg(os = "ios")'.build]
+sources  = ["platform/ios/*.mm"]
+cxxflags = ["-fobjc-arc"]
+ldflags  = ["-weak_framework", "UniformTypeIdentifiers"]
+
+[target.'cfg(os = "ios")'.runtime]
+frameworks = ["Contacts", "CoreBluetooth", "CoreFoundation", "CoreGraphics", "CoreImage", "CoreLocation",
+              "CoreText", "CoreVideo", "EventKit", "Foundation", "ImageIO", "Metal", "MetalPerformanceShaders",
+              "MobileCoreServices", "AVFoundation", "BackgroundTasks", "Photos", "QuartzCore", "UIKit",
+              "UserNotifications"]

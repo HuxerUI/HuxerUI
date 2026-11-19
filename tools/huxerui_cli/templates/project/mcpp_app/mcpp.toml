@@ -1,0 +1,78 @@
+[package]
+name     = "@TARGET_NAME@"
+version  = "0.1.0"
+standard = "c++23"
+
+# The project's identity, which `huxerui platform add` gives to the platform shells it writes.
+[package.metadata.huxerui]
+name = "@PROJECT_NAME@"
+id   = "@PROJECT_ID@"
+
+@MCPP_DEPENDENCIES@
+
+# `app` is a program on the desktop and the Web and the application's shared library on Android.
+# The platform shell owns the process entry, so each desktop and Apple platform names its own. On
+# the Web and Android the platform layer starts the application, so the entry is the framework's,
+# which runs nothing.
+[targets.@TARGET_NAME@]
+kind = "app"
+main = "platform/linux/main.cpp"
+windows_subsystem = "windows"
+
+[target.'cfg(os = "windows")'.targets.@TARGET_NAME@]
+main = "platform/windows/main.cpp"
+
+[target.'cfg(os = "macos")'.targets.@TARGET_NAME@]
+main = "platform/macos/main.cpp"
+
+[target.'cfg(os = "ios")'.targets.@TARGET_NAME@]
+main = "platform/ios/App/main.mm"
+
+[target.'cfg(os = "emscripten")'.targets.@TARGET_NAME@]
+main = { from = "@MCPP_HUXERUI@/platform-entry" }
+
+[target.'cfg(env = "android")'.targets.@TARGET_NAME@]
+main = { from = "@MCPP_HUXERUI@/platform-entry" }
+
+[build]
+# huxerui.rules selects the sources: a build program can add a source but cannot replace one, so a package that
+# also listed src/**/*.cpp would link both the original and the transformed copy of every composable.
+sources = []
+# The iOS deployment minimum, as the Xcode shell's IPHONEOS_DEPLOYMENT_TARGET and the CMake integration state it.
+ios_deployment_target = "15.0"
+
+[target.'cfg(os = "ios")'.dependencies]
+# Below the toolchain's own iOS floor, the core needs the compiler's runtime builtins built for it.
+llvm.compiler-rt-builtins = "22.1.8.6"
+
+# The Web build's exception model; HuxerUI requires it, and only the root package can grant it.
+[target.'cfg(os = "emscripten")'.abi]
+exceptions = true
+
+# The C++ runtime inside the application's shared library on Android, as the CMake integration's `c++_static`.
+# `runner` is what `huxerui run android --no-shell` starts the APK with; through the Gradle shell the CLI installs
+# and launches it with adb, as for CMake.
+[target.aarch64-linux-android]
+cxx_runtime = "self-contained"
+runner = ["adb-run"]
+
+[target.x86_64-linux-android]
+cxx_runtime = "self-contained"
+runner = ["adb-run"]
+
+# What `huxerui run ios --no-shell` starts the Simulator bundle with; through the Xcode shell the CLI uses simctl.
+[target.aarch64-ios-sim]
+runner = ["simctl-run"]
+
+[target.aarch64-ios-sim.xlings.workspace]
+"xim:apple-simulator-tools" = "0.3.0"
+
+# The release profiles `huxerui build`, `run`, and `package` select with `--optimization size|minsize` and
+# `--lto on`, as the CMake integration's HUXERUI_OPTIMIZATION and HUXERUI_ENABLE_LTO. A profile of your own states
+# each setting in which it differs from mcpp's defaults for one, so each restates what release gives.
+[profile]
+release-size        = { opt = "s", debug = false, ndebug = true, trim_paths = true }
+release-minsize     = { opt = "z", debug = false, ndebug = true, trim_paths = true }
+release-lto         = { opt = 2, debug = false, ndebug = true, trim_paths = true, lto = true }
+release-size-lto    = { opt = "s", debug = false, ndebug = true, trim_paths = true, lto = true }
+release-minsize-lto = { opt = "z", debug = false, ndebug = true, trim_paths = true, lto = true }

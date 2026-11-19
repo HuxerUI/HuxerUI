@@ -1,0 +1,27 @@
+# c++23 for the same reason as the other examples: mcpp's clang-on-Windows path
+# refuses `import std;` below it (mcpp-community/mcpp#603).
+[package]
+name        = "gauge"
+version     = "0.1.0"
+standard    = "c++23"
+description = "A headers library that is a C++ module too"
+
+# `namespace` is the C++ namespace whose names the module exports. The module
+# is named after the package, and the rules generate its interface, the [lib]
+# path, from the headers.
+[package.metadata.huxerui]
+library   = "Gauge::Gauge"
+namespace = "gauge"
+
+[dependencies]
+huxerui = { path = "../../../../.." }
+
+[targets.gauge]
+kind = "lib"
+
+[lib]
+path = "modules/gauge.cppm"
+
+[build]
+sources      = []
+include_dirs = ["include"]

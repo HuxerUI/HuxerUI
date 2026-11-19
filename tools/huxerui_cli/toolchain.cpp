@@ -347,6 +347,41 @@ EnvironmentDiagnostic ResolveCMake(const ProcessEnvironment& environment, const 
   return check;
 }
 
+namespace {
+
+// A tool needed by name only. It is not started: a version is never compared, and a launcher such as an xlings shim
+// may write to the terminal when it runs.
+EnvironmentDiagnostic ResolveNamedTool(std::string id) {
+  return CheckTool(id, id, FindExecutable(id).value_or(std::filesystem::path{}));
+}
+
+} // namespace
+
+EnvironmentDiagnostic ResolveMcpp() {
+  return ResolveNamedTool("mcpp");
+}
+
+EnvironmentDiagnostic ResolveXlings() {
+  auto check = ResolveNamedTool("xlings");
+  check.required = false;
+  return check;
+}
+
+std::vector<SetupAction> PlanMcppSetup(std::span<const EnvironmentDiagnostic> diagnostics) {
+  if (!NeedsSetup(diagnostics, "mcpp"))
+    return {};
+  // The commands mcpp's own installation guide gives: https://github.com/mcpp-community/mcpp#install
+  std::vector<SetupAction> actions;
+  if (NeedsSetup(diagnostics, "xlings")) {
+    const std::string_view command = CurrentHostId() == "windows"
+                                         ? "irm https://d2learn.org/xlings-install.ps1.txt | iex"
+                                         : "curl -fsSL https://d2learn.org/xlings-install.sh | bash";
+    actions.push_back({"Install xlings: " + std::string(command), std::nullopt, "install_xlings", {}, {"xlings"}});
+  }
+  actions.push_back({"Install mcpp: xlings install mcpp -y", std::nullopt, "install_mcpp", {"xlings"}, {"mcpp"}});
+  return actions;
+}
+
 SetupAction PlanCMakeSetup() {
   static constexpr std::array artifacts{
       std::pair{"linux-aarch64", "a343c6294f770742904e6a6792e0956b5ff8212abfb63cac99237de2e210fa0f"},

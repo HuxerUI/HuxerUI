@@ -16,6 +16,9 @@ build-egl/
 # mcpp build outputs (the mcpp leg of the dual build system).
 target/
 .mcpp/
+# The framework is a library package, so its lock file is a build record rather than a pin; the tool
+# packages below buildtools/mcpp keep theirs.
+/mcpp.lock
 compile_commands.json
 # GCC writes module BMIs beside the compiler's working directory; a stray
 # `gcm.cache/` at the repo root is a 28 MB build artifact, not a source file.

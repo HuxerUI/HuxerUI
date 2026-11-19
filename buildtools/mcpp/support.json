@@ -1,0 +1,131 @@
+{
+  "schema": 1,
+  "integration": "mcpp",
+  "declaration": "mcpp.toml",
+  "inapplicable": {
+    "product": [
+      [
+        "--sdk",
+        "{repository}"
+      ]
+    ],
+    "driver": [
+      [
+        "--generator",
+        "Ninja"
+      ]
+    ]
+  },
+  "targets": {
+    "linux": {
+      "hosts": [
+        "linux"
+      ],
+      "checks": [
+        "build",
+        "linkage",
+        "resources",
+        "libraries",
+        "launch",
+        "package",
+        "usage",
+        "doctor"
+      ],
+      "capabilities": [
+        "modules"
+      ]
+    },
+    "windows": {
+      "hosts": [
+        "windows"
+      ],
+      "checks": [
+        "build",
+        "linkage",
+        "resources",
+        "libraries",
+        "launch",
+        "package",
+        "usage",
+        "doctor"
+      ],
+      "capabilities": [
+        "modules"
+      ]
+    },
+    "macos": {
+      "hosts": [
+        "macos"
+      ],
+      "checks": [
+        "build",
+        "linkage",
+        "resources",
+        "libraries",
+        "launch",
+        "package",
+        "usage",
+        "doctor"
+      ],
+      "capabilities": [
+        "modules"
+      ]
+    },
+    "web": {
+      "hosts": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "checks": [
+        "build",
+        "linkage",
+        "resources",
+        "libraries",
+        "launch",
+        "package",
+        "usage",
+        "doctor"
+      ],
+      "capabilities": [
+        "modules"
+      ]
+    },
+    "android": {
+      "hosts": [
+        "linux",
+        "macos",
+        "windows"
+      ],
+      "checks": [
+        "build",
+        "linkage",
+        "resources",
+        "libraries",
+        "launch",
+        "package",
+        "package-shellless"
+      ],
+      "capabilities": [
+        "modules"
+      ]
+    },
+    "ios": {
+      "hosts": [
+        "macos"
+      ],
+      "checks": [
+        "build",
+        "linkage",
+        "resources",
+        "libraries",
+        "launch",
+        "package",
+        "package-shellless"
+      ],
+      "capabilities": [
+        "modules"
+      ]
+    }
+  }
+}

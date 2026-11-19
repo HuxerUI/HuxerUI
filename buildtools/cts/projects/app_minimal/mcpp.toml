@@ -1,0 +1,56 @@
+[package]
+name     = "cts_app_minimal"
+version  = "0.1.0"
+standard = "c++23"
+authors  = ["HuxerUI <huxerui@users.noreply.github.com>"]
+
+# The identity the platform shells and package formats use, the values the CMake declaration states.
+[package.metadata.huxerui]
+name = "CTS App Minimal"
+id   = "org.huxerui.cts.appminimal"
+
+[dependencies]
+huxerui = { path = "../../../.." }
+
+# `app` is a program on the desktop and the Web and the application's shared library on Android.
+# The platform shell owns the process entry, so each platform names its own.
+[targets.cts_app_minimal]
+kind = "app"
+main = "platform/linux/main.cpp"
+windows_subsystem = "windows"
+
+[target.'cfg(os = "windows")'.targets.cts_app_minimal]
+main = "platform/windows/main.cpp"
+
+[target.'cfg(os = "macos")'.targets.cts_app_minimal]
+main = "platform/macos/main.cpp"
+
+[target.'cfg(os = "ios")'.targets.cts_app_minimal]
+main = "platform/ios/App/main.mm"
+
+# On the Web and Android the platform layer starts the application, so the entry is the framework's.
+[target.'cfg(os = "emscripten")'.targets.cts_app_minimal]
+main = { from = "huxerui/platform-entry" }
+
+[target.'cfg(env = "android")'.targets.cts_app_minimal]
+main = { from = "huxerui/platform-entry" }
+
+[build]
+sources = []
+# The iOS deployment minimum, as the Xcode shell's IPHONEOS_DEPLOYMENT_TARGET and the CMake integration state it.
+ios_deployment_target = "15.0"
+
+[target.'cfg(os = "ios")'.dependencies]
+# Below the toolchain's own iOS floor, the core needs the compiler's runtime builtins built for it.
+llvm.compiler-rt-builtins = "22.1.8.6"
+
+# The Web build's exception model; HuxerUI requires it, and only the root package can grant it.
+[target.'cfg(os = "emscripten")'.abi]
+exceptions = true
+
+# The C++ runtime inside the application's shared library on Android, as the CMake integration's `c++_static`.
+[target.aarch64-linux-android]
+cxx_runtime = "self-contained"
+
+[target.x86_64-linux-android]
+cxx_runtime = "self-contained"

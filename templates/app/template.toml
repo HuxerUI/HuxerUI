@@ -1,13 +1,15 @@
 [template]
-description = "A HuxerUI desktop application: `import huxerui;`, composables and packaged resources"
+description = "A HuxerUI application: `import huxerui;`, composables and packaged resources"
 default     = true
 post_message = """
 Built with:   mcpp build
 Run with:     mcpp run
 
-The page is in src/app.cppm, a module interface unit. src/main.cpp holds only
-the call to RunApplication() and deliberately instantiates nothing -- that is
-why it needs no includes at all, and why huxerui.rules can leave it alone.
+The page is in src/app.cppm, a module interface unit. Each platform's entry,
+platform/<platform>/main.cpp, holds only the call to RunApplication() and
+deliberately instantiates nothing -- that is why it needs no includes at all,
+and why huxerui.rules can leave it alone. `huxerui platform add` writes the rest
+of a platform's shell.
 
 Both files write `import huxerui;` rather than #include <huxerui/huxerui.h>.
 The two name the same entities; the module is what HuxerUI ships for consumers

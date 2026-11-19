@@ -17,7 +17,7 @@ import huxerui.rules;
 
 namespace {
 
-// The xlings payloads declared in [target.'cfg(linux)'.xlings.workspace].
+// The xlings payloads declared in [target.'cfg(all(os = "linux", not(env = "android")))'.xlings.workspace].
 // Their VERSIONS live in mcpp.toml; xpkg_dir answers with the directory of
 // whatever this build installed, so this list carries names only.
 constexpr std::string_view kLinuxPayloads[] = {
@@ -58,7 +58,7 @@ std::string pkg_config_libdir() {
         std::cerr << "huxerui: " << (std::size(kLinuxPayloads) - found)
                   << " of " << std::size(kLinuxPayloads)
                   << " xlings payloads did not resolve; check "
-                     "[target.'cfg(linux)'.xlings.workspace] in mcpp.toml\n";
+                     "[target.'cfg(all(os = \"linux\", not(env = \"android\")))'.xlings.workspace] in mcpp.toml\n";
     }
     return dirs;
 }
@@ -120,13 +120,38 @@ bool probe(std::string_view module_spec, const std::string& libdir) {
 int main() {
     if (!huxerui::rules::builtin_resources()) return 1;
 
+    if (std::string_view(mcpp::target_os()) == "emscripten") {
+        // The link interface of cmake/platform/Web.cmake for an application.
+        const std::string web = std::string(mcpp::manifest_dir()) + "/platform/web";
+        for (const char* flag : { "--bind", "--no-entry", "-lidbfs.js", "-sMODULARIZE=1", "-sEXPORT_ES6=1",
+                                  "-sEXPORT_NAME=createHuxerUIApp", "-sEXPORTED_RUNTIME_METHODS=stringToNewUTF8",
+                                  "-sENVIRONMENT=web", "-sALLOW_MEMORY_GROWTH=1", "-sSTACK_SIZE=1048576",
+                                  "-sNO_EXIT_RUNTIME=1" }) {
+            mcpp::link_flag(flag);
+        }
+        for (const char* script : { "/web_platform_registry.js", "/web_file.js" }) {
+            mcpp::link_flag("--pre-js");
+            mcpp::link_flag((web + script).c_str());
+        }
+        return 0;
+    }
+    if (std::string_view(mcpp::target_env()) == "android") {
+        // The platform finds these entries by name, so they must survive the
+        // archive: the retention and export rules of cmake/HuxerUIOptimization.cmake.
+        const std::string exports = std::string(mcpp::manifest_dir()) + "/cmake/HuxerUIAndroid.exports";
+        for (const char* entry : { "Java_*", "JNI_OnLoad", "JNI_OnUnload" }) {
+            mcpp::link_flag((std::string("-Wl,--undefined-glob=") + entry).c_str());
+        }
+        mcpp::link_flag(("-Wl,--version-script=" + exports).c_str());
+        return 0;
+    }
     if (std::string_view(mcpp::target_os()) != "linux") return 0;
 
     const std::string libdir = pkg_config_libdir();
     if (libdir.empty()) {
         std::cerr << "huxerui: no xlings payload resolved for the Linux GTK "
                      "stack -- mcpp installs them from "
-                     "[target.'cfg(linux)'.xlings.workspace]\n";
+                     "[target.'cfg(all(os = \"linux\", not(env = \"android\")))'.xlings.workspace]\n";
         return 1;
     }
 

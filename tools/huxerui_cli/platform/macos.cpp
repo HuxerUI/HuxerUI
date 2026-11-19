@@ -91,7 +91,7 @@ public:
   }
 
   std::vector<GeneratedFile> CreateShell(const ProjectTemplateContext& context) const override {
-    std::vector<GeneratedFile> files = RenderTemplateTree("platform/desktop/app", context);
+    std::vector<GeneratedFile> files = RenderTemplateTree(DesktopEntryTemplate(context), context);
     std::vector<GeneratedFile> platform_files = RenderTemplateTree("platform/macos/app", context);
     files.insert(files.end(), std::make_move_iterator(platform_files.begin()),
                  std::make_move_iterator(platform_files.end()));

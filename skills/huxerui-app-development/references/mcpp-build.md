@@ -2,11 +2,11 @@
 
 Use this reference only for an existing mcpp project that manually consumes a prebuilt HuxerUI SDK. Package projects using `huxerui.huxerui` and `huxerui.rules` follow [cpp-modules-and-mcpp.md](cpp-modules-and-mcpp.md); preserve that integration rather than replacing it with manual SDK flags.
 
-`huxerui mcpp build` validates the source directory and delegates to mcpp. It does not discover the SDK, inject its link interface, or run HuxerUI code/resource generation automatically. Existing manual consumers must provide those integrations themselves.
+Drive such a project with `mcpp` directly. The HuxerUI CLI dispatches `build` and `run` only to projects whose `build.mcpp` uses `huxerui.rules`, and it does not discover the SDK, inject its link interface, or run HuxerUI code or resource generation for a manual consumer. Existing manual consumers must provide those integrations themselves.
 
 ## Resolve the selected SDK
 
-Use the project's configured SDK path first. If it does not specify one, follow [SDK discovery](project-workflow.md#locate-the-tools-and-sdk). Verify that the selected SDK contains `include/huxerui/huxerui.h` and locate its `HuxerUIConfig.cmake`. Inspect `huxerui mcpp --help` and the installed mcpp help before relying on flags.
+Use the project's configured SDK path first. If it does not specify one, follow [SDK discovery](project-workflow.md#locate-the-tools-and-sdk). Verify that the selected SDK contains `include/huxerui/huxerui.h` and locate its `HuxerUIConfig.cmake`. Inspect the installed mcpp help before relying on flags.
 
 Read the installed exported targets and platform package fragments for include paths, library names, transitive libraries, link options, and runtime files. Use release metadata for that exact artifact to establish compiler, architecture, standard library, runtime linkage, and deployment baseline. An unrelated source checkout's current CI is not evidence of how an older SDK binary was built.
 
@@ -19,15 +19,9 @@ Read the installed exported targets and platform package fragments for include p
 - Use public SDK headers and libraries rather than private source directories or object files.
 - For static linking, reproduce the installed public target's platform dependencies and link order.
 - For shared linking, preserve runtime-library deployment and loading paths.
-- Keep explicit codegen and resource-generation steps when the application uses those facilities; the delegating frontend does not supply them.
+- Keep explicit codegen and resource-generation steps when the application uses those facilities; mcpp does not supply them without `huxerui.rules`.
 
-The frontend accepts:
-
-```text
-huxerui mcpp build [--project <dir>] [--release] [--locked] [--offline] [--verbose]
-```
-
-`--project` selects the directory containing `mcpp.toml` and defaults to the current directory. Use `mcpp run` when the configured project supplies a runnable target. Follow the installed mcpp version's manifest syntax.
+Build with `mcpp build` and use `mcpp run` when the configured project supplies a runnable target. Follow the installed mcpp version's manifest syntax.
 
 ## Diagnose and validate
 

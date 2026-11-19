@@ -165,7 +165,9 @@ Task<IoResult<T>> RunFileAccessOperation(
   if (!store) {
     co_return IoResult<T>(IoError{IoErrorCode::Unsupported, "HuxerUI file access storage is unavailable"});
   }
-  co_return co_await ((*store).*operation)(std::move(args)...);
+  // The call is a named operand: GCC 16.1 fails to compile a pointer-to-member call expanded directly in co_await.
+  auto task = ((*store).*operation)(std::move(args)...);
+  co_return co_await std::move(task);
 }
 
 std::optional<IoError> ReferenceFileError(FileType type, bool allowed = true) {

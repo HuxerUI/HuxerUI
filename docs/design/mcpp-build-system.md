@@ -4,16 +4,18 @@ HuxerUI has two build systems. This document specifies the second one: how the
 framework is an [mcpp](https://github.com/mcpp-community/mcpp) package, how an
 application consumes it, and what the C++20 module surface guarantees.
 
-CMake remains the full-platform path and the only path for Android, iOS and
-Web. Nothing in the CMake build reads any file described here, and deleting
-`mcpp.toml`, `build.mcpp` and `mcpp/` returns the repository to a CMake-only
+Both build the framework and applications for Linux, Windows, macOS, the Web,
+Android and iOS; on Android and iOS the standard Gradle and Xcode shells consume
+the core either one builds, as [SDK, CLI, Platform Shell, and Library](sdk-cli.md)
+describes. Nothing in the CMake build reads any file described here, and deleting
+`mcpp.toml`, `build.mcpp` and `buildtools/mcpp/` returns the repository to a CMake-only
 project.
 
 ## 1. Division of ownership
 
 | | CMake | mcpp |
 |---|---|---|
-| Platforms | Linux, Windows, macOS, Android, iOS, Web | Linux, Windows, macOS |
+| Platforms | Linux, Windows, macOS, Android, iOS, Web | Linux, Windows, macOS, Android, iOS, Web |
 | Consumption | `#include <huxerui/huxerui.h>` | `import huxerui;` *and* the headers |
 | Linux dependencies | the distribution's packages | xlings payloads |
 | Toolchain | the host's | mcpp's own, per target |
@@ -28,12 +30,12 @@ why they must.
 mcpp.toml                     the framework as a package
 build.mcpp                    its build program
 modules/huxerui.cppm          the C++20 module interface (generated, committed)
-mcpp/
+buildtools/mcpp/
   huxerui-build-rules/        `import huxerui.rules;` -- the application-facing API
   huxerui-source-select/      the scanning the rules and the tools share
   huxerui-tools/              huxerui-build-check, huxerui-module-gen
   huxerui-tests/              the unit suite, compiled against the mcpp build
-  examples/                   three applications
+  examples/                   four applications
 templates/                    mcpp package templates: app, navigation, library
 tools/codegen/mcpp.toml       hcg as a package
 tools/resource_compiler/…     hrc as a package
@@ -69,7 +71,7 @@ its rule module as **build**-dependencies with `reexport = true`:
 [build-dependencies]
 huxerui-codegen           = { path = "tools/codegen",            tools = ["hcg"], reexport = true }
 huxerui-resource-compiler = { path = "tools/resource_compiler",  tools = ["hrc"], reexport = true }
-huxerui-build-rules       = { path = "mcpp/huxerui-build-rules", host-module = true, reexport = true }
+huxerui-build-rules       = { path = "buildtools/mcpp/huxerui-build-rules", host-module = true, reexport = true }
 ```
 
 `reexport` is what carries them one dependency edge further, so the application
@@ -87,6 +89,48 @@ the manifest stays out of it.
 
 The target's entry is the one file the rule never transforms, for the same
 reason: a transformed copy of `main.cpp` would link beside the original.
+
+On the Web and Android the platform layer starts the application: the page mounts the module through its exports, and the Java host loads the shared library.
+No `main` runs application code there, and the CMake declaration compiles no entry for them, but mcpp links one translation unit as every program's entry.
+The framework therefore declares an entry target, `[targets.platform-entry] kind = "entry"`, whose translation unit defines nothing, and an application's Web and Android rows select it with `main = { from = "huxerui/platform-entry" }`, naming the key its dependency table gives HuxerUI.
+The file is outside `src/*/*.cpp`, so neither integration compiles it as a framework source.
+
+### Resources and libraries
+
+`configure()` produces the one final resource package the [Build System Integration Contract](../../buildtools/specs/build-system-integration.md) requires and deploys it to `<program>.resources/` beside the program, where the Runtime looks for it.
+An application's own root uses the namespace `app` unless the build program states another.
+
+A HuxerUI library states its public identity and resource root about itself:
+
+```toml
+[package.metadata.huxerui]
+library   = "CameraKit::CameraKit"
+resources = "resources"
+```
+
+The application's build program reads the resolved graph through `mcpp::graph_file()`, which carries that table for every package in the closure, including libraries the application does not name.
+It compiles each library's root under the namespace its identity projects to, merges builtin, library, and application packages in contract order, and writes the ordered library-graph record to `.huxerui/generated/libraries.json` with the schema the CMake integration uses.
+A library's own build program reads the same table from its own manifest to generate its resource header.
+A package that has module interface units also gets a generated `<namespace>.resources` module, so module code writes `import app.resources;` instead of including the header.
+
+A library with public headers under `include/` that declares mcpp, names the C++ `namespace` of `[package.metadata.huxerui]`, and states a `[lib]` path is also a module.
+Its interface is the `[lib]` unit, wherever the author puts it, and its module is named after the package identity: `<package namespace>.<package name>`, or the name alone, with `-` written as `_`.
+The package identity rather than the C++ namespace names the module because a module name is global to a program and a package identity is unique where packages are published, while one C++ namespace may be shared by several libraries; the C++ namespace still decides which names the interface exports.
+The interface has the shape of `modules/huxerui.cppm`: the headers in the global module fragment, `export import huxerui;`, and a `using` declaration for each name the headers declare directly in the namespace, so `import <module>;` and `#include` reach the same entities and the library needs no second binary.
+
+| `cpp_modules_gen` | The interface |
+| --- | --- |
+| absent or `true` | `configure()` generates it from the headers with the scanner `huxerui-module-gen` uses, writing it only when its content changes and reporting a note when it does |
+| `false` | the author writes it; `configure()` reports the names the headers declare and the interface does not export |
+
+Either way the rules add the interface to the package's sources, rerun when a header, the interface, or the manifest changes, and warn about a macro a header defines, which no module exports. A name declared `static` has internal linkage and is not exported.
+They watch the manifest, the set of headers, and the set of units below `modules/` before they decide whether the package is a module, so a headers library made a module later, by adding the `namespace` or the interface file after a build, runs them again.
+A module carries no macro, and the rules map none: which macros importers need is the author's choice, and whether a macro is a constant, a type, or syntax is not decidable from the header's text.
+The author maps the chosen ones to constants in a unit named `<module>.macros`, under their own names in `<namespace>::macros`.
+The rules compile every unit below `modules/` and the generated interface re-exports those named under the module, so the unit is found by its name, not its file; the documentation recommends `modules/macros.cppm` beside a `modules/<package name>.cppm` interface, and no layout is checked.
+A macro such a unit names, and one its header undefines again, is not reported; with `cpp_modules_gen = false` the rules report an interface that does not re-export such a unit.
+`buildtools/mcpp/examples/04-headers-library` builds this shape.
+The key matters only to such a library: a CMake-only library has no mcpp build, and a C++ modules library's interface is its source.
 
 ## 4. The module surface
 
@@ -122,14 +166,7 @@ The std module is a C++23 *library* feature that every implementation HuxerUI
 builds with offers in C++20 mode as well — the MSVC STL's named modules are
 documented as needing `/std:c++20` or later.
 
-**Applications nonetheless pin `standard = "c++23"`, and that is a workaround.**
-mcpp's clang-on-Windows path hardcodes `importStdMinLevel = 23` rather than
-probing the STL it found, and refuses `import std;` below c++23
-([mcpp#603](https://github.com/mcpp-community/mcpp/issues/603)). A module graph
-has exactly one standard, so an application at c++23 compiles the framework at
-c++23 too; the framework's own `standard` stays c++20, which is the SDK's ABI
-baseline and what it is when it is the root. One line in each manifest changes
-back when #603 is fixed.
+**Every mcpp package of HuxerUI states `standard = "c++23"`, mcpp's default.** A build program is compiled at its package's standard, and `huxerui.rules` imports the official `mcpp:plugins` distribution members, which need C++23; a module graph has one standard, so the framework, its tools and its applications agree on it. mcpp's clang-on-Windows path also refuses `import std;` below c++23 ([mcpp#603](https://github.com/mcpp-community/mcpp/issues/603)). The CMake integration keeps its C++20 floor.
 
 `[toolchain] windows = "msvc@system"` would sidestep it and put both build
 systems on one compiler, and is blocked separately: a host module's BMI reaches
@@ -148,7 +185,7 @@ boundary. Two different holes, two different fixes:
 - **Hand-written code.** A scope written by hand is spelled the way the macro
   expands — `return Scope([=]() -> View { … });` — and `Scope` and `View` are
   exported, so a module unit needs neither the macro nor a header.
-  `mcpp/examples/02-module-units/src/banner.cppm` is the worked case.
+  `buildtools/mcpp/examples/02-module-units/src/banner.cppm` is the worked case.
   `<huxerui_scope_prelude.h>` remains for a **non-module** translation unit in
   an mcpp project, which the rule force-includes; that is the only case left
   where the macro is reachable and needed.
@@ -177,7 +214,7 @@ another.
 So the transitive `.pc` closure of `gtk4 + epoxy + libsoup` is declared as
 xlings payloads and `build.mcpp` points `PKG_CONFIG_LIBDIR` at those only,
 which keeps the host out entirely. They are declared on the **target** axis
-(`[target.'cfg(linux)'.xlings.workspace]`) because they are what the produced
+(`[target.'cfg(all(os = "linux", not(env = "android")))'.xlings.workspace]`) because they are what the produced
 code is compiled and linked against.
 
 ### Dialect flags belong to the whole graph
@@ -213,73 +250,33 @@ so `platform/macos/*.mm` is listed explicitly. `frameworks` is a **top-level**
 `[target.macos.runtime] frameworks` entry is ignored, failing at link on macOS
 alone. Unconditional is correct: the engine renders it only for Mach-O.
 
-## 7. The Windows installer
+## 7. Packaging an application
 
-An application asks for an MSI in its build program, and gets one:
+`mcpp pack --pkg-format <format>` packages an application through the official `mcpp:plugins` distribution members, and `huxerui package <platform>` runs it for an mcpp project.
+`huxerui-build-rules` depends on `mcpp:plugins` with the `dist-appimage`, `dist-deb`, `dist-rpm`, `dist-wix`, `dist-apple`, `dist-web`, and `dist-apk` features, and `configure()` configures each member from the application's identity and its platform shell; a member declares its format in every pass and acts only in the pass that asked for it, and its tool is installed only when a pack asks for it.
 
-```cpp
-huxerui::rules::configure({
-    .resources = "resources",
-    .installer = {
-        .target       = "myapp",
-        .version      = "1.2.3",
-        .upgrade_code = "27B7A054-FFE4-48A5-92E3-5D90C0507EEB",
-    },
-});
-```
+| Platform | Formats | What the rule supplies |
+| --- | --- | --- |
+| Linux | `appimage` (the CLI's default), `deb`, `rpm` | name, categories, `platform/linux/package/<target>.svg`; for deb and rpm the maintainer, by default the first `[package] authors` entry |
+| Windows | `setup` (the CLI's default, as CMake's), `msi` | product name, manufacturer, and the upgrade code derived from the identifier as `string(UUID ... TYPE SHA1)` derives it in CMake |
+| macOS | `dmg`, `app` | name, identifier, `platform/macos/AppIcon.icns` |
+| iOS | `app` | name and identifier |
+| Web | `web` | `platform/web/index.html.in` rendered with the CMake integration's values, and its icons |
+| Android | `apk`, `aab` | identifier, label, and a generated application shell: an Application that loads the program's library and an Activity on `org.huxerui.HuxerUIActivity` |
 
-…and one line in its manifest:
+The identity is `[package.metadata.huxerui] name` and `id` in the application's manifest, or `bundle_name` and `bundle_identifier` in `configure()`.
+Packaging options beyond it are `configure({.package = {...}})`: categories, maintainer, depends, manufacturer, and upgrade code.
+An Android package needs the identifier; without one the rule warns and configures no package, and the build goes on.
 
-```toml
-[xlings.workspace]
-"xim:wix" = { windows = "5.0.2" }
-```
+The final resource package is deployed where each format's Runtime reads it: `<program>.resources/` beside the program on the desktop, `HuxerUI/` for the Apple bundles (`Contents/Resources/HuxerUI` on macOS, the bundle root on iOS), and the asset root of an APK.
+The framework states what an Android package carries from it, its Java host and its manifest entries, in `[package.metadata.dist-apk]` of its own manifest; `dist-apk` reads that table from every package in the application's resolved graph and substitutes `${applicationId}`.
+A library contributes its Android platform package without stating anything: for every library in the graph that has a Gradle library module at `platform/android` and no `[package.metadata.dist-apk]`, the rule passes `dist-apk` the module's `src/main/java`, `src/main/kotlin`, `src/main/AndroidManifest.xml`, `src/main/res`, and `src/main/assets`, under the package its `[package.metadata.huxerui] id` names, which is the namespace the CLI gives that module.
+A library that states `[package.metadata.dist-apk]` is not inferred; its table replaces the inference as a whole, and carries what the layout cannot, such as Maven coordinates, archives, or further source roots.
+A library's iOS Swift package reaches the application through the Xcode shell; `rules-swift` compiles only the Swift sources a package names in its own manifest, so packaging for iOS without the shell warns that the package is not included.
+Android applications state `cxx_runtime = "self-contained"` for their Android triples, so the application's shared library links the C++ runtime statically, as the CMake integration's `c++_static`.
 
-That line is not redundant with the framework's. `xpkg_dir` answers from
-`MCPP_XPKG_*_DIR`, which mcpp sets for what the **building** package declared;
-a dependency's declaration provisions the payload — the log says
-`Provisioning [xlings.workspace] entries (xim:wix@5.0.2)` — without making it
-visible to the consumer's build program. The rule says exactly this, and prints
-the two lines to add, when the lookup comes back empty.
-
-It is on the **host** axis because `wix.exe` runs on the build machine, which
-is mcpp's own rule for which table a tool belongs in; the GTK payloads in §5
-are the other case.
-
-The rule renders the MSI definition it ships
-(`mcpp/huxerui-build-rules/wix/Package.wxs.in`) into the build directory and
-submits **one** action, `role = "artifact"` — whose inputs are link outputs, so
-ninja sequences it after the link with no phase machinery.
-
-Three things make it one action rather than several:
-
-- **No staging.** The program is passed to WiX as a preprocessor variable,
-  `-d Executable=${mcpp.target_file:<target>}`, and the definition names it with
-  `<File Source="$(Executable)" />`. An earlier version harvested a directory
-  bindpath instead and produced a valid, empty, 52 KB installer when the path
-  resolved to nothing — with no diagnostic. A `<File Source>` whose path is
-  wrong is an error before anything is written.
-- **No resource copying.** HuxerUI's compiled resources are linked into the
-  executable; moving the whole `out/hrc` tree away and running the program
-  confirms it. The install set is the executable and the DLLs beside it.
-- **No path arithmetic.** `${mcpp.target_file:<target>}` is what mcpp expands
-  to the link output. A build program is told neither the target triple nor the
-  fingerprint, so the placeholder is the only way to name it — and an unknown
-  target is refused rather than expanded to an empty path.
-
-CI reads the MSI's `File` table rather than judging the installer by its size:
-an installer that carries nothing and one that carries the wrong file are both
-plausible sizes, and only the table says which file is in it.
-
-Silent on Linux and macOS: the rule returns before it reads anything when the
-target is not Windows.
-
-**The branded bundle is not built.** `Bundle.wxs` in the CMake path wraps the
-MSI in a WiX **bootstrapper application**, which is a second HuxerUI program —
-`platform/windows/windows_installer.cpp` (896 lines) plus a per-application UI
-and ten locales, linking `balutil.lib` and `dutil.lib` from the same payload.
-`wix_paths()` already resolves those, so nothing structural is missing; it is
-unbuilt, not blocked.
+A Web build also lays the rendered page beside the module as `<program>.html`, the name the CMake build gives it, so the CLI serves and watches either integration's build the same way.
+`mcpp pack` reports the Web page as the distributable; the CLI publishes the page's directory, which holds the module, its WebAssembly, the preloaded data, and that page beside dist-web's `index.html`.
 
 ## 8. Verification
 
@@ -289,8 +286,8 @@ unbuilt, not blocked.
 | `huxerui-module-gen --check` | a public name added to a header and not to the module shell |
 | `mcpp test` in `huxerui-source-select` | the scanning the rules and the tools share |
 | `mcpp test` in `huxerui-tests` | 209 cases and 11,521 assertions against the mcpp-built framework |
-| `mcpp build --workspace` | a workspace member that does not build |
 | `mcpp pack` shape | headers, module interface and library all present |
+| Build System Conformance | each integration's build, resources, launch, and distributable against the projects' expected facts (`buildtools/cts/README.md`) |
 
 Both tools are C++ programs built by mcpp: a repository that offers mcpp as a
 first-class build system should not need a second language to check its own
@@ -303,13 +300,6 @@ shows only where GCC is the default and clang is the exception.
 
 ## 9. Known gaps
 
-**Android, iOS and Web** are outside mcpp's target language today, and CMake
-remains the only path to them. Web is the one that has been taken up with
-upstream —
-[mcpp#597](https://github.com/mcpp-community/mcpp/issues/597) sets out what an
-Emscripten target needs and why a rule package cannot supply it. Android and
-iOS have not been raised.
-
 **A published package carries no consumer dependencies.** `mcpp emit xpkg`
 derives a descriptor's `xpm.<platform>.deps` from the top-level
 `[xlings.workspace]` only, and the GTK payloads are declared on the target axis
@@ -321,7 +311,7 @@ the build machine, and stops being right the first time the package is
 cross-compiled. Until mcpp derives consumer dependencies from the target axis,
 a published `huxerui.huxerui` would resolve and then fail to link on a machine
 without the payloads. Path and git dependencies are unaffected — they provision the target
-axis, which is what `mcpp/examples/` relies on.
+axis, which is what `buildtools/mcpp/examples/` relies on.
 
 **`tests/runtime` and `tests/platform` are not in the mcpp suite.** They reach
 fixtures a CMake step generates, and each needs an mcpp equivalent before it
@@ -329,5 +319,5 @@ compiles there. `tests/cli` links the CLI, a CMake target.
 
 **`mcpp test` cannot run from the repository root.** mcpp defines a test as
 every `tests/**/*.cpp` with no manifest key to point that elsewhere, and this
-repository's `tests/` is CMake's. `mcpp/huxerui-tests` selects instead of
+repository's `tests/` is CMake's. `buildtools/mcpp/huxerui-tests` selects instead of
 discovering.

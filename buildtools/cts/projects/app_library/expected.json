@@ -1,0 +1,63 @@
+{
+  "schema": 1,
+  "target": "cts_app_library",
+  "requires": [],
+  "facts": {
+    "profile": "debug",
+    "artifact.name": "cts_app_library",
+    "framework.linkage": "static",
+    "resources.location": "<artifact>.resources/huxerui/resources.bin",
+    "libraries": [
+      "CtsKit::Widgets",
+      "CtsKit::Core"
+    ],
+    "artifact.bundle": "<none>",
+    "package.kind": "appimage"
+  },
+  "launch": {
+    "app.title": "CTS library application",
+    "widgets.caption": "Caption from the widgets library",
+    "core.name": "Name from the core library"
+  },
+  "targets": {
+    "macos": {
+      "facts": {
+        "artifact.bundle": "cts_app_library.app",
+        "resources.location": "<bundle>/Contents/Resources/HuxerUI/huxerui/resources.bin",
+        "package.kind": "dmg"
+      }
+    },
+    "web": {
+      "facts": {
+        "resources.location": "<artifact>.data:/huxerui/resources.bin",
+        "package.kind": "web"
+      }
+    },
+    "android": {
+      "facts": {
+        "artifact.name": "libcts_app_library.so",
+        "resources.location": "application core",
+        "android.exports": "JNI entries only",
+        "package.kind": "apk",
+        "package.library_code": [
+          "org.huxerui.ctsprobe.core.CoreAndroid",
+          "org.huxerui.ctsprobe.widgets.WidgetsAndroid",
+          "org.huxerui.ctsprobe.widgets.WidgetsExtra"
+        ]
+      }
+    },
+    "ios": {
+      "facts": {
+        "artifact.name": "libcts_app_library_huxerui.a",
+        "resources.location": "application core",
+        "ios.link_inputs": "present",
+        "package.kind": "app"
+      }
+    },
+    "windows": {
+      "facts": {
+        "package.kind": "setup"
+      }
+    }
+  }
+}

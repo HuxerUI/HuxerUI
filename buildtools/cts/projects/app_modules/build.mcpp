@@ -1,0 +1,4 @@
+import mcpp;
+import huxerui.rules;
+
+int main() { return huxerui::rules::configure({ .resources = "resources" }) ? 0 : 1; }

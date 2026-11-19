@@ -8,11 +8,39 @@ pluginManagement {
     }
 }
 
-def huxeruiHomeValue = providers.environmentVariable("HUXERUI_HOME").orNull
-if (huxeruiHomeValue == null || huxeruiHomeValue.isBlank()) {
-    throw new GradleException("HUXERUI_HOME is required")
+// The integration that builds the application core: the one -PhuxeruiBuildSystem names, the project's only
+// declaration, or CMake when the project declares both. Everything else in this shell is shared.
+def huxeruiProjectRoot = file("../..")
+def huxeruiDeclarations = [
+        cmake: new File(huxeruiProjectRoot, "CMakeLists.txt").isFile(),
+        mcpp : new File(huxeruiProjectRoot, "mcpp.toml").isFile() && new File(huxeruiProjectRoot, "build.mcpp").isFile(),
+]
+def huxeruiBuildSystem = providers.gradleProperty("huxeruiBuildSystem").orNull
+if (huxeruiBuildSystem == null) {
+    def declared = huxeruiDeclarations.findAll { it.value }.keySet().toList()
+    if (declared.isEmpty()) {
+        throw new GradleException("The project declares no build system: ${huxeruiProjectRoot}")
+    }
+    huxeruiBuildSystem = declared.first()
+} else if (!huxeruiDeclarations[huxeruiBuildSystem]) {
+    throw new GradleException("The project has no ${huxeruiBuildSystem} declaration")
 }
-def huxeruiHome = file(huxeruiHomeValue)
+
+// CMake takes the framework from HUXERUI_HOME; mcpp resolves it as a dependency and records where.
+def huxeruiHome
+if (huxeruiBuildSystem == "mcpp") {
+    def frameworkRecord = file("../../.huxerui/generated/framework.json")
+    if (!frameworkRecord.isFile()) {
+        throw new GradleException("Run 'huxerui build android' to resolve the framework")
+    }
+    huxeruiHome = file(new JsonSlurper().parse(frameworkRecord).sourceRoot)
+} else {
+    def huxeruiHomeValue = providers.environmentVariable("HUXERUI_HOME").orNull
+    if (huxeruiHomeValue == null || huxeruiHomeValue.isBlank()) {
+        throw new GradleException("HUXERUI_HOME is required")
+    }
+    huxeruiHome = file(huxeruiHomeValue)
+}
 def huxeruiLibrary = new File(huxeruiHome, "platform/android/huxerui")
 def huxeruiArchive = new File(huxeruiHome, "share/huxerui/platform/android/HuxerUI.aar")
 def huxeruiUsesSource = huxeruiLibrary.isDirectory()
@@ -35,6 +63,7 @@ dependencyResolutionManagement {
     }
 }
 
+gradle.ext.huxeruiBuildSystem = huxeruiBuildSystem
 gradle.ext.huxeruiHome = huxeruiHome
 gradle.ext.huxeruiUsesSource = huxeruiUsesSource
 gradle.ext.huxeruiAndroidArchive = huxeruiArchive

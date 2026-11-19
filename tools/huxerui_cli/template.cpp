@@ -158,6 +158,10 @@ std::string ProjectTemplateContext::Render(std::string_view value) const {
   return rendered;
 }
 
+std::string_view DesktopEntryTemplate(const ProjectTemplateContext& context) noexcept {
+  return context.source_style == SourceStyle::Modules ? "platform/desktop/app_modules" : "platform/desktop/app";
+}
+
 std::vector<GeneratedFile> RenderTemplateTree(std::string_view root, const ProjectTemplateContext& context,
                                               std::span<const TemplateReplacement> replacements) {
   return LoadTemplateTree(root, &context, replacements);

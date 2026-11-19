@@ -1,0 +1,21 @@
+[package]
+name     = "ctskit_widgets"
+version  = "0.1.0"
+standard = "c++23"
+
+[package.metadata.huxerui]
+library   = "CtsKit::Widgets"
+resources = "resources"
+
+[dependencies]
+huxerui     = { path = "../../../../../.." }
+ctskit_core = { path = "../core" }
+
+[targets.ctskit_widgets]
+kind = "lib"
+
+[lib]
+path = "src/widgets.cppm"
+
+[build]
+sources = []

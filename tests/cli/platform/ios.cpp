@@ -99,10 +99,33 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
           "-destination",
           "generic/platform=iOS Simulator",
           "HUXERUI_HOME=" + context.huxerui_home.string(),
+          "HUXERUI_BUILD_SYSTEM=cmake",
           "HUXERUI_INTEGRATION_PLAN=" + (build / "huxerui-integration/app.json").string(),
           "build",
       }
   );
+
+  // The Xcode shell builds an mcpp core too: mcpp builds it first, which records the framework it resolved, and
+  // the shell compiles its entry against that framework.
+  auto mcpp_context = context;
+  mcpp_context.build_system = huxerui::cli::BuildSystem::Mcpp;
+  const auto mcpp_graph = ios->LibraryGraphCommands(mcpp_context);
+  REQUIRE(mcpp_graph.size() == 1);
+  REQUIRE(mcpp_graph[0].executable == "mcpp");
+  REQUIRE(mcpp_graph[0].arguments == std::vector<std::string>{"build", "--target", "aarch64-ios-sim"});
+  REQUIRE_THROWS_WITH(ios->BuildCommands(mcpp_context), Catch::Matchers::ContainsSubstring("framework record"));
+  const std::filesystem::path framework = temporary.Path() / "resolved";
+  std::filesystem::create_directories(project / ".huxerui/generated");
+  std::ofstream(project / ".huxerui/generated/framework.json")
+      << "{\n  \"schema\": 1,\n  \"sourceRoot\": \"" << framework.generic_string() << "\"\n}\n";
+  const auto mcpp_build = ios->BuildCommands(mcpp_context).front().arguments;
+  REQUIRE(std::ranges::find(mcpp_build, "HUXERUI_HOME=" + framework.string()) != mcpp_build.end());
+  REQUIRE(std::ranges::find(mcpp_build, "HUXERUI_BUILD_SYSTEM=mcpp") != mcpp_build.end());
+  REQUIRE(std::ranges::find(mcpp_build, "ARCHS=arm64") != mcpp_build.end());
+  auto intel_context = mcpp_context;
+  intel_context.abis = {"x86_64"};
+  REQUIRE_THROWS_WITH(ios->ValidateBuildAbis(intel_context), Catch::Matchers::ContainsSubstring("arm64 ABI only"));
+
   auto profiling_context = context;
   profiling_context.profiling = true;
   const auto profiling_commands = ios->BuildCommands(profiling_context);
@@ -171,6 +194,7 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
           "-destination",
           "id=00008130-000C048A1A90001C",
           "HUXERUI_HOME=" + physical_context.huxerui_home.string(),
+          "HUXERUI_BUILD_SYSTEM=cmake",
           "HUXERUI_INTEGRATION_PLAN=" + (physical_context.build_directory / "huxerui-integration/app.json").string(),
           "-allowProvisioningUpdates",
           "build",

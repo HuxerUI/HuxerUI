@@ -1,0 +1,31 @@
+# The rule package HuxerUI consumers import from their build.mcpp.
+#
+# It is a `host-module` dependency: mcpp compiles its lib-root module for the
+# host in the same command as build.mcpp, which is what makes the BMI usable.
+# The framework re-exports it, so an application declares `huxerui` and gets
+# `import huxerui.rules;` without naming this package.
+
+[package]
+name        = "huxerui-build-rules"
+namespace   = "huxerui"
+version     = "0.5.0"
+description = "mcpp build rules for HuxerUI: composable codegen and resource compilation"
+license     = "Apache-2.0"
+
+# The pure half, split out so `mcpp test` can cover it: this package imports
+# mcpp and therefore cannot be built outside a build program's compile.
+# A plugin's own imports are its `[dependencies]`: they serve the build program
+# the plugin serves. Nothing needs `reexport`, because the consumer imports only
+# `huxerui.rules`.
+[dependencies]
+huxerui-source-select = { path = "../huxerui-source-select" }
+# The official distribution members: `mcpp pack --pkg-format <format>` of an
+# application dispatches to the member its build program configured, and each
+# member's tool is installed only when a pack asks for it.
+mcpp.plugins = { version = "0.26.1", features = ["dist-appimage", "dist-deb", "dist-rpm", "dist-wix",
+                                                 "dist-apple", "dist-web", "dist-apk"] }
+
+[lib]
+# The module this package publishes is `huxerui.rules`; the package name is
+# `huxerui-build-rules`, which is not a legal C++ module name and does not have to be.
+path = "src/rules.cppm"

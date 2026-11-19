@@ -1,0 +1,23 @@
+plugins {
+    id "com.android.library"
+}
+
+android {
+    namespace = "org.huxerui.ctskit.widgets"
+    compileSdk = 36
+
+    defaultConfig {
+        minSdk = 23
+    }
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    // A source root beyond the standard layout, which only an explicit declaration can name to a package built
+    // without this module.
+    sourceSets {
+        main.java.srcDirs += "src/extra/java"
+    }
+}

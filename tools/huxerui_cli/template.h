@@ -18,6 +18,22 @@ struct GeneratedFile {
   bool executable = false;
 };
 
+/// How a generated project's sources reach HuxerUI.
+enum class SourceStyle {
+  /// Sources include `<huxerui/huxerui.h>`.
+  Headers,
+  /// Sources are C++ module units that write `import huxerui;`.
+  Modules,
+};
+
+/// Build system whose native declaration a project carries.
+enum class BuildSystem {
+  /// `CMakeLists.txt` with the HuxerUI CMake helpers.
+  CMake,
+  /// `mcpp.toml` and `build.mcpp` with the `huxerui.rules` build program.
+  Mcpp,
+};
+
 /// Values shared by generated project and platform templates.
 struct ProjectTemplateContext {
   /// User-facing project name.
@@ -26,6 +42,8 @@ struct ProjectTemplateContext {
   std::string target_name;
   /// Reverse-domain application or library identifier.
   std::string project_id;
+  /// Source style, which selects the form of a desktop shell's process entry.
+  SourceStyle source_style = SourceStyle::Headers;
 
   /// Replaces the standard project tokens in a string.
   /// @param value Template text containing tokens such as `@PROJECT_NAME@` or `@PROJECT_ID@`.
@@ -64,6 +82,9 @@ struct TemplateReplacement {
   /// Text substituted for each token occurrence.
   std::string_view value;
 };
+
+/// The embedded template of a desktop shell's process entry for a project's source style.
+[[nodiscard]] std::string_view DesktopEntryTemplate(const ProjectTemplateContext& context) noexcept;
 
 /// Loads an embedded template tree and renders every path and text file.
 /// @param root Embedded template directory relative to the CLI template root.
