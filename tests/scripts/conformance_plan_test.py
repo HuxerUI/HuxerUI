@@ -54,6 +54,13 @@ class SuiteTests(unittest.TestCase):
         for key in ("run_jobs", "run_macos_jobs", "run_sequence", "compare", "compare_macos"):
             self.assertEqual(outputs[key], "false", key)
 
+    def test_non_inputs_do_not_expand_a_platform_change(self):
+        other_paths = ["README.MD", "buildtools/mcpp/README.md", "tests/cli/platform/ios.cpp", "src/io/file.cpp",
+                       "include/huxerui/view.h", "platform/ios/ios_file.mm", "cmake/ValidateSdkRelease.cmake"]
+        ios_paths = ["cmake/platform/IOS.cmake"]
+        self.assertEqual(every(other_paths), [])
+        self.assertEqual(plan.outputs(ios_paths + other_paths), plan.outputs(ios_paths))
+
 
 class MacosJobTests(unittest.TestCase):
     def test_each_integration_builds_its_macos_targets_in_one_job(self):
@@ -80,7 +87,8 @@ class IntegrationTests(unittest.TestCase):
 
     def test_shared_tools_select_every_integration_whatever_their_name(self):
         for path in ("tools/huxerui_cli/cli.cpp", "tools/huxerui_cli/CMakeLists.txt", "tools/codegen/transform.cpp",
-                     "src/resources/resource_format.h", "scripts/build_tools.sh", "include/huxerui/view.h"):
+                     "tools/resource_compiler/compiler.cpp", "src/resources/resource_format.h",
+                     "src/resources/vector_format.h"):
             with self.subTest(path=path):
                 self.assertEqual(every([path]), primary("cmake", "mcpp"))
 
@@ -94,6 +102,13 @@ class IntegrationTests(unittest.TestCase):
 
 
 class TargetTests(unittest.TestCase):
+    def test_host_tool_scripts_select_only_cmake_jobs_on_their_hosts(self):
+        self.assertEqual(every(["scripts/build_tools.ps1"]),
+                         ["cmake/android@windows", "cmake/web@windows", "cmake/windows@windows"])
+        self.assertEqual(every(["scripts/build_tools.sh"]),
+                         ["cmake/android@linux", "cmake/android@macos", "cmake/ios@macos", "cmake/linux@linux",
+                          "cmake/macos@macos", "cmake/web@linux", "cmake/web@macos"])
+
     def test_a_target_path_runs_that_target_on_its_primary_host(self):
         for path in ("tools/huxerui_cli/platform/android.cpp",
                      "tools/huxerui_cli/templates/platform/android/app/build.gradle"):

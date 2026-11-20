@@ -14,9 +14,8 @@ confined to; a change runs the union.
 - This plan selects nothing; the plan job tests it before it selects.
 - A conformance project's path selects that project, and the project its `sameModelAs` relates it to, on the target
   the path belongs to, or on every target. created-projects.json selects the created projects where it declares them.
-- Prebuilt host tool writebacks select nothing. Each integration builds the tools from the checkout.
-- Any other path selects the integration that owns it, or every integration, on the target that owns it, or on every
-  target.
+- A host-tool build script selects the CMake jobs that run it.
+- Other build inputs select their integration and target, or both integrations and all targets when shared.
 
 A target is run on its primary host: the target's own host, or a Linux host for a target that is not a host. The rows
 of the other hosts, and the comparison between hosts' builds that they allow, run on a manual dispatch, which selects
@@ -77,6 +76,13 @@ PLAN = (".github/workflows/scripts/conformance_plan.py",)
 PROJECTS = "buildtools/cts/projects/"
 CREATED_PROJECTS = "buildtools/cts/created-projects.json"
 
+# These inputs follow the workflow's automatic path filters.
+BUILD_INPUT_PREFIXES = ("buildtools/", "cmake/", "modules/", "templates/", "tools/codegen/",
+                        "tools/resource_compiler/", "tools/huxerui_cli/")
+BUILD_INPUT_FILES = {"CMakeLists.txt", "mcpp.toml", "build.mcpp", "src/resources/resource_format.h",
+                     "src/resources/vector_format.h"}
+HOST_TOOL_SCRIPT_HOSTS = {"scripts/build_tools.ps1": ("windows",), "scripts/build_tools.sh": ("linux", "macos")}
+
 # Paths below these prefixes are inputs of every integration even where a file name below says otherwise:
 # the CLI's own CMakeLists.txt builds the tool both integrations are driven through.
 SHARED_PREFIXES = ("tools/", ".github/")
@@ -92,10 +98,8 @@ OWNED_NAMES = {
     "mcpp": ("mcpp.toml", "build.mcpp", "*.cppm"),
 }
 
-# A target owns its platform directories, its CLI driver and its CMake platform file (`cmake/platform/IOS.cmake`
-# belongs to `ios`).
+# A target owns its CLI driver, shell templates, project fixtures and CMake platform file.
 TARGET_PATTERNS = (
-    "platform/{target}/*",
     "tools/huxerui_cli/platform/{target}.cpp",
     "tools/huxerui_cli/templates/platform/{target}/*",
     "buildtools/cts/projects/*/platform/{target}/*",
@@ -152,10 +156,14 @@ def related_projects(name, root):
 
 def impact(path, root=REPOSITORY):
     """The jobs a changed path can affect, as (integration, target, host) keys, and the projects it is confined to."""
-    if path in PLAN or path.startswith("tools/prebuilt/"):
+    if path in PLAN or path.lower().endswith(".md") or path == "cmake/ValidateSdkRelease.cmake":
         return set(), set()
     if path in SUITE:
         return every_job(), EVERY_PROJECT
+    if hosts := HOST_TOOL_SCRIPT_HOSTS.get(path):
+        return {job for job in every_job() if job[0] == "cmake" and job[2] in hosts}, EVERY_PROJECT
+    if path not in BUILD_INPUT_FILES and not path.startswith(BUILD_INPUT_PREFIXES):
+        return set(), set()
     if path == CREATED_PROJECTS:
         suite = json.loads((root / path).read_text(encoding="utf-8"))
         jobs = {(integration, target, host) for project in suite["projects"].values()

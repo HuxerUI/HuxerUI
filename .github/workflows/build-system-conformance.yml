@@ -45,7 +45,7 @@ on:
       - 'scripts/build_tools.ps1'
       - '.github/workflows/build-system-conformance.yml'
       - '.github/workflows/scripts/conformance_plan.py'
-      # Last, because the later pattern wins: documentation is no input of any checkpoint.
+      - '!cmake/ValidateSdkRelease.cmake'
       - '!**.[mM][dD]'
   pull_request:
     paths:
@@ -65,7 +65,7 @@ on:
       - 'scripts/build_tools.ps1'
       - '.github/workflows/build-system-conformance.yml'
       - '.github/workflows/scripts/conformance_plan.py'
-      # Last, because the later pattern wins: documentation is no input of any checkpoint.
+      - '!cmake/ValidateSdkRelease.cmake'
       - '!**.[mM][dD]'
   workflow_dispatch:
     inputs:
@@ -146,7 +146,7 @@ jobs:
             base=$BEFORE
           fi
           if [ -n "$base" ]; then
-            git diff --name-only "$base" HEAD | tee /dev/stderr \
+            git -c core.quotepath=false diff --no-renames --name-only "$base" HEAD | tee /dev/stderr \
               | python3 -I .github/workflows/scripts/conformance_plan.py --only "$only" >> "$GITHUB_OUTPUT"
           else
             python3 -I .github/workflows/scripts/conformance_plan.py --only "$only" < /dev/null >> "$GITHUB_OUTPUT"

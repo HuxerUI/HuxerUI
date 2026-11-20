@@ -21,7 +21,9 @@ on:
       - 'tools/codegen/**'
       - 'tools/huxerui_cli/**'
       - 'tests/codegen/**'
+      - '!tests/codegen/runtime.cpp'
       - 'tests/cli/**'
+      - '!tests/cli/platform/**'
       # Defines huxerui_add_test_suite, which both of them are built by.
       - 'tests/CMakeLists.txt'
       # Embedded into the CLI by cmrc and asserted on by HuxerUICliTests, so a
@@ -38,7 +40,9 @@ on:
       - 'tools/codegen/**'
       - 'tools/huxerui_cli/**'
       - 'tests/codegen/**'
+      - '!tests/codegen/runtime.cpp'
       - 'tests/cli/**'
+      - '!tests/cli/platform/**'
       # Defines huxerui_add_test_suite, which both of them are built by.
       - 'tests/CMakeLists.txt'
       # Embedded into the CLI by cmrc and asserted on by HuxerUICliTests, so a

@@ -47,8 +47,32 @@ defaults:
     shell: bash
 
 jobs:
+  plan:
+    name: Select mcpp checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      framework: ${{ steps.select.outputs.framework }}
+    steps:
+      - uses: actions/checkout@v5
+        if: github.event_name == 'pull_request'
+        with:
+          fetch-depth: 2
+      - name: Check for changes beyond the CLI
+        id: select
+        run: |
+          framework=true
+          if [ "$GITHUB_EVENT_NAME" = pull_request ] &&
+             git diff --quiet --no-renames HEAD^1 HEAD -- . \
+               ':(exclude)tools/huxerui_cli/**' ':(exclude)tests/cli/**' ':(exclude,icase)*.md'; then
+            framework=false
+          fi
+          echo "framework=$framework" >> "$GITHUB_OUTPUT"
+
   parity:
     name: mcpp/CMake parity
+    needs: plan
+    if: needs.plan.outputs.framework == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -90,6 +114,8 @@ jobs:
 
   linux:
     name: mcpp build (linux x86_64)
+    needs: plan
+    if: needs.plan.outputs.framework == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -231,6 +257,8 @@ jobs:
 
   linux-llvm:
     name: mcpp build (linux x86_64, clang)
+    needs: plan
+    if: needs.plan.outputs.framework == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -303,6 +331,8 @@ jobs:
 
   macos:
     name: mcpp build (macos arm64)
+    needs: plan
+    if: needs.plan.outputs.framework == 'true'
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -365,6 +395,8 @@ jobs:
           echo "package carries headers, the module interface and a library"
   windows:
     name: mcpp build (windows x86_64)
+    needs: plan
+    if: needs.plan.outputs.framework == 'true'
     runs-on: windows-2022
     timeout-minutes: 60
     steps:

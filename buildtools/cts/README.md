@@ -152,7 +152,7 @@ The workflow boots an Android emulator on Linux hosts and runs `launch` after `p
 `.github/workflows/build-system-conformance.yml` runs every checkpoint as its own step for each integration, then compares the integrations.
 Pull requests and pushes to `main` trigger the suite for changes to a build integration, the CLI, the host tool build inputs, the templates, or the suite itself.
 CMake jobs rebuild `hcg` and `hrc` in the CI checkout before creating or building projects. mcpp builds both tools through its own dependency graph. The separate host-tool workflow builds and validates the checked-in binaries. Binary-only writebacks leave CTS runs for source changes in progress.
-Its plan job first runs the suite's own tests (`tests/scripts/cts_test.py`) and then selects, for each changed path, as little as the path can affect, and runs the union:
+Its plan job runs the suite's own tests and then combines the jobs selected by each changed build input. Companion changes outside the trigger paths leave the selection unchanged.
 
 | Changed path | Runs |
 | --- | --- |
@@ -161,7 +161,8 @@ Its plan job first runs the suite's own tests (`tests/scripts/cts_test.py`) and 
 | `buildtools/cts/created-projects.json` | the created projects, where it declares them |
 | A path one integration owns, such as `cmake/**`, `buildtools/mcpp/**`, `mcpp.toml`, or `templates/**` | that integration, every project |
 | A path one target owns, such as `cmake/platform/IOS.cmake` or the target's CLI driver and shell templates | that target, every project |
-| Any other path, such as the rest of the CLI | both integrations on every target, every project |
+| `scripts/build_tools.ps1` or `scripts/build_tools.sh` | CMake on Windows or on Linux and macOS, respectively |
+| A shared build input, such as the rest of the CLI | both integrations on every target, every project |
 | The plan script | nothing beyond its tests |
 
 Each selected target runs on its primary host: the target's own host, or a Linux host for the Web and Android.
