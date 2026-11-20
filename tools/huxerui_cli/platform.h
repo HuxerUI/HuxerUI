@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "mcpp/mcpp.h"
 #include "process_runner.h"
 #include "sdk.h"
 #include "template.h"
@@ -161,6 +162,8 @@ struct PlatformCommandContext {
   BuildSystem build_system = BuildSystem::CMake;
   /// Resolved platform toolchain and SDK overrides for build children.
   ProcessEnvironment environment = {};
+  /// mcpp options shared by the library graph and the shell for one build, when the shell uses mcpp.
+  std::optional<mcpp::CommandOptions> mcpp_options = std::nullopt;
 };
 
 /// One file or directory published by the `package` command.

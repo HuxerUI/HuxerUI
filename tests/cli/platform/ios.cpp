@@ -109,18 +109,27 @@ TEST_CASE("HuxerUICliCreatesIosBuildAndRunCommands") {
   // the shell compiles its entry against that framework.
   auto mcpp_context = context;
   mcpp_context.build_system = huxerui::cli::BuildSystem::Mcpp;
+  mcpp_context.mcpp_options = huxerui::cli::mcpp::CommandOptions{
+      .project_root = project,
+      .platform = "ios",
+      .profile_name = "dev",
+      .features = {"huxerui/profiling"},
+  };
   const auto mcpp_graph = ios->LibraryGraphCommands(mcpp_context);
   REQUIRE(mcpp_graph.size() == 1);
   REQUIRE(mcpp_graph[0].executable == "mcpp");
-  REQUIRE(mcpp_graph[0].arguments == std::vector<std::string>{"build", "--target", "aarch64-ios-sim"});
+  REQUIRE(mcpp_graph[0].arguments ==
+          std::vector<std::string>{"build", "--target", "aarch64-ios-sim", "--features", "huxerui/profiling"});
   REQUIRE_THROWS_WITH(ios->BuildCommands(mcpp_context), Catch::Matchers::ContainsSubstring("framework record"));
   const std::filesystem::path framework = temporary.Path() / "resolved";
   std::filesystem::create_directories(project / ".huxerui/generated");
   std::ofstream(project / ".huxerui/generated/framework.json")
       << "{\n  \"schema\": 1,\n  \"sourceRoot\": \"" << framework.generic_string() << "\"\n}\n";
   const auto mcpp_build = ios->BuildCommands(mcpp_context).front().arguments;
-  REQUIRE(std::ranges::find(mcpp_build, "HUXERUI_HOME=" + framework.string()) != mcpp_build.end());
+  REQUIRE(std::ranges::find(mcpp_build, "HUXERUI_HOME=" + framework.generic_string()) != mcpp_build.end());
   REQUIRE(std::ranges::find(mcpp_build, "HUXERUI_BUILD_SYSTEM=mcpp") != mcpp_build.end());
+  REQUIRE(std::ranges::find(mcpp_build, "HUXERUI_MCPP_PROFILE=dev") != mcpp_build.end());
+  REQUIRE(std::ranges::find(mcpp_build, "HUXERUI_MCPP_FEATURES=huxerui/profiling") != mcpp_build.end());
   REQUIRE(std::ranges::find(mcpp_build, "ARCHS=arm64") != mcpp_build.end());
   auto intel_context = mcpp_context;
   intel_context.abis = {"x86_64"};

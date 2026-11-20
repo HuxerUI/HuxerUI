@@ -136,10 +136,9 @@ TEST_CASE("HuxerUICliDispatchesToTheProjectsBuildSystem") {
   const std::filesystem::path both = temporary.Path() / "both";
 
   // An option that would change the product is invalid usage for an integration that cannot honor it.
-  const std::string_view foreign_abi = huxerui::cli::detail::HostArchitecture() == "arm64" ? "x86_64" : "aarch64";
   for (const std::initializer_list<std::string_view> arguments : {
-           std::initializer_list<std::string_view>{"build", "linux", "--abi", foreign_abi},
-           std::initializer_list<std::string_view>{"build", "linux", "--sdk", "."},
+           std::initializer_list<std::string_view>{"build", "web", "--abi", "wasm32"},
+           std::initializer_list<std::string_view>{"build", "web", "--sdk", "."},
            std::initializer_list<std::string_view>{"run", "android", "--watch", "--no-shell"},
        }) {
     const Invocation invocation = Invoke(modules / "src", arguments);
@@ -154,20 +153,23 @@ TEST_CASE("HuxerUICliDispatchesToTheProjectsBuildSystem") {
   std::ofstream(bare / "mcpp.toml") << "[package]\nname = \"bare\"\nversion = \"0.1.0\"\n\n[dependencies]\n"
                                        "huxerui = { path = \"/nowhere\" }\n";
   std::ofstream(bare / "build.mcpp") << "int main() { return 0; }\n";
-  const Invocation undeclared_profile =
-      Invoke(bare, {"build", "linux", "--config", "release", "--optimization", "size", "--lto", "on"});
-  REQUIRE(undeclared_profile.result == 2);
-  REQUIRE(undeclared_profile.error.find("profile release-size-lto, which mcpp.toml does not declare") !=
-          std::string::npos);
+  for (const Invocation& undeclared_profile : {
+           Invoke(bare, {"build", "linux", "--config", "release", "--optimization", "size", "--lto", "on"}),
+           Invoke(bare, {"package", "linux", "--optimization", "size", "--lto", "on"}),
+       }) {
+    REQUIRE(undeclared_profile.result == 2);
+    REQUIRE(undeclared_profile.error.find("profile release-size-lto, which mcpp.toml does not declare") !=
+            std::string::npos);
+  }
 
   // A root declaring both build systems builds with CMake unless --build-system selects mcpp, and a selection must
   // name a declared one. `--no-shell` tells the two paths apart without building: only the CMake path refuses it.
-  const Invocation defaulted = Invoke(both, {"build", "linux", "--no-shell"});
+  const Invocation defaulted = Invoke(both, {"build", "web", "--no-shell"});
   REQUIRE(defaulted.result == 2);
   REQUIRE(defaulted.error.find("not available for a CMake project") != std::string::npos);
-  const Invocation selected = Invoke(both, {"build", "linux", "--no-shell", "--build-system", "mcpp"});
+  const Invocation selected = Invoke(both, {"build", "web", "--no-shell", "--build-system", "mcpp"});
   REQUIRE(selected.result == 2);
-  REQUIRE(selected.error.find("linux has none") != std::string::npos);
+  REQUIRE(selected.error.find("web has none") != std::string::npos);
   REQUIRE(Invoke(both, {"build", "linux", "--build-system", "meson"}).result == 2);
   const Invocation undeclared = Invoke(modules, {"build", "linux", "--build-system", "cmake"});
   REQUIRE(undeclared.result == 2);
@@ -209,9 +211,6 @@ TEST_CASE("HuxerUICliDispatchesToTheProjectsBuildSystem") {
   const Invocation cmake_shellless = Invoke(linux_only, {"build", "linux", "--build-system", "cmake", "--no-shell"});
   REQUIRE(cmake_shellless.result == 2);
   REQUIRE(cmake_shellless.error.find("not available for a CMake project") != std::string::npos);
-  const Invocation desktop_shellless = Invoke(linux_only, {"build", "linux", "--build-system", "mcpp", "--no-shell"});
-  REQUIRE(desktop_shellless.result == 2);
-  REQUIRE(desktop_shellless.error.find("linux has none") != std::string::npos);
 
   // The Xcode shell builds an mcpp core too, so `open ios` dispatches like `build`: away from macOS it stops at the
   // host check, and an mcpp project takes no --sdk.

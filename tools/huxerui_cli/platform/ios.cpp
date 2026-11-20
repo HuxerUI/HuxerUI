@@ -328,12 +328,6 @@ void UpdateIosLibraryIntegration(const std::filesystem::path& project_root) {
   }
 }
 
-/// The profile and features the mcpp integration builds the core with, resolved from the CLI's options.
-mcpp::CommandOptions IosMcppOptions(const PlatformCommandContext& context) {
-  return mcpp::ResolveOptions(context.project_root, "ios", context.profile, context.optimization, context.lto,
-                              context.profiling);
-}
-
 /// The framework the shell compiles its entry against: the SDK for CMake, or for mcpp the framework the build
 /// resolved, which its build program records.
 std::filesystem::path IosFrameworkHome(const PlatformCommandContext& context) {
@@ -618,7 +612,7 @@ public:
       // core is built before Xcode runs; the shell's own build then finds it current.
       std::vector<std::string> arguments{"build", "--target",
                                          IsIosPhysicalDevice(context) ? "aarch64-ios" : "aarch64-ios-sim"};
-      const std::vector<std::string> profile = mcpp::ProfileArguments(IosMcppOptions(context));
+      const std::vector<std::string> profile = mcpp::ProfileArguments(context.mcpp_options.value());
       arguments.insert(arguments.end(), profile.begin(), profile.end());
       return {{"mcpp", std::move(arguments), context.project_root}};
     }
@@ -675,8 +669,7 @@ public:
       build_arguments.push_back("ARCHS=arm64");
     }
     if (context.build_system == BuildSystem::Mcpp) {
-      // The shell's build phase builds the core with the profile and features the CLI resolved.
-      const mcpp::CommandOptions options = IosMcppOptions(context);
+      const auto& options = context.mcpp_options.value();
       build_arguments.push_back("HUXERUI_MCPP_PROFILE=" + options.profile_name);
       std::string features;
       for (const std::string& feature : options.features) {

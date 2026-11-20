@@ -311,19 +311,28 @@ TEST_CASE("HuxerUICliBuildsTheMcppCoreThroughTheGradleShell") {
   context.profile = "release";
   context.abis = {"x86_64", "arm64-v8a"};
   context.build_system = huxerui::cli::BuildSystem::Mcpp;
+  context.mcpp_options = huxerui::cli::mcpp::CommandOptions{
+      .project_root = context.project_root,
+      .platform = "android",
+      .profile = "release",
+      .profile_name = "release-size",
+      .features = {"huxerui/profiling"},
+  };
 
   // mcpp writes the library graph and the framework record while it builds, so the first ABI is built before
   // Gradle reads them; the shell then builds every ABI and finds that one current.
   const auto graph = huxerui::cli::detail::AndroidLibraryGraphCommands(context, "linux");
   REQUIRE(graph.size() == 1);
   REQUIRE(graph[0].executable == "mcpp");
-  REQUIRE(graph[0].arguments == std::vector<std::string>{"build", "--target", "x86_64-linux-android", "--release"});
+  REQUIRE(graph[0].arguments == std::vector<std::string>{"build", "--target", "x86_64-linux-android", "--profile",
+                                                        "release-size", "--features", "huxerui/profiling"});
   REQUIRE(graph[0].working_directory == context.project_root);
 
   const auto build = huxerui::cli::detail::AndroidBuildCommands(context, "linux", {});
   REQUIRE(build[0].arguments ==
           std::vector<std::string>{"-PhuxeruiAbis=x86_64,arm64-v8a", "-PhuxeruiBuildSystem=mcpp",
-                                   "-PhuxeruiMcppProfile=release", ":app:assembleRelease"});
+                                   "-PhuxeruiMcppProfile=release-size", "-PhuxeruiMcppFeatures=huxerui/profiling",
+                                   ":app:assembleRelease"});
   REQUIRE_THROWS_AS(huxerui::cli::detail::AndroidMcppTriple("armeabi-v7a"), std::invalid_argument);
 }
 
