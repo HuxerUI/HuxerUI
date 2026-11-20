@@ -10,8 +10,8 @@ name: Build System Conformance
 # such as the content of the final resource package. The sequence job builds
 # several targets in one checkout in turn, as a developer on one host does.
 #
-# The suite checks the build systems, not the framework, so the framework's
-# sources start no run. A pull request and a push to main run the jobs and
+# The suite checks the build-system integrations and builds the host tools
+# from this checkout. A pull request and a push to main run the jobs and
 # projects their changed paths can affect, each target on its primary host
 # (.github/workflows/scripts/conformance_plan.py): a conformance project's
 # change runs that project, a path one integration or target owns runs only
@@ -39,7 +39,10 @@ on:
       - 'tools/codegen/**'
       - 'tools/resource_compiler/**'
       - 'tools/huxerui_cli/**'
-      - 'tools/prebuilt/**'
+      - 'src/resources/resource_format.h'
+      - 'src/resources/vector_format.h'
+      - 'scripts/build_tools.sh'
+      - 'scripts/build_tools.ps1'
       - '.github/workflows/build-system-conformance.yml'
       - '.github/workflows/scripts/conformance_plan.py'
       # Last, because the later pattern wins: documentation is no input of any checkpoint.
@@ -56,7 +59,10 @@ on:
       - 'tools/codegen/**'
       - 'tools/resource_compiler/**'
       - 'tools/huxerui_cli/**'
-      - 'tools/prebuilt/**'
+      - 'src/resources/resource_format.h'
+      - 'src/resources/vector_format.h'
+      - 'scripts/build_tools.sh'
+      - 'scripts/build_tools.ps1'
       - '.github/workflows/build-system-conformance.yml'
       - '.github/workflows/scripts/conformance_plan.py'
       # Last, because the later pattern wins: documentation is no input of any checkpoint.
@@ -325,6 +331,15 @@ jobs:
             -gpu swiftshader_indirect > "$RUNNER_TEMP/emulator.log" 2>&1 &
           echo $! > "$RUNNER_TEMP/emulator.pid"
 
+      - name: Build the CMake host tools
+        if: matrix.integration == 'cmake'
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then
+            pwsh -NoProfile -File scripts/build_tools.ps1
+          else
+            sh scripts/build_tools.sh
+          fi
+
       # The package checkpoints run `huxerui package` as a developer does, so the suite builds the CLI.
       - name: Build the HuxerUI CLI
         run: |
@@ -538,6 +553,10 @@ jobs:
         with:
           version: ${{ env.MCPP_VERSION }}
 
+      - name: Build the CMake host tools
+        if: matrix.integration == 'cmake'
+        run: sh scripts/build_tools.sh
+
       - name: Build the HuxerUI CLI
         run: |
           cmake -S tools/huxerui_cli -B "$RUNNER_TEMP/cli" -DCMAKE_BUILD_TYPE=Release
@@ -673,6 +692,10 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+
+      - name: Build the CMake host tools
+        if: matrix.integration == 'cmake'
+        run: sh scripts/build_tools.sh
 
       # The package checkpoints run `huxerui package` as a developer does, so the suite builds the CLI.
       - name: Build the HuxerUI CLI

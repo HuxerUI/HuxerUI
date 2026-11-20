@@ -80,7 +80,7 @@ class IntegrationTests(unittest.TestCase):
 
     def test_shared_tools_select_every_integration_whatever_their_name(self):
         for path in ("tools/huxerui_cli/cli.cpp", "tools/huxerui_cli/CMakeLists.txt", "tools/codegen/transform.cpp",
-                     "include/huxerui/view.h"):
+                     "src/resources/resource_format.h", "scripts/build_tools.sh", "include/huxerui/view.h"):
             with self.subTest(path=path):
                 self.assertEqual(every([path]), primary("cmake", "mcpp"))
 
@@ -109,11 +109,11 @@ class TargetTests(unittest.TestCase):
         self.assertEqual(outputs["compare_macos"], "true")
         self.assertEqual(outputs["run_sequence"], "false")
 
-    def test_host_tools_run_the_rows_of_their_host(self):
-        self.assertEqual(every(["tools/prebuilt/windows/x86_64/hcg.exe"]),
-                         ["cmake/android@windows", "cmake/web@windows", "cmake/windows@windows",
-                          "mcpp/android@windows", "mcpp/web@windows", "mcpp/windows@windows"])
-        self.assertEqual(every(["tools/prebuilt/android/aarch64/hcg"]), [])
+    def test_prebuilt_host_tools_do_not_select_additional_checks(self):
+        prebuilts = ["tools/prebuilt/windows/x86_64/hcg.exe", "tools/prebuilt/linux/x86_64/hrc"]
+        paths = ["buildtools/cts/projects/app_minimal/platform/android/AndroidManifest.xml"]
+        self.assertEqual(every(prebuilts), [])
+        self.assertEqual(plan.outputs(paths + prebuilts), plan.outputs(paths))
 
 
 class ProjectTests(unittest.TestCase):

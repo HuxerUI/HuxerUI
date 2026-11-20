@@ -150,7 +150,8 @@ The `build`, `linkage`, and `resources` checks of Android and iOS stop at the ap
 The workflow boots an Android emulator on Linux hosts and runs `launch` after `package` on every row.
 
 `.github/workflows/build-system-conformance.yml` runs every checkpoint as its own step for each integration, then compares the integrations.
-The suite checks the build systems rather than the framework, and a run takes hours, so pull requests and pushes to `main` start it only for a build system, the CLI and the tools it runs, the templates, or the suite; framework sources and Markdown start nothing.
+Pull requests and pushes to `main` trigger the suite for changes to a build integration, the CLI, the host tool build inputs, the templates, or the suite itself.
+CMake jobs rebuild `hcg` and `hrc` in the CI checkout before creating or building projects. mcpp builds both tools through its own dependency graph. The separate host-tool workflow builds and validates the checked-in binaries. Binary-only writebacks leave CTS runs for source changes in progress.
 Its plan job first runs the suite's own tests (`tests/scripts/cts_test.py`) and then selects, for each changed path, as little as the path can affect, and runs the union:
 
 | Changed path | Runs |
@@ -160,7 +161,6 @@ Its plan job first runs the suite's own tests (`tests/scripts/cts_test.py`) and 
 | `buildtools/cts/created-projects.json` | the created projects, where it declares them |
 | A path one integration owns, such as `cmake/**`, `buildtools/mcpp/**`, `mcpp.toml`, or `templates/**` | that integration, every project |
 | A path one target owns, such as `cmake/platform/IOS.cmake` or the target's CLI driver and shell templates | that target, every project |
-| `tools/prebuilt/<host>/**` | the rows of that host |
 | Any other path, such as the rest of the CLI | both integrations on every target, every project |
 | The plan script | nothing beyond its tests |
 

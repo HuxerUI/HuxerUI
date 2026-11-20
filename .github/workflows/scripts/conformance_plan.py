@@ -14,7 +14,7 @@ confined to; a change runs the union.
 - This plan selects nothing; the plan job tests it before it selects.
 - A conformance project's path selects that project, and the project its `sameModelAs` relates it to, on the target
   the path belongs to, or on every target. created-projects.json selects the created projects where it declares them.
-- Host tools below `tools/prebuilt/<host>/` select the rows of that host.
+- Prebuilt host tool writebacks select nothing. Each integration builds the tools from the checkout.
 - Any other path selects the integration that owns it, or every integration, on the target that owns it, or on every
   target.
 
@@ -76,7 +76,6 @@ PLAN = (".github/workflows/scripts/conformance_plan.py",)
 
 PROJECTS = "buildtools/cts/projects/"
 CREATED_PROJECTS = "buildtools/cts/created-projects.json"
-HOST_TOOLS = "tools/prebuilt/"
 
 # Paths below these prefixes are inputs of every integration even where a file name below says otherwise:
 # the CLI's own CMakeLists.txt builds the tool both integrations are driven through.
@@ -153,7 +152,7 @@ def related_projects(name, root):
 
 def impact(path, root=REPOSITORY):
     """The jobs a changed path can affect, as (integration, target, host) keys, and the projects it is confined to."""
-    if path in PLAN:
+    if path in PLAN or path.startswith("tools/prebuilt/"):
         return set(), set()
     if path in SUITE:
         return every_job(), EVERY_PROJECT
@@ -163,9 +162,6 @@ def impact(path, root=REPOSITORY):
                 for integration in project["build-systems"]
                 for target, hosts in suite["hosts"].items() for host in hosts}
         return jobs, set(suite["projects"])
-    if path.startswith(HOST_TOOLS):
-        host = PurePosixPath(path).parts[2] if len(PurePosixPath(path).parts) > 3 else ""
-        return {job for job in every_job() if job[2] == host}, EVERY_PROJECT
     integrations = [owner(path)] if owner(path) else INTEGRATIONS
     targets = [target_owner(path)] if target_owner(path) else TARGETS
     jobs = {(integration, target, primary_host(target)) for integration in integrations for target in targets}
