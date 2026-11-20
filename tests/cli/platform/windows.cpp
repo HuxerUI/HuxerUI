@@ -37,6 +37,9 @@ TEST_CASE("HuxerUICliCreatesWindowsPlatformShell") {
   REQUIRE(installer_app.find("InstallerPromptChoice::TryAgain") != std::string::npos);
   REQUIRE(installer_app.find("\"Ready to install\"") == std::string::npos);
   REQUIRE(installer_app.find("TextFieldVariant::Outlined") != std::string::npos);
+  REQUIRE(installer_app.find("WindowChromeMode::Custom") != std::string::npos);
+  REQUIRE(installer_app.find("WindowTitleBar") != std::string::npos);
+  REQUIRE(installer_app.find("WindowDragRegion") != std::string::npos);
   const std::string default_installer_strings = Read(installer_strings / "default.properties");
   REQUIRE(default_installer_strings.find("ready_to_install = Ready to install") != std::string::npos);
   REQUIRE(default_installer_strings.find("application_setup = APPLICATION SETUP") != std::string::npos);
