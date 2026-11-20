@@ -83,10 +83,7 @@ inline Invocation Invoke(const std::filesystem::path& directory, std::initialize
   return {result, output.str(), error.str()};
 }
 
-inline std::string Read(const std::filesystem::path& path) {
-  std::ifstream stream(path, std::ios::binary);
-  REQUIRE(stream);
-  std::string content{std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+inline std::string NormalizeLineEndings(std::string content) {
   std::erase(content, '\r');
   return content;
 }
@@ -95,6 +92,10 @@ inline std::string ReadBinary(const std::filesystem::path& path) {
   std::ifstream stream(path, std::ios::binary);
   REQUIRE(stream);
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
+}
+
+inline std::string Read(const std::filesystem::path& path) {
+  return NormalizeLineEndings(ReadBinary(path));
 }
 
 inline std::vector<std::string> ExpectedLibraryGraphArguments(const huxerui::cli::PlatformCommandContext& context) {

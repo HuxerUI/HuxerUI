@@ -432,8 +432,10 @@ TEST_CASE("HuxerUICliPackageTemplatesCarryTheShellEntries") {
     REQUIRE(file != files.end());
     return file->content;
   };
-  const std::string entry = find(huxerui::cli::RenderTemplateTree("platform/desktop/app_modules", context), "main.cpp");
-  const std::string ios = find(huxerui::cli::RenderTemplateTree("platform/ios/app", context), "App/main.mm");
+  const std::string entry = NormalizeLineEndings(
+      find(huxerui::cli::RenderTemplateTree("platform/desktop/app_modules", context), "main.cpp"));
+  const std::string ios = NormalizeLineEndings(
+      find(huxerui::cli::RenderTemplateTree("platform/ios/app", context), "App/main.mm"));
   const auto macos = huxerui::cli::RenderTemplateTree("platform/macos/app", context);
   for (const std::string_view name : {"app", "navigation"}) {
     const std::filesystem::path root = std::filesystem::path(HUXERUI_TEST_SOURCE_DIRECTORY) / "templates" / name;
@@ -442,7 +444,7 @@ TEST_CASE("HuxerUICliPackageTemplatesCarryTheShellEntries") {
       REQUIRE(Read(root / "platform" / id / "main.cpp") == entry);
     }
     REQUIRE(Read(root / "platform/ios/App/main.mm") == ios);
-    REQUIRE(Read(root / "platform/macos/Info.plist.in.in") == find(macos, "Info.plist.in"));
+    REQUIRE(Read(root / "platform/macos/Info.plist.in.in") == NormalizeLineEndings(find(macos, "Info.plist.in")));
     REQUIRE(ReadBinary(root / "platform/macos/AppIcon.icns") == find(macos, "AppIcon.icns"));
   }
 }

@@ -543,15 +543,20 @@ std::vector<GeneratedFile> ModulesPreviewProjectFiles(const LibraryTemplateConte
       McppApplicationDeclaration(context, huxerui_home, library.project.project_name + " = { path = \"../..\" }\n");
   // `import std;` on iOS needs a C++ standard library built for the application, as in `templates/app`.
   std::string& manifest = FindGeneratedFile(declaration, "mcpp.toml", "project/mcpp_app").content;
-  const std::string ios_dependencies = "[target.'cfg(os = \"ios\")'.dependencies]\n";
+  const std::string_view ios_dependencies = "[target.'cfg(os = \"ios\")'.dependencies]";
   const std::size_t table = manifest.find(ios_dependencies);
-  if (table == std::string::npos) {
+  const std::size_t table_end = manifest.find('\n', table);
+  if (table_end == std::string::npos) {
     throw std::logic_error("project/mcpp_app declares no iOS dependency table");
   }
-  manifest.insert(table + ios_dependencies.size(),
-                  "# `import std;` on iOS needs a C++ standard library built for this application: the module is "
-                  "made from the\n# toolchain's libc++ headers, and the libc++ in the iOS SDK does not carry every "
-                  "symbol those headers name.\nllvm.libcxx = \"22.1.8.3\"\n");
+  std::string libcxx =
+      "# `import std;` on iOS needs a C++ standard library built for this application: the module is "
+      "made from the\n# toolchain's libc++ headers, and the libc++ in the iOS SDK does not carry every "
+      "symbol those headers name.\nllvm.libcxx = \"22.1.8.3\"\n";
+  if (manifest[table_end - 1] == '\r') {
+    ReplaceAll(libcxx, "\n", "\r\n");
+  }
+  manifest.insert(table_end + 1, libcxx);
   files.insert(files.end(), std::make_move_iterator(declaration.begin()),
                std::make_move_iterator(declaration.end()));
   FindGeneratedFile(files, ".gitignore", "project/modules_library_preview").content += "\n/target/\n/.mcpp/\n";
