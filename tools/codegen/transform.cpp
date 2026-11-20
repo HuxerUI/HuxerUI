@@ -151,20 +151,27 @@ struct FunctionBody {
   return offset < source.size() && source[offset] == '#';
 }
 
-[[nodiscard]] std::size_t SkipPreprocessorDirective(std::string_view source, std::size_t offset) noexcept {
-  while (offset < source.size()) {
-    const std::size_t line_end = source.find('\n', offset);
-    if (line_end == std::string_view::npos) {
-      return source.size();
+[[nodiscard]] std::size_t SkipPreprocessorDirective(std::string_view source, std::size_t offset) {
+  bool in_line_comment = false;
+  for (std::size_t cursor = offset; cursor < source.size();) {
+    if (!in_line_comment) {
+      if (const auto end = SkipNonCode(source, cursor)) {
+        in_line_comment = StartsWith(source, cursor, "//");
+        cursor = *end;
+        continue;
+      }
     }
-    std::size_t last = line_end;
-    while (last > offset && (source[last - 1] == ' ' || source[last - 1] == '\t' || source[last - 1] == '\r')) {
-      --last;
+    if (source[cursor] == '\n') {
+      std::size_t last = cursor;
+      while (last > offset && (source[last - 1] == ' ' || source[last - 1] == '\t' || source[last - 1] == '\r')) {
+        --last;
+      }
+      if (last == offset || source[last - 1] != '\\') {
+        return cursor;
+      }
+      offset = cursor + 1;
     }
-    if (last == offset || source[last - 1] != '\\') {
-      return line_end;
-    }
-    offset = line_end + 1;
+    ++cursor;
   }
   return source.size();
 }
@@ -272,31 +279,22 @@ FindFunctionBody(std::string_view source, std::size_t parameter_end, std::string
   return offset > body.opening_brace && offset < body.closing_brace;
 }
 
-[[nodiscard]] bool IsConditionalDirective(std::string_view source, std::size_t offset) noexcept {
-  if (source[offset] != '#') {
-    return false;
-  }
-
-  std::size_t line_begin = offset;
-  while (line_begin > 0 && source[line_begin - 1] != '\n') {
-    --line_begin;
-  }
-  for (std::size_t cursor = line_begin; cursor < offset; ++cursor) {
-    if (source[cursor] != ' ' && source[cursor] != '\t') {
-      return false;
-    }
-  }
-
+[[nodiscard]] std::string_view PreprocessorDirectiveName(std::string_view source, std::size_t offset) {
   std::size_t cursor = offset + 1;
-  while (cursor < source.size() && (source[cursor] == ' ' || source[cursor] == '\t')) {
-    ++cursor;
+  while (cursor < source.size()) {
+    if (StartsWith(source, cursor, "/*")) {
+      cursor = SkipBlockComment(source, cursor);
+    } else if (source[cursor] != '\n' && std::isspace(static_cast<unsigned char>(source[cursor]))) {
+      ++cursor;
+    } else {
+      break;
+    }
   }
   const std::size_t name_begin = cursor;
   while (cursor < source.size() && IsIdentifierCharacter(source[cursor])) {
     ++cursor;
   }
-  const std::string_view name = source.substr(name_begin, cursor - name_begin);
-  return name == "if" || name == "ifdef" || name == "ifndef" || name == "elif" || name == "else" || name == "endif";
+  return source.substr(name_begin, cursor - name_begin);
 }
 
 [[nodiscard]] std::size_t FindOpeningBrace(std::string_view source, std::size_t marker_offset) {
@@ -340,13 +338,17 @@ FindFunctionBody(std::string_view source, std::size_t parameter_end, std::string
   throw TransformError(marker_offset, "composable marker has no function body");
 }
 
-[[nodiscard]] std::size_t
-FindClosingBrace(std::string_view source, std::size_t marker_offset, std::size_t opening_brace) {
+[[nodiscard]] std::size_t FindClosingBrace(std::string_view source, std::size_t marker_offset,
+                                           std::size_t opening_brace) {
   std::size_t cursor = opening_brace + 1;
   std::size_t depth = 1;
+  bool at_line_start = false;
+  std::vector<std::size_t> conditional_depths;
 
   while (cursor < source.size()) {
     if (const auto end = SkipNonCode(source, cursor)) {
+      // A block comment counts as whitespace even when it spans source lines.
+      at_line_start = at_line_start && StartsWith(source, cursor, "/*");
       cursor = *end;
       continue;
     }
@@ -357,18 +359,39 @@ FindClosingBrace(std::string_view source, std::size_t marker_offset, std::size_t
     if (StartsWith(source, cursor, kScopeBegin)) {
       throw TransformError(cursor, "composable function already contains an explicit HuxerUI scope");
     }
-    if (IsConditionalDirective(source, cursor)) {
-      throw TransformError(cursor, "conditional compilation inside a composable function is not supported");
+    if (at_line_start && source[cursor] == '#') {
+      const auto name = PreprocessorDirectiveName(source, cursor);
+      if (name == "if" || name == "ifdef" || name == "ifndef") {
+        conditional_depths.push_back(depth);
+      } else if (name == "elif" || name == "elifdef" || name == "elifndef" || name == "else" || name == "endif") {
+        if (conditional_depths.empty()) {
+          throw TransformError(cursor, "conditional directives must stay within the composable function body");
+        }
+        if (depth != conditional_depths.back()) {
+          throw TransformError(cursor, "each preprocessor branch in a composable function must balance its braces");
+        }
+        if (name == "endif") {
+          conditional_depths.pop_back();
+        }
+      }
+      cursor = SkipPreprocessorDirective(source, cursor);
+      at_line_start = false;
+      continue;
     }
 
     if (source[cursor] == '{') {
       ++depth;
     } else if (source[cursor] == '}') {
+      if (!conditional_depths.empty() && depth == conditional_depths.back()) {
+        throw TransformError(cursor, "a preprocessor branch cannot close a brace opened before its conditional");
+      }
       --depth;
       if (depth == 0) {
         return cursor;
       }
     }
+    at_line_start = source[cursor] == '\n' ||
+                    (at_line_start && std::isspace(static_cast<unsigned char>(source[cursor])));
     ++cursor;
   }
 

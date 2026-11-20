@@ -116,17 +116,59 @@ TEST_CASE("Explicit scope boundaries are rejected") {
                     TransformError);
 }
 
-TEST_CASE("Conditional compilation inside scopes is rejected") {
-  REQUIRE_THROWS_AS(TransformSource("[[huxerui::composable]]\n"
-                                    "View Counter() {\n"
-                                    "#if ENABLE_COUNTER\n"
-                                    "  return Text(\"counter\");\n"
-                                    "#else\n"
-                                    "  return View{};\n"
-                                    "#endif\n"
-                                    "}\n",
-                                    "conditional.cpp"),
-                    TransformError);
+TEST_CASE("Composable branches with balanced braces are preserved") {
+  const std::string branches = R"source(/* Optional counter */ #if defined(ENABLE_COUNTER) && \
+    ENABLE_COUNTER /* Debug counter
+} */
+# /* Visibility */ ifndef HIDE_COUNTER
+  return Column { Text(UseState(0)) };
+#else
+  return View{};
+#endif
+#elif defined(ENABLE_FALLBACK)
+  return Text("fallback");
+#else
+  return View{};
+#endif
+)source";
+  const auto result = TransformSource("[[huxerui::composable]] View Counter() {\n" + branches + "}\n",
+                                      "conditional.cpp");
+
+  REQUIRE(result.composable_count == 1);
+  const auto scope_open = result.source.find(kScopeOpenText);
+  const auto branches_begin = result.source.find(branches);
+  const auto scope_close = result.source.find(kScopeCloseText);
+  REQUIRE(scope_close != std::string::npos);
+  REQUIRE(scope_open < branches_begin);
+  REQUIRE(branches_begin < scope_close);
+}
+
+TEST_CASE("Composable branches cannot share braces") {
+  const std::string source = R"source([[huxerui::composable]] View Counter() {
+#if ENABLE_COUNTER
+  {
+#else
+  }
+#endif
+  return View{};
+}
+)source";
+  REQUIRE_THROWS_WITH(TransformSource(source, "conditional.cpp"),
+                      "each preprocessor branch in a composable function must balance its braces");
+}
+
+TEST_CASE("Composable branches cannot close braces from outside their conditional") {
+  const std::string source = R"source([[huxerui::composable]] View Counter() {
+  {
+#ifdef ENABLE_COUNTER
+  } {
+#endif
+    return View{};
+  }
+}
+)source";
+  REQUIRE_THROWS_WITH(TransformSource(source, "conditional.cpp"),
+                      "a preprocessor branch cannot close a brace opened before its conditional");
 }
 
 TEST_CASE("Unmarked composition calls are rejected") {
