@@ -5,12 +5,10 @@
 
 #include <algorithm>
 #include <array>
-#include <cerrno>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -22,14 +20,10 @@
 #include <utility>
 #include <vector>
 
-#include <signal.h>
-#include <sys/wait.h>
-#include <unistd.h>
-
 #include "application/system_tray_internal.h"
 #include "image_test_support.h"
 #include "linux_system_tray.h"
-#include "macros_internal.h"
+#include "private_session_bus.h"
 
 namespace huxerui::test {
 namespace {
@@ -52,64 +46,6 @@ constexpr const char* watcher_xml = R"xml(
   </interface>
 </node>
 )xml";
-
-std::vector<std::byte> MakeSolidPng(
-    std::uint32_t width,
-    std::uint32_t height,
-    std::uint8_t r,
-    std::uint8_t g,
-    std::uint8_t b,
-    std::uint8_t a
-) {
-  std::vector<std::byte> scanlines;
-  scanlines.reserve(static_cast<std::size_t>(height) * (static_cast<std::size_t>(width) * 4U + 1U));
-  for (std::uint32_t y = 0; y < height; ++y) {
-    scanlines.push_back(std::byte{0});
-    for (std::uint32_t x = 0; x < width; ++x) {
-      scanlines.push_back(static_cast<std::byte>(r));
-      scanlines.push_back(static_cast<std::byte>(g));
-      scanlines.push_back(static_cast<std::byte>(b));
-      scanlines.push_back(static_cast<std::byte>(a));
-    }
-  }
-
-  std::vector<std::byte> compressed{std::byte{0x78}, std::byte{0x01}};
-  const std::size_t block_size = scanlines.size();
-  compressed.push_back(std::byte{0x01});
-  compressed.push_back(static_cast<std::byte>(block_size));
-  compressed.push_back(static_cast<std::byte>(block_size >> 8U));
-  const auto complement = static_cast<std::uint16_t>(~block_size);
-  compressed.push_back(static_cast<std::byte>(complement));
-  compressed.push_back(static_cast<std::byte>(complement >> 8U));
-  compressed.insert(compressed.end(), scanlines.begin(), scanlines.end());
-  std::uint32_t adler_a = 1;
-  std::uint32_t adler_b = 0;
-  for (std::byte byte : scanlines) {
-    adler_a = (adler_a + std::to_integer<std::uint8_t>(byte)) % 65521U;
-    adler_b = (adler_b + adler_a) % 65521U;
-  }
-  AppendBigEndian32(compressed, (adler_b << 16U) | adler_a);
-
-  std::vector<std::byte> result{
-      std::byte{0x89}, std::byte{'P'}, std::byte{'N'}, std::byte{'G'},
-      std::byte{0x0D}, std::byte{0x0A}, std::byte{0x1A}, std::byte{0x0A},
-  };
-  std::array<std::byte, 13> header{};
-  header[0] = static_cast<std::byte>(width >> 24U);
-  header[1] = static_cast<std::byte>(width >> 16U);
-  header[2] = static_cast<std::byte>(width >> 8U);
-  header[3] = static_cast<std::byte>(width);
-  header[4] = static_cast<std::byte>(height >> 24U);
-  header[5] = static_cast<std::byte>(height >> 16U);
-  header[6] = static_cast<std::byte>(height >> 8U);
-  header[7] = static_cast<std::byte>(height);
-  header[8] = std::byte{8};
-  header[9] = std::byte{6};
-  AppendPngChunk(result, "IHDR", header);
-  AppendPngChunk(result, "IDAT", compressed);
-  AppendPngChunk(result, "IEND", std::span<const std::byte>{});
-  return result;
-}
 
 template <class Predicate>
 bool PumpMainContextUntil(Predicate&& predicate, std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
@@ -137,114 +73,6 @@ bool PumpMainContextUntil(Predicate&& predicate, std::chrono::milliseconds timeo
   }
   return true;
 }
-
-class PrivateSessionBus final {
-public:
-  PrivateSessionBus() {
-    constexpr const char* config = R"xml(<busconfig>
-  <type>session</type>
-  <listen>unix:tmpdir=/tmp</listen>
-  <policy context="default">
-    <allow send_destination="*" eavesdrop="true"/>
-    <allow eavesdrop="true"/>
-    <allow own="*"/>
-  </policy>
-</busconfig>
-)xml";
-    GError* error = nullptr;
-    gchar* config_path = nullptr;
-    const gint descriptor = g_file_open_tmp("huxerui-tray-bus-XXXXXX", &config_path, &error);
-    if (descriptor < 0) {
-      const std::string message =
-          error != nullptr && error->message != nullptr ? error->message : "Failed to create bus configuration";
-      g_clear_error(&error);
-      throw std::runtime_error(message);
-    }
-    close(descriptor);
-    if (!g_file_set_contents(config_path, config, -1, &error)) {
-      const std::string message =
-          error != nullptr && error->message != nullptr ? error->message : "Failed to write bus configuration";
-      g_clear_error(&error);
-      unlink(config_path);
-      g_free(config_path);
-      throw std::runtime_error(message);
-    }
-
-    const char* daemon = g_getenv("G_TEST_DBUS_DAEMON");
-    const std::string config_argument = "--config-file=" + std::string(config_path);
-    gchar* arguments[] = {
-        const_cast<gchar*>(daemon != nullptr ? daemon : "dbus-daemon"),
-        const_cast<gchar*>("--nofork"),
-        const_cast<gchar*>("--nopidfile"),
-        const_cast<gchar*>("--print-address=1"),
-        const_cast<gchar*>(config_argument.c_str()),
-        nullptr,
-    };
-    gint output = -1;
-    const auto flags = static_cast<GSpawnFlags>(
-        G_SPAWN_SEARCH_PATH | G_SPAWN_DO_NOT_REAP_CHILD | G_SPAWN_STDERR_TO_DEV_NULL
-    );
-    const gboolean spawned = g_spawn_async_with_pipes(
-        nullptr, arguments, nullptr, flags, nullptr, nullptr, &pid_, nullptr, &output, nullptr, &error
-    );
-    if (!spawned) {
-      const std::string message =
-          error != nullptr && error->message != nullptr ? error->message : "Failed to start dbus-daemon";
-      g_clear_error(&error);
-      unlink(config_path);
-      g_free(config_path);
-      throw std::runtime_error(message);
-    }
-
-    std::array<char, 4096> buffer{};
-    while (address_.find('\n') == std::string::npos) {
-      const ssize_t count = read(output, buffer.data(), buffer.size());
-      if (count > 0) {
-        address_.append(buffer.data(), static_cast<std::size_t>(count));
-        continue;
-      }
-      if (count < 0 && errno == EINTR) {
-        continue;
-      }
-      close(output);
-      Stop();
-      unlink(config_path);
-      g_free(config_path);
-      throw std::runtime_error("Private dbus-daemon did not report an address");
-    }
-    close(output);
-    address_.resize(address_.find('\n'));
-    unlink(config_path);
-    g_free(config_path);
-  }
-
-  ~PrivateSessionBus() {
-    Stop();
-  }
-
-  PrivateSessionBus(const PrivateSessionBus&) = delete;
-  PrivateSessionBus& operator=(const PrivateSessionBus&) = delete;
-
-  [[nodiscard]] const std::string& Address() const noexcept {
-    return address_;
-  }
-
-private:
-  void Stop() noexcept {
-    if (pid_ == 0) {
-      return;
-    }
-    HUXERUI_DISCARD(kill(pid_, SIGTERM));
-    int status = 0;
-    while (waitpid(pid_, &status, 0) < 0 && errno == EINTR) {
-    }
-    g_spawn_close_pid(pid_);
-    pid_ = 0;
-  }
-
-  GPid pid_ = 0;
-  std::string address_;
-};
 
 struct RegisteredItem {
   std::string sender;
@@ -606,8 +434,8 @@ public:
     property_signals_.clear();
   }
 
-  void SyncSignals() {
-    GVariant* reply = Call(item_path, "org.freedesktop.DBus.Peer", "Ping", nullptr);
+  void SyncSignals(std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
+    GVariant* reply = Call(item_path, "org.freedesktop.DBus.Peer", "Ping", nullptr, timeout);
     if (reply != nullptr) {
       g_variant_unref(reply);
     }
@@ -727,13 +555,15 @@ public:
   }
 
 private:
-  GVariant* Call(const char* path, const char* interface_name, const char* method, GVariant* parameters) {
+  GVariant* Call(const char* path, const char* interface_name, const char* method, GVariant* parameters,
+                 std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
     struct CallState {
       bool done = false;
-      GVariant* reply = nullptr;
-      std::string error_message;
+      std::unique_ptr<GVariant, decltype(&g_variant_unref)> reply{nullptr, g_variant_unref};
+      std::unique_ptr<GError, decltype(&g_error_free)> error{nullptr, g_error_free};
     };
-    CallState state;
+    const auto state = std::make_shared<CallState>();
+    const std::unique_ptr<GCancellable, decltype(&g_object_unref)> cancellation(g_cancellable_new(), g_object_unref);
     g_dbus_connection_call(
         connection_,
         target_bus_name_.c_str(),
@@ -744,24 +574,27 @@ private:
         nullptr,
         G_DBUS_CALL_FLAGS_NONE,
         5000,
-        nullptr,
+        cancellation.get(),
         [](GObject* source, GAsyncResult* result, gpointer data) {
-          auto* call_state = static_cast<CallState*>(data);
+          const std::unique_ptr<std::shared_ptr<CallState>> callback_state(
+              static_cast<std::shared_ptr<CallState>*>(data));
+          auto& call = **callback_state;
           GError* error = nullptr;
-          call_state->reply = g_dbus_connection_call_finish(G_DBUS_CONNECTION(source), result, &error);
-          if (error != nullptr) {
-            call_state->error_message = error->message != nullptr ? error->message : "D-Bus call failed";
-            g_error_free(error);
-          }
-          call_state->done = true;
+          call.reply.reset(g_dbus_connection_call_finish(G_DBUS_CONNECTION(source), result, &error));
+          call.error.reset(error);
+          call.done = true;
         },
-        &state
+        new std::shared_ptr<CallState>(state)
     );
-    REQUIRE(PumpMainContextUntil([&] { return state.done; }));
-    if (!state.error_message.empty()) {
-      throw std::runtime_error(state.error_message);
+    if (!PumpMainContextUntil([&] { return state->done; }, timeout)) {
+      // Cancellation completes through the same callback, which may run after this wait returns.
+      g_cancellable_cancel(cancellation.get());
+      throw std::runtime_error(std::string("Timed out waiting for D-Bus method ") + method);
     }
-    return state.reply;
+    if (state->error) {
+      throw std::runtime_error(state->error->message);
+    }
+    return state->reply.release();
   }
 
   static void OnSignal(
@@ -911,7 +744,9 @@ TEST_CASE("Linux system tray registers icon, layout, and depth-aware dirty state
   REQUIRE(events[0].available);
 
   HostTrayClient client(bus.Address(), registered.sender);
-  const ImageAsset icon = ImageAsset::FromEncoded(MakeSolidPng(1, 1, 0x11, 0x22, 0x33, 0x80));
+  REQUIRE_THROWS_WITH(client.SyncSignals(std::chrono::milliseconds(0)), "Timed out waiting for D-Bus method Ping");
+  client.SyncSignals();
+  const ImageAsset icon = ImageAsset::FromEncoded(MakeTestPng(1, 1, {0x11, 0x22, 0x33, 0x80}));
   transport.Show({
       .icon = icon,
       .tooltip = "Tray title",
@@ -966,10 +801,10 @@ TEST_CASE(
   const RegisteredItem registered = watcher.WaitForRegistration();
   HostTrayClient client(bus.Address(), registered.sender);
 
-  const ImageAsset main_icon_a = ImageAsset::FromEncoded(MakeSolidPng(1, 1, 0x10, 0x20, 0x30, 0xFF));
-  const ImageAsset main_icon_b = ImageAsset::FromEncoded(MakeSolidPng(1, 1, 0x40, 0x50, 0x60, 0xFF));
-  const ImageAsset item_icon_a = ImageAsset::FromEncoded(MakeSolidPng(1, 1, 0xAA, 0x00, 0x00, 0xFF));
-  const ImageAsset item_icon_b = ImageAsset::FromEncoded(MakeSolidPng(1, 1, 0x00, 0xBB, 0x00, 0xFF));
+  const ImageAsset main_icon_a = ImageAsset::FromEncoded(MakeTestPng(1, 1, {0x10, 0x20, 0x30, 0xFF}));
+  const ImageAsset main_icon_b = ImageAsset::FromEncoded(MakeTestPng(1, 1, {0x40, 0x50, 0x60, 0xFF}));
+  const ImageAsset item_icon_a = ImageAsset::FromEncoded(MakeTestPng(1, 1, {0xAA, 0x00, 0x00, 0xFF}));
+  const ImageAsset item_icon_b = ImageAsset::FromEncoded(MakeTestPng(1, 1, {0x00, 0xBB, 0x00, 0xFF}));
 
   transport.Show({
       .icon = main_icon_a,
@@ -1093,7 +928,7 @@ TEST_CASE(
   REQUIRE(PumpMainContextUntil([&] { return transport.IsAvailable(); }));
   const RegisteredItem registered = watcher.WaitForRegistration();
   HostTrayClient client(bus.Address(), registered.sender);
-  const ImageAsset icon = ImageAsset::FromEncoded(MakeSolidPng(1, 1, 0x01, 0x02, 0x03, 0xFF));
+  const ImageAsset icon = ImageAsset::FromEncoded(MakeTestPng(1, 1, {0x01, 0x02, 0x03, 0xFF}));
 
   transport.Show({
       .icon = icon,
@@ -1207,7 +1042,7 @@ TEST_CASE("Linux system tray handles empty menu transitions, hide, and clean shu
   REQUIRE(PumpMainContextUntil([&] { return transport.IsAvailable(); }));
   const RegisteredItem registered = watcher.WaitForRegistration();
   HostTrayClient client(bus.Address(), registered.sender);
-  const ImageAsset icon = ImageAsset::FromEncoded(MakeSolidPng(1, 1, 0x05, 0x06, 0x07, 0xFF));
+  const ImageAsset icon = ImageAsset::FromEncoded(MakeTestPng(1, 1, {0x05, 0x06, 0x07, 0xFF}));
 
   transport.Show({
       .icon = icon,
@@ -1250,6 +1085,7 @@ TEST_CASE("Linux system tray handles empty menu transitions, hide, and clean shu
 
   client.SyncSignals();
   client.ClearSignals();
+  transport.Hide();
   transport.Hide();
   client.SyncSignals();
 

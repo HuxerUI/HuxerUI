@@ -14,7 +14,6 @@
 #include <string>
 #include <string_view>
 #include <tuple>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -161,6 +160,7 @@ struct LinuxSystemTrayTransport::Impl {
     int id = 0;
     ResolvedSystemTrayMenuEntry entry;
     std::vector<MenuNode> children;
+    bool layout_dirty = false;
   };
 
   enum class MenuRole { Separator, Action, Submenu };
@@ -181,7 +181,6 @@ struct LinuxSystemTrayTransport::Impl {
 
   struct MenuChanges {
     std::vector<int> layouts;
-    std::vector<int> new_submenus;
     std::vector<MenuPropertyChange> properties;
   };
 
@@ -413,7 +412,7 @@ struct LinuxSystemTrayTransport::Impl {
       return false;
     }
     if (registered_menu && !menu.empty()) {
-      dirty_layouts.insert(0);
+      root_layout_dirty = true;
       MarkSubmenusDirty(menu);
     }
     return true;
@@ -452,8 +451,9 @@ struct LinuxSystemTrayTransport::Impl {
   }
 
   static std::vector<MenuNode> BuildMenu(std::span<const ResolvedSystemTrayMenuEntry> entries,
-                                         std::span<const MenuNode> previous, std::optional<int> parent,
-                                         int& next_id, MenuChanges& changes) {
+                                        std::span<const MenuNode> previous, std::optional<int> parent,
+                                        bool& layout_dirty, int& next_id, MenuChanges& changes) {
+    // Hosts cache an item's role and checkability by ID. Reuse an ID only for an unambiguous sibling match.
     std::map<MenuIdentity, MenuMatch> matches;
     for (std::size_t i = 0; i < previous.size(); ++i) {
       const auto [match, inserted] = matches.try_emplace(Identity(previous[i].entry, i), MenuMatch{&previous[i]});
@@ -472,11 +472,11 @@ struct LinuxSystemTrayTransport::Impl {
     for (std::size_t i = 0; i < entries.size(); ++i) {
       const auto& entry = entries[i];
       const auto match = matches.find(Identity(entry, i));
-      // Clients retain native actions by ID, including the action's original role.
       const MenuNode* old = match != matches.end() && match->second.new_count == 1 ? match->second.previous : nullptr;
       MenuNode node{.id = 0, .entry = entry, .children = {}};
       if (old != nullptr) {
         node.id = old->id;
+        node.layout_dirty = old->layout_dirty;
         const MenuPropertyChange change{
             node.id, entry, old->entry.enabled != entry.enabled, old->entry.checked != entry.checked,
             old->entry.icon != entry.icon,
@@ -489,55 +489,67 @@ struct LinuxSystemTrayTransport::Impl {
           throw std::overflow_error("HuxerUI Linux system tray exhausted its menu item IDs");
         }
         node.id = next_id++;
-        if (!entry.children.empty()) {
-          changes.new_submenus.push_back(node.id);
-        }
       }
       if (!entry.children.empty()) {
-        node.children = BuildMenu(entry.children, old != nullptr ? std::span<const MenuNode>{old->children}
-                                                                 : std::span<const MenuNode>{},
-                                  old != nullptr ? std::optional<int>{node.id} : std::nullopt, next_id, changes);
+        const auto previous_children = old != nullptr ? std::span<const MenuNode>{old->children}
+                                                      : std::span<const MenuNode>{};
+        const auto previous_id = old != nullptr ? std::optional{node.id} : std::nullopt;
+        node.children = BuildMenu(entry.children, previous_children, previous_id, node.layout_dirty, next_id, changes);
       }
       result.emplace_back(std::move(node));
     }
-    if (parent.has_value() && !std::ranges::equal(previous, result, {}, &MenuNode::id, &MenuNode::id)) {
-      changes.layouts.push_back(*parent);
+    if (!std::ranges::equal(previous, result, {}, &MenuNode::id, &MenuNode::id)) {
+      layout_dirty = true;
+      if (parent.has_value()) {
+        changes.layouts.push_back(*parent);
+      }
     }
     return result;
   }
 
-  const MenuNode* FindMenuNode(int id, const std::vector<MenuNode>& nodes) const noexcept {
-    for (const MenuNode& node : nodes) {
+  static MenuNode* FindMenuNode(int id, std::vector<MenuNode>& nodes) noexcept {
+    for (MenuNode& node : nodes) {
       if (node.id == id) {
         return &node;
       }
-      if (const MenuNode* found = FindMenuNode(id, node.children)) {
+      if (MenuNode* found = FindMenuNode(id, node.children)) {
         return found;
       }
     }
     return nullptr;
   }
 
-  void MarkSubmenusDirty(const std::vector<MenuNode>& nodes) {
-    for (const MenuNode& node : nodes) {
+  std::optional<bool> NeedsLayoutUpdate(int id) noexcept {
+    if (id == 0) {
+      return root_layout_dirty;
+    }
+    if (const MenuNode* node = FindMenuNode(id, menu)) {
+      return node->layout_dirty;
+    }
+    return std::nullopt;
+  }
+
+  static void MarkSubmenusDirty(std::vector<MenuNode>& nodes) noexcept {
+    for (MenuNode& node : nodes) {
       if (!node.children.empty()) {
-        dirty_layouts.insert(node.id);
+        node.layout_dirty = true;
         MarkSubmenusDirty(node.children);
       }
     }
   }
 
-  void ClearDirtyLayouts(const MenuNode* node, int depth) noexcept {
+  void ClearDirtyLayouts(MenuNode* node, int depth) noexcept {
     if (depth == 0) {
       return;
     }
-    dirty_layouts.erase(node == nullptr ? 0 : node->id);
+    (node == nullptr ? root_layout_dirty : node->layout_dirty) = false;
+    // A depth-one reply includes the direct items, but leaves their submenu lists unfetched.
     const int child_depth = depth < 0 ? depth : depth - 1;
     if (child_depth == 0) {
       return;
     }
-    const std::vector<MenuNode>& children = node == nullptr ? menu : node->children;
-    for (const MenuNode& child : children) {
+    auto& children = node == nullptr ? menu : node->children;
+    for (MenuNode& child : children) {
       if (!child.children.empty()) {
         ClearDirtyLayouts(&child, child_depth);
       }
@@ -617,18 +629,16 @@ struct LinuxSystemTrayTransport::Impl {
       replacement_icon = DecodeIconPixmap(value.icon);
     }
     int next_id = next_menu_id;
+    bool replacement_root_dirty = root_layout_dirty;
     MenuChanges changes;
-    std::vector<MenuNode> replacement_menu = BuildMenu(value.menu, menu, 0, next_id, changes);
+    auto replacement_menu = BuildMenu(value.menu, menu, 0, replacement_root_dirty, next_id, changes);
     if (replacement_icon.has_value()) {
       icon = std::move(replacement_icon);
     }
     menu = std::move(replacement_menu);
     presentation = std::move(replacement_presentation);
     next_menu_id = next_id;
-    std::erase_if(dirty_layouts, [this](int id) { return id != 0 && FindMenuNode(id, menu) == nullptr; });
-    for (int id : changes.new_submenus) {
-      dirty_layouts.insert(id);
-    }
+    root_layout_dirty = replacement_root_dirty;
     if (icon_changed) {
       EmitItemSignal("NewIcon", nullptr);
     }
@@ -644,7 +654,6 @@ struct LinuxSystemTrayTransport::Impl {
     if (!changes.layouts.empty()) {
       ++menu_revision;
       for (int parent : changes.layouts) {
-        dirty_layouts.insert(parent);
         EmitMenuLayout(parent);
       }
     }
@@ -657,12 +666,11 @@ struct LinuxSystemTrayTransport::Impl {
     presentation.reset();
     icon.reset();
     menu.clear();
-    dirty_layouts.clear();
     if (was_active) {
       EmitItemSignal("NewStatus", g_variant_new("(s)", "Passive"));
     }
     if (had_menu) {
-      dirty_layouts.insert(0);
+      root_layout_dirty = true;
       ++menu_revision;
       EmitMenuLayout(0);
     }
@@ -814,7 +822,7 @@ struct LinuxSystemTrayTransport::Impl {
         GVariant* properties = nullptr;
         g_variant_get(parameters, "(ii@as)", &parent, &depth, &properties);
         g_variant_unref(properties);
-        const MenuNode* node = parent == 0 ? nullptr : impl.FindMenuNode(parent, impl.menu);
+        MenuNode* node = parent == 0 ? nullptr : impl.FindMenuNode(parent, impl.menu);
         if (parent != 0 && node == nullptr) {
           g_dbus_method_invocation_return_dbus_error(
               invocation,
@@ -913,8 +921,7 @@ struct LinuxSystemTrayTransport::Impl {
       if (name == "AboutToShow") {
         gint parent = 0;
         g_variant_get(parameters, "(i)", &parent);
-        const bool valid = parent == 0 || impl.FindMenuNode(parent, impl.menu) != nullptr;
-        const bool needs_update = valid && impl.dirty_layouts.contains(parent);
+        const bool needs_update = impl.NeedsLayoutUpdate(parent).value_or(false);
         g_dbus_method_invocation_return_value(invocation, g_variant_new("(b)", needs_update ? TRUE : FALSE));
         return;
       }
@@ -927,9 +934,10 @@ struct LinuxSystemTrayTransport::Impl {
         g_variant_builder_init(&errors, G_VARIANT_TYPE("ai"));
         gint parent = 0;
         while (g_variant_iter_next(parents, "i", &parent)) {
-          if (parent != 0 && impl.FindMenuNode(parent, impl.menu) == nullptr) {
+          const auto needs_update = impl.NeedsLayoutUpdate(parent);
+          if (!needs_update.has_value()) {
             g_variant_builder_add(&errors, "i", parent);
-          } else if (impl.dirty_layouts.contains(parent)) {
+          } else if (*needs_update) {
             g_variant_builder_add(&updates, "i", parent);
           }
         }
@@ -990,7 +998,7 @@ struct LinuxSystemTrayTransport::Impl {
   std::optional<ResolvedSystemTrayPresentation> presentation;
   std::optional<IconPixmap> icon;
   std::vector<MenuNode> menu;
-  std::unordered_set<int> dirty_layouts;
+  bool root_layout_dirty = false;
   GDBusConnection* watch_connection = nullptr;
   GDBusConnection* connection = nullptr;
   GDBusNodeInfo* item_node = nullptr;

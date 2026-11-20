@@ -39,7 +39,8 @@ inline void AppendPngChunk(std::vector<std::byte>& bytes, std::string_view type,
   AppendBigEndian32(bytes, PngCrc32(std::span<const std::byte>(bytes).subspan(crc_begin)));
 }
 
-inline std::vector<std::byte> MakeTestPng(std::uint32_t width, std::uint32_t height) {
+inline std::vector<std::byte> MakeTestPng(std::uint32_t width, std::uint32_t height,
+                                         std::array<std::uint8_t, 4> rgba = {0, 0, 0, 0xFF}) {
   if (width == 0 || height == 0 || width > 1024 || height > 1024) {
     throw std::invalid_argument("test PNG dimensions are invalid");
   }
@@ -48,7 +49,9 @@ inline std::vector<std::byte> MakeTestPng(std::uint32_t width, std::uint32_t hei
   for (std::uint32_t y = 0; y < height; ++y) {
     scanlines.push_back(std::byte{0});
     for (std::uint32_t x = 0; x < width; ++x) {
-      scanlines.insert(scanlines.end(), {std::byte{0}, std::byte{0}, std::byte{0}, std::byte{0xFF}});
+      for (const auto channel : rgba) {
+        scanlines.push_back(static_cast<std::byte>(channel));
+      }
     }
   }
 
