@@ -49,6 +49,9 @@ struct EnvironmentDiagnostic {
   std::filesystem::path path = {};
   /// False for checks needed only to perform a proposed installation.
   bool required = true;
+  /// A compiler, library, or packaging tool the build takes from the host. A build system that provisions its own
+  /// toolchain does not need it, so its plan leaves the check out.
+  bool host_toolchain = false;
 };
 
 enum class EnvironmentOperation { Build, Run, Package, Devices };
@@ -64,6 +67,9 @@ struct EnvironmentRequest {
   std::string device;
   /// Shared CMake discovery result when a plan has already resolved it.
   std::optional<std::filesystem::path> cmake_path = std::nullopt;
+  /// Whether the build system the operation dispatches to provisions its own toolchain, so that the checks marked
+  /// `host_toolchain` do not apply.
+  bool provisioned_toolchain = false;
 };
 
 /// One automatic or manual action proposed by `setup`.
@@ -151,6 +157,8 @@ struct PlatformCommandContext {
   bool profiling = false;
   /// Whether this build belongs to a development watch session.
   bool watch = false;
+  /// The integration that builds the application core the platform shell consumes.
+  BuildSystem build_system = BuildSystem::CMake;
   /// Resolved platform toolchain and SDK overrides for build children.
   ProcessEnvironment environment = {};
 };
@@ -350,9 +358,14 @@ std::vector<ProcessCommand> DesktopPackageStageCommands(
 /// Plans the CMake configure command that emits the app-side library graph.
 std::vector<ProcessCommand> LibraryGraphConfigureCommands(const PlatformCommandContext& context);
 
-/// Plans the Android library-graph configure command for an explicit host.
-std::vector<ProcessCommand> AndroidLibraryGraphCommands(const PlatformCommandContext& context,
-                                                        std::string_view host_id);
+/// The mcpp target triple of a canonical Android ABI.
+/// @throws std::invalid_argument for an ABI the mcpp integration does not build.
+[[nodiscard]] std::string AndroidMcppTriple(std::string_view abi);
+
+/// Plans the command that writes the library graph before the Gradle shell runs, for an explicit host: the CMake
+/// graph-only configure, or for the mcpp integration the build of the first ABI, whose build program writes it.
+[[nodiscard]] std::vector<ProcessCommand>
+AndroidLibraryGraphCommands(const PlatformCommandContext& context, std::string_view host_id);
 
 /// Plans Android Gradle commands for an explicit host and optional Termux `aapt2` path.
 std::vector<ProcessCommand> AndroidBuildCommands(const PlatformCommandContext& context, std::string_view host_id,

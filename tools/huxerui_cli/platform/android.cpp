@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <utility>
 
+#include "mcpp/mcpp.h"
 #include "template.h"
 
 namespace huxerui::cli {
@@ -360,6 +361,7 @@ public:
     const auto cmake = AndroidCMake(request);
     if (!devices && !cmake.empty()) {
       checks.push_back(detail::CheckTool("cmake", "CMake selected by cmake.dir", cmake, "3.20"));
+      checks.back().host_toolchain = true;
     }
     if (!termux && (!devices || packages_missing)) {
       auto java = AndroidJava(request);
@@ -387,6 +389,8 @@ public:
       };
       check_package("android_platform", "Android platform", api, platform_jar);
       check_package("android_ndk", "Android NDK", ndk, ndk_toolchain);
+      // The Gradle shell needs the JDK and the SDK under every build system; the NDK compiles only the CMake core.
+      checks.back().host_toolchain = true;
       if (!termux)
         check_package("build_tools", "Android SDK Build Tools", android_build_tools, build_tools);
     }
@@ -597,12 +601,31 @@ public:
   }
 };
 
+/// The profile and features the mcpp integration builds the core with, resolved from the CLI's options.
+mcpp::CommandOptions AndroidMcppOptions(const PlatformCommandContext& context) {
+  return mcpp::ResolveOptions(context.project_root, "android", context.profile, context.optimization, context.lto,
+                              context.profiling);
+}
+
 } // namespace
 
 namespace detail {
 
+std::string AndroidMcppTriple(std::string_view abi) {
+  return mcpp::AbiTriple("android", abi);
+}
+
 std::vector<ProcessCommand>
 AndroidLibraryGraphCommands(const PlatformCommandContext& context, std::string_view host_id) {
+  if (context.build_system == BuildSystem::Mcpp) {
+    // The build program writes the library graph and the framework record the shell's settings read, so the first
+    // ABI is built before Gradle runs; the shell's own build of that ABI then finds it current.
+    const std::string abi = context.abis.empty() ? std::string("arm64-v8a") : context.abis.front();
+    std::vector<std::string> arguments{"build", "--target", AndroidMcppTriple(abi)};
+    const std::vector<std::string> profile = mcpp::ProfileArguments(AndroidMcppOptions(context));
+    arguments.insert(arguments.end(), profile.begin(), profile.end());
+    return {{"mcpp", std::move(arguments), context.project_root}};
+  }
   std::vector<ProcessCommand> commands = LibraryGraphConfigureCommands(context);
   if (host_id == "android") {
     commands.front().arguments.push_back("-DANDROID_ABI=arm64-v8a");
@@ -627,6 +650,20 @@ AndroidBuildCommands(const PlatformCommandContext& context, std::string_view hos
     };
   } else if (!context.abis.empty()) {
     arguments.push_back("-PhuxeruiAbis=" + JoinTargetAbis(context.abis, ','));
+  }
+  arguments.push_back(std::string("-PhuxeruiBuildSystem=") +
+                      (context.build_system == BuildSystem::Mcpp ? "mcpp" : "cmake"));
+  if (context.build_system == BuildSystem::Mcpp) {
+    // The Gradle task builds the core with the profile and features the CLI resolved from the same options.
+    const mcpp::CommandOptions options = AndroidMcppOptions(context);
+    arguments.push_back("-PhuxeruiMcppProfile=" + options.profile_name);
+    std::string features;
+    for (const std::string& feature : options.features) {
+      features += (features.empty() ? "" : ",") + feature;
+    }
+    if (!features.empty()) {
+      arguments.push_back("-PhuxeruiMcppFeatures=" + features);
+    }
   }
   if (const auto version = detail::EnvironmentValue(context.environment, "HUXERUI_CMAKE_VERSION"); !version.empty()) {
     arguments.push_back("-PhuxeruiCmakeVersion=" + version);

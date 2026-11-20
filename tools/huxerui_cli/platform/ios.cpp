@@ -7,6 +7,7 @@
 #include <cctype>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -14,6 +15,7 @@
 #include <string_view>
 #include <utility>
 
+#include "mcpp/mcpp.h"
 #include "project.h"
 #include "template.h"
 
@@ -326,6 +328,42 @@ void UpdateIosLibraryIntegration(const std::filesystem::path& project_root) {
   }
 }
 
+/// The profile and features the mcpp integration builds the core with, resolved from the CLI's options.
+mcpp::CommandOptions IosMcppOptions(const PlatformCommandContext& context) {
+  return mcpp::ResolveOptions(context.project_root, "ios", context.profile, context.optimization, context.lto,
+                              context.profiling);
+}
+
+/// The framework the shell compiles its entry against: the SDK for CMake, or for mcpp the framework the build
+/// resolved, which its build program records.
+std::filesystem::path IosFrameworkHome(const PlatformCommandContext& context) {
+  if (context.build_system != BuildSystem::Mcpp) {
+    return context.huxerui_home;
+  }
+  const std::filesystem::path record = context.project_root / ".huxerui/generated/framework.json";
+  std::ifstream input(record, std::ios::binary);
+  if (!input) {
+    throw std::runtime_error("HuxerUI framework record is missing: " + record.string());
+  }
+  const std::string json{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+  return detail::JsonString(json, "sourceRoot");
+}
+
+/// The settings a build from Xcode itself needs to match the CLI's: the integration, the framework, and for mcpp the
+/// engine, which an Xcode build phase does not find on the shell's PATH.
+void WriteIosIntegrationSettings(const PlatformCommandContext& context) {
+  const bool mcpp = context.build_system == BuildSystem::Mcpp;
+  std::string settings = "// Written by the HuxerUI CLI. Config/Local.xcconfig overrides these values.\n"
+                         "HUXERUI_BUILD_SYSTEM = " + std::string(mcpp ? "mcpp" : "cmake") + "\n"
+                         "HUXERUI_HOME = " + IosFrameworkHome(context).generic_string() + "\n";
+  if (mcpp) {
+    if (const std::optional<std::filesystem::path> engine = FindExecutable("mcpp")) {
+      settings += "HUXERUI_MCPP = " + engine->generic_string() + "\n";
+    }
+  }
+  WriteIosIntegrationFile(context.project_root / ".huxerui/generated/ios/integration.xcconfig", settings);
+}
+
 class IosDriver final : public PlatformDriver {
 public:
   std::string_view Id() const noexcept override {
@@ -575,17 +613,33 @@ public:
     if (!context.cmake_generator.empty()) {
       throw std::invalid_argument("iOS native builds do not use a CMake generator option");
     }
+    if (context.build_system == BuildSystem::Mcpp) {
+      // The build program writes the library graph and the framework record the shell's integration reads, so the
+      // core is built before Xcode runs; the shell's own build then finds it current.
+      std::vector<std::string> arguments{"build", "--target",
+                                         IsIosPhysicalDevice(context) ? "aarch64-ios" : "aarch64-ios-sim"};
+      const std::vector<std::string> profile = mcpp::ProfileArguments(IosMcppOptions(context));
+      arguments.insert(arguments.end(), profile.begin(), profile.end());
+      return {{"mcpp", std::move(arguments), context.project_root}};
+    }
     return detail::LibraryGraphConfigureCommands(context);
   }
 
   void UpdateProjectIntegration(const PlatformCommandContext& context) const override {
     UpdateIosLibraryIntegration(context.project_root);
+    WriteIosIntegrationSettings(context);
   }
 
   void ValidateBuildAbis(const PlatformCommandContext& context) const override {
     if (!context.abis.empty() && IsIosPhysicalDevice(context) &&
         (context.abis.size() != 1 || context.abis.front() != "arm64")) {
       throw std::invalid_argument("HuxerUI iOS device builds only support the arm64 ABI");
+    }
+    // mcpp's Apple toolchain targets arm64 only; an x86_64 Simulator would need an engine row and toolchain
+    // packages for Intel Macs.
+    if (context.build_system == BuildSystem::Mcpp &&
+        std::ranges::any_of(context.abis, [](const std::string& abi) { return abi != "arm64"; })) {
+      throw std::invalid_argument("the mcpp integration builds iOS for the arm64 ABI only");
     }
   }
 
@@ -606,7 +660,8 @@ public:
         (context.build_directory / "DerivedData").string(),
         "-destination",
         IosDestination(context),
-        "HUXERUI_HOME=" + context.huxerui_home.string(),
+        "HUXERUI_HOME=" + IosFrameworkHome(context).string(),
+        std::string("HUXERUI_BUILD_SYSTEM=") + (context.build_system == BuildSystem::Mcpp ? "mcpp" : "cmake"),
         "HUXERUI_INTEGRATION_PLAN=" + (context.build_directory / "huxerui-integration/app.json").string(),
     };
     if (IsIosPhysicalDevice(context)) {
@@ -615,6 +670,21 @@ public:
     if (!context.abis.empty()) {
       build_arguments.push_back("ARCHS=" + detail::JoinTargetAbis(context.abis, ' '));
       build_arguments.push_back("ONLY_ACTIVE_ARCH=NO");
+    } else if (context.build_system == BuildSystem::Mcpp) {
+      // A generic Simulator destination builds every standard architecture; the mcpp core is arm64.
+      build_arguments.push_back("ARCHS=arm64");
+    }
+    if (context.build_system == BuildSystem::Mcpp) {
+      // The shell's build phase builds the core with the profile and features the CLI resolved.
+      const mcpp::CommandOptions options = IosMcppOptions(context);
+      build_arguments.push_back("HUXERUI_MCPP_PROFILE=" + options.profile_name);
+      std::string features;
+      for (const std::string& feature : options.features) {
+        features += (features.empty() ? "" : ",") + feature;
+      }
+      if (!features.empty()) {
+        build_arguments.push_back("HUXERUI_MCPP_FEATURES=" + features);
+      }
     }
     if (context.optimization) {
       build_arguments.push_back("HUXERUI_OPTIMIZATION=" + *context.optimization);

@@ -104,6 +104,14 @@ TEST_CASE("HuxerUICliAndroidEnvironmentDiagnosisOwnsToolChecks") {
     );
   };
   REQUIRE(has_android_diagnostic("java"));
+  // The Gradle shell needs the JDK and the SDK under every build system; only the CMake core needs the NDK.
+  const auto host_toolchain = [&android_diagnostics](std::string_view id) {
+    const auto check = std::ranges::find(android_diagnostics, id, &huxerui::cli::EnvironmentDiagnostic::id);
+    return check != android_diagnostics.end() && check->host_toolchain;
+  };
+  REQUIRE_FALSE(host_toolchain("java"));
+  REQUIRE_FALSE(host_toolchain("android_sdk"));
+  REQUIRE(host_toolchain("android_ndk"));
   const bool android_host = huxerui::cli::CurrentHostId() == "android";
   REQUIRE(has_android_diagnostic("sdkmanager") != android_host);
   REQUIRE(has_android_diagnostic("platform_tools") != android_host);
@@ -253,13 +261,13 @@ TEST_CASE("HuxerUICliCreatesAndroidBuildCommandsForSourceSdks") {
       std::filesystem::path(windows_commands[0].executable).generic_string() ==
       (context.project_root / "platform/android/gradlew.bat").generic_string()
   );
-  REQUIRE(windows_commands[0].arguments == std::vector<std::string>{":app:assembleRelease"});
+  REQUIRE(windows_commands[0].arguments == std::vector<std::string>{"-PhuxeruiBuildSystem=cmake", ":app:assembleRelease"});
   REQUIRE(posix_commands.size() == 1);
   REQUIRE(
       std::filesystem::path(posix_commands[0].executable).generic_string() ==
       (context.project_root / "platform/android/gradlew").generic_string()
   );
-  REQUIRE(posix_commands[0].arguments == std::vector<std::string>{":app:assembleRelease"});
+  REQUIRE(posix_commands[0].arguments == std::vector<std::string>{"-PhuxeruiBuildSystem=cmake", ":app:assembleRelease"});
   REQUIRE(library_commands[0].working_directory == context.project_root);
   REQUIRE(windows_commands[0].working_directory == context.project_root / "platform/android");
   REQUIRE(posix_commands[0].working_directory == context.project_root / "platform/android");
@@ -284,6 +292,7 @@ TEST_CASE("HuxerUICliCreatesAndroidBuildCommandsForSourceSdks") {
       std::vector<std::string>{
           "-PhuxeruiAbis=arm64-v8a",
           "-Pandroid.aapt2FromMavenOverride=" + termux_aapt2.string(),
+          "-PhuxeruiBuildSystem=cmake",
           ":app:assembleRelease",
       }
   );
@@ -294,6 +303,28 @@ TEST_CASE("HuxerUICliCreatesAndroidBuildCommandsForSourceSdks") {
       android->LibraryGraphCommands(explicit_generator),
       "Android native builds do not use a CMake generator option"
   );
+}
+
+TEST_CASE("HuxerUICliBuildsTheMcppCoreThroughTheGradleShell") {
+  huxerui::cli::PlatformCommandContext context;
+  context.project_root = "/work/sample";
+  context.profile = "release";
+  context.abis = {"x86_64", "arm64-v8a"};
+  context.build_system = huxerui::cli::BuildSystem::Mcpp;
+
+  // mcpp writes the library graph and the framework record while it builds, so the first ABI is built before
+  // Gradle reads them; the shell then builds every ABI and finds that one current.
+  const auto graph = huxerui::cli::detail::AndroidLibraryGraphCommands(context, "linux");
+  REQUIRE(graph.size() == 1);
+  REQUIRE(graph[0].executable == "mcpp");
+  REQUIRE(graph[0].arguments == std::vector<std::string>{"build", "--target", "x86_64-linux-android", "--release"});
+  REQUIRE(graph[0].working_directory == context.project_root);
+
+  const auto build = huxerui::cli::detail::AndroidBuildCommands(context, "linux", {});
+  REQUIRE(build[0].arguments ==
+          std::vector<std::string>{"-PhuxeruiAbis=x86_64,arm64-v8a", "-PhuxeruiBuildSystem=mcpp",
+                                   "-PhuxeruiMcppProfile=release", ":app:assembleRelease"});
+  REQUIRE_THROWS_AS(huxerui::cli::detail::AndroidMcppTriple("armeabi-v7a"), std::invalid_argument);
 }
 
 TEST_CASE("HuxerUICliUsesGradleMetadataToLaunchAndroidApplications") {

@@ -1,0 +1,51 @@
+name: Rerun Unassigned Jobs
+
+# GitHub cancels a job that no hosted runner took, as it does for macOS arm64 runners when their capacity runs out
+# ("The job was not acquired by Runner of type hosted even after multiple attempts"). Such a job ran no step, so it
+# says nothing about the change. When every job of a completed run that did not pass is one no runner took, the run's
+# failed jobs are started again, up to three attempts in all. A run with a job that ran and failed is left for a
+# person, and so is a run a newer one of the same branch superseded.
+#
+# A workflow_run workflow runs from the default branch, so a change to this file takes effect once it is merged.
+
+on:
+  workflow_run:
+    workflows: [Build System Conformance]
+    types: [completed]
+
+permissions:
+  actions: write
+
+jobs:
+  rerun:
+    name: Rerun jobs no runner took
+    if: github.event.workflow_run.conclusion != 'success' && github.event.workflow_run.run_attempt < 3
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Rerun the failed jobs when no runner took them
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
+          BRANCH: ${{ github.event.workflow_run.head_branch }}
+          EVENT: ${{ github.event.workflow_run.event }}
+        run: |
+          latest=$(gh api "repos/$GH_REPO/actions/workflows/$WORKFLOW_ID/runs?branch=$BRANCH&event=$EVENT&per_page=1" \
+            --jq '.workflow_runs[0].id')
+          if [ "$latest" != "$RUN_ID" ]; then
+            echo "Run $RUN_ID is superseded by $latest; nothing to rerun."
+            exit 0
+          fi
+          # A job no runner took has no step; one that ran and failed has steps. Skipped jobs never count.
+          jobs=$(gh api --paginate "repos/$GH_REPO/actions/runs/$RUN_ID/attempts/$ATTEMPT/jobs?per_page=100" \
+            --jq '.jobs[] | select(.conclusion != "success" and .conclusion != "skipped")
+                  | "\(if (.steps | length) == 0 then "unassigned" else "ran" end)\t\(.name)"')
+          printf '%s\n' "$jobs"
+          if [ -z "$jobs" ] || printf '%s\n' "$jobs" | grep -q '^ran'; then
+            echo "A job ran and did not pass, or none failed; nothing to rerun."
+            exit 0
+          fi
+          gh run rerun "$RUN_ID" --failed

@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "cli.h"
+#include "prompt.h"
 #include "sdk.h"
 
 int main(int argc, char** argv) {
@@ -16,7 +17,9 @@ int main(int argc, char** argv) {
   try {
     const auto executable = huxerui::cli::ExecutablePath(argc > 0 ? argv[0] : "huxerui");
     const auto sdk = huxerui::cli::LocateHuxerUIHome(executable);
-    return huxerui::cli::Run(arguments, std::filesystem::current_path(), sdk, std::cin, std::cout, std::cerr);
+    const auto prompter = huxerui::cli::prompt::MakeTerminalPrompter();
+    return huxerui::cli::Run(arguments, std::filesystem::current_path(), sdk, std::cin, std::cout, std::cerr,
+                             prompter.get());
   } catch (const std::exception& exception) {
     std::cerr << "huxerui: " << exception.what() << '\n';
     return 1;

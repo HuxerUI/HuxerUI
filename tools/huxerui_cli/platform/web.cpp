@@ -152,8 +152,12 @@ std::filesystem::path EmsdkCommand(const std::filesystem::path& root) {
 EnvironmentDiagnostic EmscriptenCheck(std::string_view version, const ProcessEnvironment& environment) {
   const auto path = FindExecutable("emcc", environment).value_or(std::filesystem::path{});
   auto check = detail::CheckTool("emcc", "Emscripten", path, version, environment);
-  if (check.version != version)
+  if (check.version != version) {
     check.status = EnvironmentDiagnosticStatus::Missing;
+    // A newer compiler passes CheckTool's minimum; say why a found compiler is not the one the SDK was built with.
+    if (!check.version.empty() && detail::VersionAtLeast(check.version, version))
+      check.detail += " (found " + check.version + "; this SDK requires " + std::string(version) + ")";
+  }
   return check;
 }
 
@@ -255,6 +259,10 @@ public:
       emsdk.required = false;
       checks.push_back(std::move(emsdk));
     }
+    // Emscripten, and the emsdk and Python that install it, are the host toolchain the CMake build compiles with;
+    // Termux's opener only shows the page.
+    for (auto& check : checks)
+      check.host_toolchain = check.id != "termux-open";
     return checks;
   }
 

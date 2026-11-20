@@ -1,16 +1,15 @@
-# c++23, and it is a workaround rather than a language requirement.
-#
-# The module unit writes `import std;`, which every implementation this project
-# builds with supports at c++20. mcpp's clang-on-Windows path hardcodes a
-# c++23 floor instead of probing the STL it found (mcpp-community/mcpp#603) and
-# refuses the build below it.
-#
-# A module graph has exactly one standard, so this compiles huxerui at c++23
-# too. Change this line back to c++20 once #603 is fixed.
+# mcpp's default standard. huxerui.rules runs in this package's build program
+# and imports the official mcpp:plugins distribution members, which need C++23.
 [package]
 name     = "{{project.name}}"
 version  = "0.1.0"
 standard = "c++23"
+
+# The identity the platform shells and package formats use. `id` is the
+# reverse-DNS application identifier an Android, iOS, or macOS package needs.
+[package.metadata.huxerui]
+name = "{{project.name}}"
+# id = "org.example.{{project.name}}"
 
 # The EXACT package identity, not a bare name: namespace omission means
 # `mcpplibs` only, and mcpp's bare-name fallback is deprecated
@@ -19,15 +18,47 @@ standard = "c++23"
 [dependencies]
 {{self.name}} = "{{self.version}}"
 
+# `import std;` on iOS needs a C++ standard library built for this application: the module is made from the
+# toolchain's libc++ headers, and the libc++ in the iOS SDK does not carry every symbol those headers name.
+[target.'cfg(os = "ios")'.dependencies]
+llvm.libcxx = "22.1.8.3"
+# Below the toolchain's own iOS floor, the core needs the compiler's runtime builtins built for it.
+llvm.compiler-rt-builtins = "22.1.8.6"
+
+# `app` is a program on the desktop and the Web and the application's shared library on Android.
+# The platform shell owns the process entry, so each desktop and Apple platform names its own. On
+# the Web and Android the platform layer starts the application, so the image has no program start.
 [targets.{{project.name}}]
-kind = "bin"
-main = "src/main.cpp"
+kind = "app"
+main = "platform/linux/main.cpp"
+windows_subsystem = "windows"
+
+[target.'cfg(os = "windows")'.targets.{{project.name}}]
+main = "platform/windows/main.cpp"
+
+[target.'cfg(os = "macos")'.targets.{{project.name}}]
+main = "platform/macos/main.cpp"
+
+[target.'cfg(os = "ios")'.targets.{{project.name}}]
+main = "platform/ios/App/main.mm"
+
+[target.'cfg(os = "emscripten")'.targets.{{project.name}}]
+main = false
+
+[target.'cfg(env = "android")'.targets.{{project.name}}]
+main = false
 
 [build]
 # huxerui.rules owns the source selection: a build program can ADD a source but
 # cannot replace one, so a package that also globbed src/**/*.cpp would link
 # both the original and the transformed copy of every composable.
 sources = []
+# The iOS deployment minimum, as the Xcode shell's IPHONEOS_DEPLOYMENT_TARGET and the CMake integration state it.
+ios_deployment_target = "15.0"
+
+# The Web build's exception model; HuxerUI requires it, and only the root package can grant it.
+[target.'cfg(os = "emscripten")'.abi]
+exceptions = true
 
 # The Windows executable's icon and the version metadata its Properties dialog
 # shows. FILEVERSION, ProductName, FileDescription and CompanyName all default
@@ -40,3 +71,31 @@ sources = []
 # rather than on the Windows one.
 [resources]
 icon = "assets/app.ico"
+
+# The C++ runtime inside the application's shared library on Android, as the CMake integration's `c++_static`.
+# `runner` is what `huxerui run android --no-shell` starts the APK with; through the Gradle shell the CLI installs
+# and launches it with adb, as for CMake.
+[target.aarch64-linux-android]
+cxx_runtime = "self-contained"
+runner = ["adb-run"]
+
+[target.x86_64-linux-android]
+cxx_runtime = "self-contained"
+runner = ["adb-run"]
+
+# What `huxerui run ios --no-shell` starts the Simulator bundle with; through the Xcode shell the CLI uses simctl.
+[target.aarch64-ios-sim]
+runner = ["simctl-run"]
+
+[target.aarch64-ios-sim.xlings.workspace]
+"xim:apple-simulator-tools" = "0.3.0"
+
+# The release profiles `huxerui build`, `run`, and `package` select with `--optimization size|minsize` and
+# `--lto on`, as the CMake integration's HUXERUI_OPTIMIZATION and HUXERUI_ENABLE_LTO. A profile of your own states
+# each setting in which it differs from mcpp's defaults for one, so each restates what release gives.
+[profile]
+release-size        = { opt = "s", debug = false, ndebug = true, trim_paths = true }
+release-minsize     = { opt = "z", debug = false, ndebug = true, trim_paths = true }
+release-lto         = { opt = 2, debug = false, ndebug = true, trim_paths = true, lto = true }
+release-size-lto    = { opt = "s", debug = false, ndebug = true, trim_paths = true, lto = true }
+release-minsize-lto = { opt = "z", debug = false, ndebug = true, trim_paths = true, lto = true }

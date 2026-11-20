@@ -15,6 +15,7 @@ TEST_CASE("HuxerUICliWebDiagnosisUsesTheSelectedSdkArchiveVersion") {
   const auto compiler = std::ranges::find(diagnostics, std::string_view{"emcc"}, &EnvironmentDiagnostic::id);
   REQUIRE(compiler != diagnostics.end());
   REQUIRE(compiler->required_version == "6.0.5");
+  REQUIRE(compiler->host_toolchain);
 }
 
 TEST_CASE("HuxerUICliCreatesWebPlatformShell") {

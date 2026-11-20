@@ -20,7 +20,7 @@ subset: 565 names, and a program may mix the two spellings in one build.
 
 The module is built by mcpp. A project that declares `huxerui` as a dependency
 can import it with nothing else to configure —
-[`mcpp/examples/01-import`](../mcpp/examples/01-import) is the smallest one:
+[`buildtools/mcpp/examples/01-import`](../buildtools/mcpp/examples/01-import) is the smallest one:
 
 ```cpp
 export module app;
@@ -72,7 +72,7 @@ neither needs a header:
 It is generated from the public headers by `huxerui-module-gen`:
 
 ```bash
-cd mcpp/huxerui-tools
+cd buildtools/mcpp/huxerui-tools
 mcpp run huxerui-module-gen              # regenerate
 mcpp run huxerui-module-gen -- --check   # assert it is current
 ```

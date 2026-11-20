@@ -1,9 +1,10 @@
 name: mcpp Build
 
-# Manually validate HuxerUI and its application templates with mcpp.
+# Validate HuxerUI and its application templates with mcpp.
 #
-# CMake remains the full-platform path and the only path for Android, iOS and
-# Web; this workflow covers what mcpp builds today. The design is
+# The framework's own build, its unit suite, the examples, and the templates on
+# the desktop hosts; the Web, Android and iOS rows and every application's
+# distributable are checked by build-system-conformance.yml. The design is
 # docs/design/mcpp-build-system.md.
 #
 # `parity` is first and cheap on purpose: it builds two small programs and no
@@ -11,6 +12,21 @@ name: mcpp Build
 # and not the other -- is reported before anyone waits on a compile.
 
 on:
+  # The paths only mcpp consumes, the C++ modules templates and the CLI that renders them, and the unit
+  # sources `mcpp test` builds. A change to the shared framework sources runs this workflow on a manual
+  # dispatch, as it runs build-system-conformance.yml.
+  pull_request:
+    paths:
+      - 'mcpp.toml'
+      - 'build.mcpp'
+      - 'modules/**'
+      - 'buildtools/mcpp/**'
+      - 'templates/**'
+      - 'tools/huxerui_cli/**'
+      - 'tests/unit/**'
+      - '.github/workflows/mcpp-build.yml'
+      # Last, because the later pattern wins.
+      - '!**.[mM][dD]'
   workflow_dispatch:
 
 concurrency:
@@ -22,7 +38,7 @@ permissions:
 
 env:
   # Pin mcpp and the Linux Clang toolchain for reproducible validation.
-  MCPP_VERSION: '2026.9.18.3'
+  MCPP_VERSION: '2026.11.20.1'
   MCPP_LLVM: 'llvm@22.1.8'
   XLINGS_NON_INTERACTIVE: '1'
 
@@ -47,48 +63,30 @@ jobs:
           key: mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
           restore-keys: |
             mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-
-            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-
 
-      - name: Install xlings and mcpp
-        run: |
-          if [ ! -x "$HOME/.xlings/bin/xlings" ]; then
-            curl -fsSL https://d2learn.org/xlings-install.sh | bash
-          fi
-          echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
-          xlings install "mcpp@${MCPP_VERSION}" -y || true
-
-      - name: Select the pinned mcpp
-        run: |
-          xlings install "mcpp@${MCPP_VERSION}" -y
-          mcpp --version
+      - name: Install the pinned mcpp
+        uses: mcpp-community/setup-mcpp@5c65c7d7258af3182188eda8aa070269475e3f32 # v1.0.1
+        with:
+          version: ${{ env.MCPP_VERSION }}
 
       # The tooling is built by mcpp rather than written in Python: a
       # repository that offers mcpp as a first-class build system should not
       # need a second language to check its own build. It builds only the two
       # small programs and their dependencies, not the framework.
       - name: Unit-test the scanning the tools and the rules share
-        working-directory: mcpp/huxerui-source-select
+        working-directory: buildtools/mcpp/huxerui-source-select
         run: mcpp test
 
       - name: Check that both build systems describe the same project
-        working-directory: mcpp/huxerui-tools
+        working-directory: buildtools/mcpp/huxerui-tools
         run: mcpp run huxerui-build-check
 
       # The module shell and the scope prelude are generated from the public
       # headers; a public name added to a header and not to the shell is a name
       # `import huxerui;` cannot see.
       - name: Check that the module shell is up to date
-        working-directory: mcpp/huxerui-tools
+        working-directory: buildtools/mcpp/huxerui-tools
         run: mcpp run huxerui-module-gen -- --check
-
-      # `[workspace] members` is otherwise a table nothing reads. It was wrong
-      # when this ran for the first time: huxerui-build-rules was listed, and
-      # that package imports mcpp, so it compiles only inside a build program's
-      # compile and the fan-out died on the first member with `failed to read
-      # compiled module`.
-      - name: Build every workspace member
-        run: mcpp build --workspace
 
   linux:
     name: mcpp build (linux x86_64)
@@ -114,20 +112,11 @@ jobs:
           key: mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
           restore-keys: |
             mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-
-            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-
 
-      - name: Install xlings and mcpp
-        run: |
-          if [ ! -x "$HOME/.xlings/bin/xlings" ]; then
-            curl -fsSL https://d2learn.org/xlings-install.sh | bash
-          fi
-          echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
-
-      - name: Select the pinned mcpp
-        run: |
-          xlings install "mcpp@${MCPP_VERSION}" -y
-          mcpp --version
+      - name: Install the pinned mcpp
+        uses: mcpp-community/setup-mcpp@5c65c7d7258af3182188eda8aa070269475e3f32 # v1.0.1
+        with:
+          version: ${{ env.MCPP_VERSION }}
 
       # The framework: 67 core sources, platform/linux, the builtin resource
       # header (hrc) and the C++20 module shell. mcpp provisions the GTK
@@ -136,13 +125,13 @@ jobs:
       - name: Build the framework
         run: mcpp build
 
-      # Three applications on top of it. Each mcpp.toml names one dependency
-      # and each build.mcpp is one call; everything else -- GTK on the link
-      # line, the composable transform, the resource packages -- arrives
-      # through the dependency edge.
+      # Four applications on top of it. Each build.mcpp is one call; everything
+      # else -- GTK on the link line, the composable transform, the resource
+      # packages, a library's generated module interface -- arrives through the
+      # dependency edges.
       - name: Build the examples
         run: |
-          for example in mcpp/examples/0*/; do
+          for example in buildtools/mcpp/examples/0*/; do
             echo "--- $example"
             ( cd "$example" && mcpp build )
           done
@@ -150,7 +139,7 @@ jobs:
       # sources tests/unit/CMakeLists.txt compiles and the same vendored
       # Catch2, against the framework mcpp built.
       - name: Run the unit test suite
-        working-directory: mcpp/huxerui-tests
+        working-directory: buildtools/mcpp/huxerui-tests
         run: mcpp test
 
       - name: Pack the library and check its shape
@@ -172,7 +161,7 @@ jobs:
             || { echo "the package carries no library"; exit 1; }
           echo "package carries headers, the module interface and a library"
       - name: Assert the composable transform ran and is macro-free
-        working-directory: mcpp/examples/02-module-units
+        working-directory: buildtools/mcpp/examples/02-module-units
         run: |
           # Name the unit rather than taking the first match. hcg's output
           # directory ACCUMULATES -- renaming a source leaves its old
@@ -201,7 +190,7 @@ jobs:
       # translation unit in an mcpp project, which the rule force-includes; it
       # is asserted here because no example needs it any more.
       - name: Assert a hand-written scope needs no macro
-        working-directory: mcpp/examples/02-module-units
+        working-directory: buildtools/mcpp/examples/02-module-units
         run: |
           grep -q 'return Scope(\[=\]() -> View' src/banner.cppm \
             || { echo "02 no longer spells a scope out by hand"; exit 1; }
@@ -214,17 +203,19 @@ jobs:
           echo "hand-written scope compiles with no macro and no header"
 
       - name: Assert the examples consume HuxerUI as a module
-        working-directory: mcpp/examples/01-import
+        working-directory: buildtools/mcpp/examples/01-import
         run: |
           grep -q '^import huxerui;' src/main.cpp \
             || { echo "01 no longer imports the module"; exit 1; }
-          # No headers in ANY example, in any unit: `import std;` covers
-          # std::type_info and `import huxerui;` covers everything else.
-          ! grep -rn '^[[:space:]]*#include' ../0*/src ../0*/widgets/src \
-            || { echo "an example gained a header"; exit 1; }
+          # No HuxerUI or standard-library header in any example's units:
+          # `import std;` covers std::type_info and `import huxerui;` covers
+          # everything else. A library's own header stays legitimate where a
+          # unit needs its macros, as 04's version test with `#if` does.
+          ! grep -rnE '^[[:space:]]*#include[[:space:]]*<(huxerui/|[A-Za-z_]+>)' ../0*/src ../0*/widgets/src \
+            || { echo "an example gained a HuxerUI or standard-library header"; exit 1; }
           # Anchored: the file's own comment explains what `import` replaces,
           # and an unanchored pattern matches that sentence.
-          echo "01 builds against import huxerui;, with no headers"
+          echo "01 builds against import huxerui;, with no HuxerUI or standard-library header"
 
       # The umbrella header is the CMake build's contract, and this PR must not
       # touch it. Compile it standalone with the SYSTEM compiler -- the one
@@ -254,27 +245,19 @@ jobs:
           key: mcpp-llvm-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ env.MCPP_LLVM }}-${{ hashFiles('mcpp.toml') }}
           restore-keys: |
             mcpp-llvm-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ env.MCPP_LLVM }}-
-            mcpp-llvm-${{ runner.os }}-${{ runner.arch }}-v2-
 
-      - name: Install xlings and mcpp
-        run: |
-          if [ ! -x "$HOME/.xlings/bin/xlings" ]; then
-            curl -fsSL https://d2learn.org/xlings-install.sh | bash
-          fi
-          echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
+      - name: Install the pinned mcpp and clang
+        uses: mcpp-community/setup-mcpp@5c65c7d7258af3182188eda8aa070269475e3f32 # v1.0.1
+        with:
+          version: ${{ env.MCPP_VERSION }}
+          toolchains: ${{ env.MCPP_LLVM }}
 
       # `mcpp toolchain default` once, rather than --toolchain on each command.
       # Only `mcpp build` takes that flag: `mcpp test` and `mcpp pack` reject it
       # with `unknown option: --toolchain`, so a per-command flag would have to
       # be a per-command environment variable for two of the three.
-      - name: Select the pinned mcpp and make clang the default toolchain
+      - name: Make clang the default toolchain
         run: |
-          xlings install "mcpp@${MCPP_VERSION}" -y
-          mcpp --version
-          # `default` selects; it does not install. On a cold cache the next
-          # command is `error: llvm@22.1.8 is not installed`.
-          mcpp toolchain install "${MCPP_LLVM}"
           mcpp toolchain default "${MCPP_LLVM}"
           mcpp toolchain list
 
@@ -292,7 +275,7 @@ jobs:
       # `mcpp build` is fully cached, emits no compile lines, and would make
       # the assertion pass by having nothing to read.
       - name: Build the example application, and check the BMI was loaded
-        working-directory: mcpp/examples/02-module-units
+        working-directory: buildtools/mcpp/examples/02-module-units
         run: |
           set -o pipefail
           mcpp build 2>&1 | tee build.log
@@ -308,7 +291,7 @@ jobs:
       # sources tests/unit/CMakeLists.txt compiles and the same vendored
       # Catch2, against the framework mcpp built.
       - name: Run the unit test suite
-        working-directory: mcpp/huxerui-tests
+        working-directory: buildtools/mcpp/huxerui-tests
         run: mcpp test
 
       - name: Pack the library and check its shape
@@ -337,20 +320,11 @@ jobs:
           key: mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
           restore-keys: |
             mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-
-            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-
 
-      - name: Install xlings and mcpp
-        run: |
-          if [ ! -x "$HOME/.xlings/bin/xlings" ]; then
-            curl -fsSL https://d2learn.org/xlings-install.sh | bash
-          fi
-          echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
-
-      - name: Select the pinned mcpp
-        run: |
-          xlings install "mcpp@${MCPP_VERSION}" -y
-          mcpp --version
+      - name: Install the pinned mcpp
+        uses: mcpp-community/setup-mcpp@5c65c7d7258af3182188eda8aa070269475e3f32 # v1.0.1
+        with:
+          version: ${{ env.MCPP_VERSION }}
 
       # 25 Objective-C++ sources compiled with -fobjc-arc, and the frameworks
       # from the top-level [runtime] table -- which the engine renders only for
@@ -360,7 +334,7 @@ jobs:
 
       - name: Build the examples
         run: |
-          for example in mcpp/examples/0*/; do
+          for example in buildtools/mcpp/examples/0*/; do
             echo "--- $example"
             ( cd "$example" && mcpp build )
           done
@@ -368,7 +342,7 @@ jobs:
       # sources tests/unit/CMakeLists.txt compiles and the same vendored
       # Catch2, against the framework mcpp built.
       - name: Run the unit test suite
-        working-directory: mcpp/huxerui-tests
+        working-directory: buildtools/mcpp/huxerui-tests
         run: mcpp test
 
       - name: Pack the library and check its shape
@@ -410,22 +384,11 @@ jobs:
           key: mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
           restore-keys: |
             mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-
-            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-
 
-      - name: Install xlings and mcpp
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "$HOME\.xlings")) {
-            irm https://d2learn.org/xlings-install.ps1.txt | iex
-          }
-          "$HOME\.xlings\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-          "$HOME\.xlings\subos\current\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-
-      - name: Select the pinned mcpp
-        shell: pwsh
-        run: |
-          xlings install "mcpp@$env:MCPP_VERSION" -y
-          mcpp --version
+      - name: Install the pinned mcpp
+        uses: mcpp-community/setup-mcpp@5c65c7d7258af3182188eda8aa070269475e3f32 # v1.0.1
+        with:
+          version: ${{ env.MCPP_VERSION }}
 
       - name: Build the framework
         shell: pwsh
@@ -437,7 +400,7 @@ jobs:
       - name: Build the examples
         shell: pwsh
         run: |
-          Get-ChildItem -Directory mcpp/examples -Filter '0*' | ForEach-Object {
+          Get-ChildItem -Directory buildtools/mcpp/examples -Filter '0*' | ForEach-Object {
             Write-Host "--- $($_.Name)"
             Push-Location $_.FullName
             mcpp build
@@ -448,7 +411,7 @@ jobs:
       - name: Assert the Windows executable carries its version resource
         if: runner.os == 'Windows'
         shell: pwsh
-        working-directory: mcpp/examples/02-module-units
+        working-directory: buildtools/mcpp/examples/02-module-units
         run: |
           $exe = Get-ChildItem -Recurse -Filter 'huxerui_example_module_units.exe' target | Select-Object -First 1
           if (-not $exe) { throw 'the demo produced no executable' }
@@ -456,19 +419,18 @@ jobs:
           Write-Host "FileVersion=$($info.FileVersion) ProductName=$($info.ProductName)"
           if (-not $info.FileVersion) { throw 'the executable carries no version resource' }
 
-      # The installer, built by huxerui.rules through the WiX toolset the
-      # framework declares as an xlings payload. `role = "artifact"` is what
-      # sequences it after the link -- its input is the executable above -- and
-      # `bindpath.Application=bin` is what lets it harvest the link directory
-      # without a staging step.
-      - name: Assert the MSI was produced
+      # The installer, written by mcpp-plugins' dist-wix through `mcpp pack`, which
+      # huxerui.rules configures; xim:wix is installed only when the pack asks for it.
+      - name: Assert the MSI is packed
         if: runner.os == 'Windows'
         shell: pwsh
-        working-directory: mcpp/examples/02-module-units
+        working-directory: buildtools/mcpp/examples/02-module-units
         run: |
+          mcpp pack --pkg-format msi
+          if ($LASTEXITCODE -ne 0) { throw 'mcpp pack --pkg-format msi failed' }
           $msi = Get-ChildItem -Recurse -Filter '*.msi' target | Select-Object -First 1
-          if (-not $msi) { throw 'huxerui.rules produced no installer' }
-          Write-Host "built $($msi.FullName) ($([math]::Round($msi.Length/1KB)) KB)"
+          if (-not $msi) { throw 'mcpp pack produced no installer' }
+          Write-Host "packed $($msi.FullName) ($([math]::Round($msi.Length/1KB)) KB)"
 
           # Read the File table rather than judging by size. A size threshold is
           # a proxy for "carries the application", and a poor one: an installer
@@ -493,17 +455,15 @@ jobs:
           $exe = $files | Where-Object { $_.Name -like '*huxerui_example_module_units.exe*' }
           if (-not $exe) { throw 'the MSI does not carry the application executable' }
           if ($exe.Size -lt 1MB) { throw "the installed executable is $($exe.Size) bytes, which is not the application" }
-
-          # The definition the rule rendered, kept beside it for inspection.
-          $wxs = Get-ChildItem -Recurse -Filter 'Package.wxs' target | Select-Object -First 1
-          if (-not $wxs) { throw 'the rendered Package.wxs is missing' }
-          if ((Get-Content $wxs.FullName -Raw) -match '@@') { throw 'the Package.wxs has unresolved tokens' }
+          if (-not ($files | Where-Object { $_.Name -like '*resources.bin*' })) {
+            throw 'the MSI does not carry the resource package'
+          }
 
       # The suite that says the LIBRARY works, not just that it links. Same
       # sources tests/unit/CMakeLists.txt compiles and the same vendored
       # Catch2, against the framework mcpp built.
       - name: Run the unit test suite
-        working-directory: mcpp/huxerui-tests
+        working-directory: buildtools/mcpp/huxerui-tests
         run: mcpp test
 
       - name: Pack the library and check its shape
@@ -541,21 +501,11 @@ jobs:
           key: mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-${{ hashFiles('mcpp.toml') }}
           restore-keys: |
             mcpp-${{ runner.os }}-${{ runner.arch }}-v2-${{ env.MCPP_VERSION }}-
-            mcpp-${{ runner.os }}-${{ runner.arch }}-v2-
 
-      - name: Install xlings and mcpp
-        run: |
-          if [ ! -x "$HOME/.xlings/bin/xlings" ]; then
-            curl -fsSL https://d2learn.org/xlings-install.sh | bash
-          fi
-          echo "$HOME/.xlings/bin" >> "$GITHUB_PATH"
-          echo "$HOME/.xlings/subos/current/bin" >> "$GITHUB_PATH"
-          xlings install "mcpp@${MCPP_VERSION}" -y || true
-
-      - name: Select the pinned mcpp
-        run: |
-          xlings install "mcpp@${MCPP_VERSION}" -y
-          mcpp --version
+      - name: Install the pinned mcpp
+        uses: mcpp-community/setup-mcpp@5c65c7d7258af3182188eda8aa070269475e3f32 # v1.0.1
+        with:
+          version: ${{ env.MCPP_VERSION }}
 
       # The CLI is a CMake artifact; only its dependencies are needed here, not
       # the framework's.
@@ -609,9 +559,9 @@ jobs:
             echo "--- $dir"
           }
 
-          run_one AppDemo create app AppDemo --build mcpp --agent none
-          run_one NavDemo create app NavDemo --build mcpp --template navigation --agent none
-          run_one my-widgets create library my-widgets --build mcpp --agent none
+          run_one AppDemo create app AppDemo --build-system mcpp --agent none
+          run_one NavDemo create app NavDemo --build-system mcpp --template navigation --agent none
+          run_one my-widgets create library my-widgets --build-system mcpp --agent none
 
           # The two applications build; the library is a lib, so its own test is
           # what says it works -- and `mcpp test` proves the module it exports
@@ -619,6 +569,8 @@ jobs:
           ( cd "$work/AppDemo" && mcpp build )
           ( cd "$work/NavDemo" && mcpp build )
           ( cd "$work/my-widgets" && mcpp test )
+          # The library's Preview is a C++ modules application that imports it.
+          ( cd "$work/my-widgets/examples/preview" && mcpp build )
 
       - name: Assert the transform ran on a generated project
         run: |

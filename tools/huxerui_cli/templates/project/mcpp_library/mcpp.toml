@@ -1,0 +1,33 @@
+[package]
+name     = "@PROJECT_NAME@"
+version  = "0.1.0"
+standard = "c++23"
+
+# The library's public identity. huxerui.rules derives the resource namespace from it the way the CMake
+# declaration does, so both declarations project the same library. `name`, `id`, and `namespace` are the
+# identity `huxerui platform add` gives to the platform packages it writes.
+[package.metadata.huxerui]
+library   = "@LIBRARY_PUBLIC_TARGET@"
+resources = "resources"
+name      = "@PROJECT_NAME@"
+id        = "@PROJECT_ID@"
+namespace = "@LIBRARY_NAMESPACE@"
+# The headers are exported as the module `@LIBRARY_MODULE_NAME@` too, named after the package: huxerui.rules
+# generates its interface, the [lib] path below, from the names they declare in `namespace`. Macros importers
+# need are mapped by hand in a `@LIBRARY_MODULE_NAME@.macros` unit, modules/macros.cppm. `cpp_modules_gen = false`
+# keeps a hand-written interface instead.
+# cpp_modules_gen = true
+
+@MCPP_DEPENDENCIES@
+
+[targets.@LIBRARY_RESOURCE_NAMESPACE@]
+kind = "lib"
+
+# The module an mcpp consumer imports; a CMake consumer includes the headers.
+[lib]
+path = "modules/@LIBRARY_MODULE_NAME@.cppm"
+
+[build]
+# huxerui.rules selects the sources and transforms composables.
+sources      = []
+include_dirs = ["include"]

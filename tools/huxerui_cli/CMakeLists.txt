@@ -48,6 +48,8 @@ add_library(huxerui_cli_core STATIC
         mcpp/mcpp.cpp
         process_runner.cpp
         project.cpp
+        prompt.cpp
+        prompt_terminal.cpp
         sdk.cpp
         toolchain.cpp
         template.cpp

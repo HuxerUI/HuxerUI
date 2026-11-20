@@ -38,6 +38,8 @@ TEST_CASE("HuxerUICliLinuxEnvironmentDiagnosisOwnsToolChecks") {
   REQUIRE_FALSE(has_linux_diagnostic("meson"));
   REQUIRE_FALSE(has_linux_diagnostic("ninja"));
   REQUIRE_FALSE(has_linux_diagnostic("gperf"));
+  // Each is taken from the host by a build system that does not provision its own toolchain.
+  REQUIRE(std::ranges::all_of(linux_diagnostics, &huxerui::cli::EnvironmentDiagnostic::host_toolchain));
   REQUIRE_FALSE(has_linux_diagnostic("git"));
 }
 

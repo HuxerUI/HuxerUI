@@ -1,0 +1,189 @@
+{
+  "schema": 1,
+  "description": "Projects the conformance suite creates with `huxerui create` and checks like its own. Each project is created for the integrations whose declaration it carries, with only the checked target's platform or with every platform, as `platforms` states; its expected facts are keyed by kind, source style, and template, never by build system or platform selection, so a project that declares two build systems expects what a project declaring either one does.",
+  "hosts": {
+    "linux": [
+      "linux"
+    ],
+    "web": [
+      "linux"
+    ],
+    "android": [
+      "linux"
+    ]
+  },
+  "projects": {
+    "created_cmake_app": {
+      "kind": "app",
+      "build-systems": [
+        "cmake"
+      ],
+      "platforms": "target"
+    },
+    "created_mcpp_app": {
+      "kind": "app",
+      "build-systems": [
+        "mcpp"
+      ],
+      "platforms": "target"
+    },
+    "created_dual_app": {
+      "kind": "app",
+      "build-systems": [
+        "cmake",
+        "mcpp"
+      ],
+      "platforms": "all"
+    },
+    "created_dual_library": {
+      "kind": "library",
+      "build-systems": [
+        "cmake",
+        "mcpp"
+      ],
+      "platforms": "all"
+    },
+    "created_mcpp_library": {
+      "kind": "library",
+      "build-systems": [
+        "mcpp"
+      ],
+      "platforms": "all"
+    }
+  },
+  "expected": {
+    "app/headers/default": {
+      "target": "{name}",
+      "requires": [],
+      "facts": {
+        "profile": "debug",
+        "create.declarations": "each selected build system",
+        "artifact.name": "{name}",
+        "artifact.bundle": "<none>",
+        "framework.linkage": "static",
+        "resources.location": "<artifact>.resources/huxerui/resources.bin",
+        "libraries": [],
+        "package.kind": "appimage"
+      },
+      "targets": {
+        "web": {
+          "facts": {
+            "resources.location": "<artifact>.data:/huxerui/resources.bin",
+            "package.kind": "web"
+          }
+        },
+        "android": {
+          "facts": {
+            "artifact.name": "lib{name}.so",
+            "resources.location": "application core",
+            "android.exports": "JNI entries only",
+            "package.kind": "apk",
+            "package.abis": "the selection"
+          }
+        }
+      }
+    },
+    "app/modules/default": {
+      "target": "{name}",
+      "requires": [
+        "modules"
+      ],
+      "facts": {
+        "profile": "debug",
+        "create.declarations": "each selected build system",
+        "artifact.name": "{name}",
+        "artifact.bundle": "<none>",
+        "framework.linkage": "static",
+        "resources.location": "<artifact>.resources/huxerui/resources.bin",
+        "libraries": [],
+        "package.kind": "appimage"
+      },
+      "targets": {
+        "web": {
+          "facts": {
+            "resources.location": "<artifact>.data:/huxerui/resources.bin",
+            "package.kind": "web"
+          }
+        },
+        "android": {
+          "facts": {
+            "artifact.name": "lib{name}.so",
+            "resources.location": "application core",
+            "android.exports": "JNI entries only",
+            "package.kind": "apk",
+            "package.abis": "the selection"
+          }
+        }
+      }
+    },
+    "library/headers+modules/default": {
+      "application": "examples/preview",
+      "target": "example_{name}",
+      "facts": {
+        "profile": "debug",
+        "create.declarations": "each selected build system",
+        "artifact.name": "example_{name}",
+        "artifact.bundle": "<none>",
+        "framework.linkage": "static",
+        "resources.location": "<artifact>.resources/huxerui/resources.bin",
+        "libraries": [
+          "{product}::{product}"
+        ],
+        "package.kind": "appimage"
+      },
+      "targets": {
+        "web": {
+          "facts": {
+            "resources.location": "<artifact>.data:/huxerui/resources.bin",
+            "package.kind": "web"
+          }
+        },
+        "android": {
+          "facts": {
+            "artifact.name": "libexample_{name}.so",
+            "resources.location": "application core",
+            "android.exports": "JNI entries only",
+            "package.kind": "apk",
+            "package.abis": "the selection"
+          }
+        }
+      }
+    },
+    "library/modules/default": {
+      "application": "examples/preview",
+      "target": "example_{name}",
+      "requires": [
+        "modules"
+      ],
+      "facts": {
+        "profile": "debug",
+        "create.declarations": "each selected build system",
+        "artifact.name": "example_{name}",
+        "artifact.bundle": "<none>",
+        "framework.linkage": "static",
+        "resources.location": "<artifact>.resources/huxerui/resources.bin",
+        "libraries": [
+          "{product}::{product}"
+        ],
+        "package.kind": "appimage"
+      },
+      "targets": {
+        "web": {
+          "facts": {
+            "resources.location": "<artifact>.data:/huxerui/resources.bin",
+            "package.kind": "web"
+          }
+        },
+        "android": {
+          "facts": {
+            "artifact.name": "libexample_{name}.so",
+            "resources.location": "application core",
+            "android.exports": "JNI entries only",
+            "package.kind": "apk",
+            "package.abis": "the selection"
+          }
+        }
+      }
+    }
+  }
+}

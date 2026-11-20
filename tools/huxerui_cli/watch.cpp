@@ -53,8 +53,10 @@ using SourceSnapshot = std::map<fs::path, std::pair<fs::file_time_type, std::uin
 
 bool IgnoreDirectory(const fs::path& path) {
   const auto name = path.filename();
+  // mcpp writes its outputs to `target/` beside the manifest.
   return name == ".git" || name == ".huxerui" || name == ".gradle" || name == ".cxx" ||
-         name == "build" || name == "dist" || name == "DerivedData";
+         name == "build" || name == "dist" || name == "DerivedData" || name == ".mcpp" ||
+         (name == "target" && fs::is_regular_file(path.parent_path() / "mcpp.toml"));
 }
 
 std::set<fs::path> SourceRoots(const PlatformCommandContext& context) {

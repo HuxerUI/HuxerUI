@@ -1,0 +1,5 @@
+target/
+compile_commands.json
+# The rules write their records here, and an example pins nothing.
+.huxerui/
+mcpp.lock

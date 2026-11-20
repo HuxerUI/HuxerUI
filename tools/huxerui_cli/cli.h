@@ -9,6 +9,10 @@
 
 namespace huxerui::cli {
 
+namespace prompt {
+class Prompter;
+} // namespace prompt
+
 /// Runs one HuxerUI CLI invocation.
 ///
 /// The argument span excludes the executable name. Diagnostics and usage errors are written to `error`; normal command
@@ -21,8 +25,11 @@ namespace huxerui::cli {
 /// @param input Input stream used by interactive commands such as `setup`.
 /// @param output Destination for normal command output.
 /// @param error Destination for usage and execution diagnostics.
+/// @param prompter Asks for selections a command was not given, or null where no one can answer; `create` then
+///        applies its defaults.
 /// @return `0` on success, `2` for invalid usage, or `1` for another command failure.
 int Run(std::span<const std::string_view> arguments, const std::filesystem::path& working_directory,
-        const SdkLocation& sdk, std::istream& input, std::ostream& output, std::ostream& error);
+        const SdkLocation& sdk, std::istream& input, std::ostream& output, std::ostream& error,
+        prompt::Prompter* prompter = nullptr);
 
 } // namespace huxerui::cli

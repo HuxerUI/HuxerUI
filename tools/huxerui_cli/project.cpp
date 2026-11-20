@@ -264,6 +264,13 @@ std::string NormalizeLibraryIdentifier(std::string_view name) {
   return identifier;
 }
 
+void ReplaceAll(std::string& text, std::string_view from, std::string_view to) {
+  for (std::size_t position = text.find(from); position != std::string::npos;
+       position = text.find(from, position + to.size())) {
+    text.replace(position, from.size(), to);
+  }
+}
+
 // The mcpp project comes from the repository's own `templates/app`, which is an
 // mcpp PACKAGE template: `mcpp new --template huxerui.huxerui:app` renders the
 // same files once HuxerUI is published. One tree, two renderers -- a copy under
@@ -279,6 +286,8 @@ std::string NormalizeLibraryIdentifier(std::string_view name) {
 ///
 /// The comment above the dependency is replaced along with it, or the manifest
 /// would explain a namespace rule that no longer applies to the line below it.
+/// An entry the manifest selects from HuxerUI names the dependency's key, so it
+/// follows the key to `huxerui`.
 std::string McppPathDependency(std::string_view manifest, const std::filesystem::path& huxerui_home) {
   std::vector<std::string> lines;
   for (std::size_t start = 0; start <= manifest.size();) {
@@ -329,6 +338,7 @@ std::string McppPathDependency(std::string_view manifest, const std::filesystem:
       out += '\n';
     }
   }
+  ReplaceAll(out, "\"huxerui.huxerui/", "\"huxerui/");
   return out;
 }
 
@@ -353,6 +363,56 @@ std::vector<GeneratedFile> McppApplicationProjectFiles(const ProjectTemplateCont
   return files;
 }
 
+/// The `[dependencies]` table of an mcpp declaration the CLI writes: HuxerUI, then `extra` lines.
+std::string McppDependencies(const std::filesystem::path& huxerui_home, std::string_view extra = {}) {
+  std::string table;
+  if (IsMcppSourcePackage(huxerui_home)) {
+    table = "# HuxerUI from the checkout this project was created against. To build against a release instead,\n"
+            "# name the published package: huxerui.huxerui = \"" + std::string(McppPackageVersion()) + "\"\n"
+            "[dependencies]\nhuxerui = { path = \"" + huxerui_home.lexically_normal().generic_string() + "\" }\n";
+  } else {
+    table = "[dependencies]\nhuxerui.huxerui = \"" + std::string(McppPackageVersion()) + "\"\n";
+  }
+  table += extra;
+  if (table.ends_with('\n')) {
+    table.pop_back();
+  }
+  return table;
+}
+
+bool IsCMakeDeclaration(const GeneratedFile& file) {
+  const std::string path = file.path.generic_string();
+  return path == "CMakeLists.txt" || path == "HuxerUIProject.cmake";
+}
+
+/// Keeps the native declarations of the selected build systems: the CMake files when CMake is selected, and the
+/// mcpp declaration rendered from `mcpp_template` when mcpp is.
+void SelectDeclarations(std::vector<GeneratedFile>& files, const CreateSelection& selection,
+                        std::vector<GeneratedFile> mcpp_declaration) {
+  if (!selection.Has(BuildSystem::CMake)) {
+    std::erase_if(files, IsCMakeDeclaration);
+  }
+  if (!selection.Has(BuildSystem::Mcpp)) {
+    return;
+  }
+  files.insert(files.end(), std::make_move_iterator(mcpp_declaration.begin()),
+               std::make_move_iterator(mcpp_declaration.end()));
+  const auto ignore = std::ranges::find_if(files, [](const GeneratedFile& file) {
+    return file.path.generic_string() == ".gitignore";
+  });
+  if (ignore != files.end()) {
+    ignore->content += "\n/target/\n/.mcpp/\n";
+  }
+}
+
+std::vector<GeneratedFile> McppApplicationDeclaration(const ProjectTemplateContext& context,
+                                                      const std::filesystem::path& huxerui_home,
+                                                      std::string_view extra_dependencies = {}) {
+  const std::string dependencies = McppDependencies(huxerui_home, extra_dependencies);
+  const std::array replacements{TemplateReplacement{"@MCPP_DEPENDENCIES@", dependencies}};
+  return RenderTemplateTree("project/mcpp_app", context, replacements);
+}
+
 std::vector<GeneratedFile> ApplicationProjectFiles(const ProjectTemplateContext& context) {
   std::vector<GeneratedFile> files = RenderTemplateTree("project/app", context);
   std::vector<GeneratedFile> project_support = RenderTemplateTree("project/application", context);
@@ -361,11 +421,13 @@ std::vector<GeneratedFile> ApplicationProjectFiles(const ProjectTemplateContext&
   return files;
 }
 
+/// The Preview application of a library, written in the library's source style.
 ProjectTemplateContext PreviewContext(const LibraryTemplateContext& library) {
   return {
       library.project.project_name + " Preview",
       "example_" + library.project.target_name,
       library.project.project_id + ".preview",
+      library.project.source_style,
   };
 }
 
@@ -394,6 +456,106 @@ std::vector<GeneratedFile> LibraryProjectFiles(const LibraryTemplateContext& lib
       TemplateReplacement{"@LIBRARY_ALIAS@", alias},
   };
   return RenderTemplateTree("project/library", library.project, replacements);
+}
+
+/// The module a library exports: its package identity, which for a package `create` writes is the package name, as
+/// huxerui.rules names a generated interface. A module name is global to a program and a package name is unique
+/// where packages are published, while one C++ namespace may be shared by several libraries; `-`, which a package
+/// name may contain and a module name may not, becomes `_`.
+std::string PackageModuleName(std::string_view package_name) {
+  std::string name(package_name);
+  std::ranges::replace(name, '-', '_');
+  return name;
+}
+
+std::vector<GeneratedFile> McppLibraryDeclaration(const LibraryTemplateContext& library,
+                                                  const std::filesystem::path& huxerui_home) {
+  const LibraryTargetProjection target = DeriveLibraryTargetProjection(library.public_target);
+  const std::string dependencies = McppDependencies(huxerui_home);
+  // The module interface is what huxerui.rules generates from the template's one header, so the first build
+  // finds it current. The package is named after the project, as a C++ modules library's is.
+  const std::string module_name = PackageModuleName(library.project.project_name);
+  const std::string primary_header = target.include_directory + "/" + target.header_name + ".h";
+  const std::array replacements{
+      TemplateReplacement{"@LIBRARY_PUBLIC_TARGET@", library.public_target},
+      TemplateReplacement{"@LIBRARY_RESOURCE_NAMESPACE@", target.resource_namespace},
+      TemplateReplacement{"@LIBRARY_NAMESPACE@", library.cpp_namespace},
+      TemplateReplacement{"@LIBRARY_MODULE_NAME@", module_name},
+      TemplateReplacement{"@LIBRARY_PRIMARY_HEADER@", primary_header},
+      TemplateReplacement{"@MCPP_DEPENDENCIES@", dependencies},
+  };
+  return RenderTemplateTree("project/mcpp_library", library.project, replacements);
+}
+
+/// The Preview's mcpp declaration depends on the library two directories up, by its package name.
+std::vector<GeneratedFile> McppPreviewDeclaration(const LibraryTemplateContext& library,
+                                                  const std::filesystem::path& huxerui_home) {
+  return McppApplicationDeclaration(PreviewContext(library), huxerui_home,
+                                    library.project.project_name + " = { path = \"../..\" }\n");
+}
+
+GeneratedFile& FindGeneratedFile(std::vector<GeneratedFile>& files, std::string_view path, std::string_view origin) {
+  const auto file = std::ranges::find_if(files, [path](const GeneratedFile& candidate) {
+    return candidate.path.generic_string() == path;
+  });
+  if (file == files.end()) {
+    throw std::logic_error(std::string(origin) + " renders no " + std::string(path));
+  }
+  return *file;
+}
+
+/// A C++ modules library: `templates/library`, which `mcpp new --template library` also renders, with the
+/// identity the CLI knows. The template's placeholder module `component` takes the library's own name, because a
+/// module name is global to a program and two libraries that both kept the placeholder could not be used together.
+std::vector<GeneratedFile> McppModulesLibraryFiles(const LibraryTemplateContext& library,
+                                                   const std::filesystem::path& huxerui_home) {
+  std::vector<GeneratedFile> files = McppApplicationProjectFiles(library.project, huxerui_home, "library");
+  // The package is named after the project, as `templates/library` renders it.
+  const std::string module = PackageModuleName(library.project.project_name);
+  const std::string unit = "src/" + module + ".cppm";
+  FindGeneratedFile(files, "src/component.cppm", "templates/library").path = unit;
+  for (GeneratedFile& file : files) {
+    ReplaceAll(file.content, "export module component;", "export module " + module + ";");
+    ReplaceAll(file.content, "import component;", "import " + module + ";");
+    ReplaceAll(file.content, "path = \"src/component.cppm\"", "path = \"" + unit + "\"");
+  }
+  GeneratedFile& manifest = FindGeneratedFile(files, "mcpp.toml", "templates/library");
+  manifest.content += "\n# The library's public identity: huxerui.rules records it in the library graph, and `huxerui "
+                      "platform add` gives\n# `name`, `id`, and `namespace` to the platform packages it writes.\n"
+                      "[package.metadata.huxerui]\nlibrary   = \"" + library.public_target + "\"\nname      = \"" +
+                      library.project.project_name + "\"\nid        = \"" + library.project.project_id +
+                      "\"\nnamespace = \"" + library.cpp_namespace + "\"\n";
+  return files;
+}
+
+/// A C++ modules library's Preview: a C++ modules application that imports the library's module.
+std::vector<GeneratedFile> ModulesPreviewProjectFiles(const LibraryTemplateContext& library,
+                                                      const std::filesystem::path& huxerui_home) {
+  const ProjectTemplateContext context = PreviewContext(library);
+  const std::string module = PackageModuleName(library.project.project_name);
+  const std::array replacements{
+      TemplateReplacement{"@LIBRARY_MODULE@", module},
+      TemplateReplacement{"@LIBRARY_PROJECT_NAME@", library.project.project_name},
+  };
+  std::vector<GeneratedFile> files = RenderTemplateTree("project/modules_library_preview", context, replacements);
+  // The library's package name is its project name, as `templates/library` renders it.
+  std::vector<GeneratedFile> declaration =
+      McppApplicationDeclaration(context, huxerui_home, library.project.project_name + " = { path = \"../..\" }\n");
+  // `import std;` on iOS needs a C++ standard library built for the application, as in `templates/app`.
+  std::string& manifest = FindGeneratedFile(declaration, "mcpp.toml", "project/mcpp_app").content;
+  const std::string ios_dependencies = "[target.'cfg(os = \"ios\")'.dependencies]\n";
+  const std::size_t table = manifest.find(ios_dependencies);
+  if (table == std::string::npos) {
+    throw std::logic_error("project/mcpp_app declares no iOS dependency table");
+  }
+  manifest.insert(table + ios_dependencies.size(),
+                  "# `import std;` on iOS needs a C++ standard library built for this application: the module is "
+                  "made from the\n# toolchain's libc++ headers, and the libc++ in the iOS SDK does not carry every "
+                  "symbol those headers name.\nllvm.libcxx = \"22.1.8.3\"\n");
+  files.insert(files.end(), std::make_move_iterator(declaration.begin()),
+               std::make_move_iterator(declaration.end()));
+  FindGeneratedFile(files, ".gitignore", "project/modules_library_preview").content += "\n/target/\n/.mcpp/\n";
+  return files;
 }
 
 std::vector<GeneratedFile> PreviewProjectFiles(const LibraryTemplateContext& library) {
@@ -455,26 +617,24 @@ std::string ReadFile(const std::filesystem::path& path) {
   return {std::istreambuf_iterator<char>(stream), std::istreambuf_iterator<char>()};
 }
 
-/// True for a directory `huxerui create --build mcpp` produced.
+/// True for a directory carrying an mcpp declaration.
 bool IsMcppProjectRoot(const std::filesystem::path& root) {
   return std::filesystem::is_regular_file(root / "mcpp.toml") &&
          std::filesystem::is_regular_file(root / "build.mcpp");
 }
 
 Project InspectProjectRoot(const std::filesystem::path& root) {
-  if (!std::filesystem::is_regular_file(root / "CMakeLists.txt")) {
-    // This CLI drives the CMake project: build, run, package and platform add
-    // all read it. An mcpp project has no CMakeLists.txt on purpose, and
-    // "missing CMakeLists.txt" sends its owner looking for the wrong thing.
-    if (IsMcppProjectRoot(root)) {
-      throw std::runtime_error("this is an mcpp project, which mcpp drives rather than the huxerui CLI"
-                               " -- build it with `mcpp build` and run it with `mcpp run`: " +
-                               root.string());
-    }
-    throw std::runtime_error("HuxerUI project is missing CMakeLists.txt: " + root.string());
+  Project project{root, {}, {}, {}};
+  if (std::filesystem::is_regular_file(root / "CMakeLists.txt")) {
+    project.build_systems.push_back(BuildSystem::CMake);
   }
-
-  Project project{root, {}, {}};
+  if (IsMcppProjectRoot(root)) {
+    project.build_systems.push_back(BuildSystem::Mcpp);
+  }
+  if (project.build_systems.empty()) {
+    throw std::runtime_error("HuxerUI project has no native build declaration (CMakeLists.txt, or mcpp.toml with "
+                             "build.mcpp): " + root.string());
+  }
   const std::filesystem::path platform_root = root / "platform";
   if (std::filesystem::is_directory(platform_root)) {
     for (const std::filesystem::directory_entry& entry : std::filesystem::directory_iterator(platform_root)) {
@@ -510,6 +670,85 @@ std::string JsonString(std::string_view json, std::string_view key) {
     throw std::runtime_error("project plan has an unterminated " + std::string(key));
   }
   return std::string(json.substr(quote + 1, end - quote - 1));
+}
+
+/// One string value of a TOML table in a manifest the CLI or `mcpp new` wrote: `key = "value"` on one line.
+std::string ManifestValue(std::string_view manifest, std::string_view table, std::string_view key) {
+  bool inside = false;
+  for (std::size_t start = 0; start < manifest.size();) {
+    const std::size_t end = std::min(manifest.find('\n', start), manifest.size());
+    std::string_view line = manifest.substr(start, end - start);
+    start = end + 1;
+    while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) {
+      line.remove_prefix(1);
+    }
+    if (line.starts_with('[')) {
+      inside = line.starts_with("[" + std::string(table) + "]");
+      continue;
+    }
+    if (!inside || !line.starts_with(key)) {
+      continue;
+    }
+    std::string_view rest = line.substr(key.size());
+    while (!rest.empty() && (rest.front() == ' ' || rest.front() == '\t')) {
+      rest.remove_prefix(1);
+    }
+    if (!rest.starts_with('=')) {
+      continue;
+    }
+    const std::size_t open = rest.find('"');
+    const std::size_t close = open == std::string_view::npos ? open : rest.find('"', open + 1);
+    if (close != std::string_view::npos) {
+      return std::string(rest.substr(open + 1, close - open - 1));
+    }
+  }
+  return {};
+}
+
+/// True for a library's root: a headers library's public `include/`, or an mcpp declaration naming a library identity.
+bool IsLibraryRoot(const std::filesystem::path& root) {
+  return std::filesystem::is_directory(root / "include") ||
+         (IsMcppProjectRoot(root) &&
+          !ManifestValue(ReadFile(root / "mcpp.toml"), "package.metadata.huxerui", "library").empty());
+}
+
+bool HasModuleSources(const std::filesystem::path& root) {
+  std::error_code error;
+  for (std::filesystem::recursive_directory_iterator entry(root / "src", error), end; !error && entry != end;
+       entry.increment(error)) {
+    if (entry->path().extension() == ".cppm") {
+      return true;
+    }
+  }
+  return false;
+}
+
+/// The identity of a project that declares only mcpp, from the manifest's `[package.metadata.huxerui]` table the
+/// CLI writes; a manifest without it, such as one `mcpp new` rendered, derives the identity from the package name.
+ProjectTemplate LoadMcppProjectTemplate(const Project& project) {
+  const std::string manifest = ReadFile(project.root / "mcpp.toml");
+  const std::string package = ManifestValue(manifest, "package", "name");
+  const std::string name = ManifestValue(manifest, "package.metadata.huxerui", "name");
+  const std::string id = ManifestValue(manifest, "package.metadata.huxerui", "id");
+  const std::string library = ManifestValue(manifest, "package.metadata.huxerui", "library");
+  const std::string_view display = name.empty() ? std::string_view(package) : std::string_view(name);
+  try {
+    const SourceStyle style = HasModuleSources(project.root) ? SourceStyle::Modules : SourceStyle::Headers;
+    if (!library.empty()) {
+      LibraryTemplateContext context = MakeLibraryTemplateContext(
+          display, ManifestValue(manifest, "package.metadata.huxerui", "namespace"), library, id);
+      context.project.source_style = style;
+      return context;
+    }
+    // The table's `name` is the display name the shells show, which may be any text, as a CMake project's name
+    // is; the target and the defaults derive from the package name, which is an identifier.
+    ProjectTemplateContext context = MakeProjectTemplateContext(IsValidProjectName(display) ? display : package, id);
+    context.project_name = std::string(display);
+    context.source_style = style;
+    return context;
+  } catch (const std::invalid_argument& error) {
+    throw std::runtime_error("mcpp.toml does not name a valid HuxerUI project identity: " + std::string(error.what()));
+  }
 }
 
 ProjectKind ParseProjectKind(std::string_view value) {
@@ -653,6 +892,62 @@ std::string MakeLibraryProductName(std::string_view library_name) {
   return product_name;
 }
 
+bool CreateSelection::Has(BuildSystem build_system) const noexcept {
+  return std::ranges::find(build_systems, build_system) != build_systems.end();
+}
+
+std::string_view BuildSystemName(BuildSystem build_system) noexcept {
+  return build_system == BuildSystem::CMake ? "cmake" : "mcpp";
+}
+
+bool ProvisionsToolchain(BuildSystem build_system) noexcept {
+  return build_system == BuildSystem::Mcpp;
+}
+
+std::optional<BuildSystem> ParseBuildSystem(std::string_view name) noexcept {
+  if (name == "cmake") {
+    return BuildSystem::CMake;
+  }
+  if (name == "mcpp") {
+    return BuildSystem::Mcpp;
+  }
+  return std::nullopt;
+}
+
+std::string_view SourceStyleName(SourceStyle style) noexcept {
+  return style == SourceStyle::Modules ? "modules" : "headers";
+}
+
+std::string_view CreateStyleName(const CreateSelection& selection) noexcept {
+  return selection.module_interface ? "headers + modules" : SourceStyleName(selection.style);
+}
+
+std::string ModuleInterfaceName(const LibraryTemplateContext& library) {
+  return PackageModuleName(library.project.project_name);
+}
+
+CreateSelection ResolveCreateSelection(ProjectKind kind, std::span<const BuildSystem> build_systems) {
+  CreateSelection selection;
+  for (const BuildSystem build_system : {BuildSystem::CMake, BuildSystem::Mcpp}) {
+    if (std::ranges::find(build_systems, build_system) != build_systems.end()) {
+      selection.build_systems.push_back(build_system);
+    }
+  }
+  if (selection.build_systems.empty()) {
+    // A library is built by its consumer's build system, so it declares every one that can build it.
+    selection.build_systems = kind == ProjectKind::Library ? std::vector{BuildSystem::CMake, BuildSystem::Mcpp}
+                                                           : std::vector{BuildSystem::CMake};
+  }
+  // The style a project's sources use is the one every declared integration can build: a list naming CMake,
+  // which lacks the `modules` capability, is headers, and mcpp alone is C++ modules.
+  selection.style = selection.Has(BuildSystem::CMake) ? SourceStyle::Headers : SourceStyle::Modules;
+  // A library declaring both exports its headers as a module as well, for consumers built with mcpp. An application
+  // has no importer, so it stays headers.
+  selection.module_interface =
+      kind == ProjectKind::Library && selection.Has(BuildSystem::CMake) && selection.Has(BuildSystem::Mcpp);
+  return selection;
+}
+
 Project DiscoverProject(const std::filesystem::path& start) {
   std::error_code error;
   std::filesystem::path current = std::filesystem::absolute(start, error);
@@ -663,18 +958,12 @@ Project DiscoverProject(const std::filesystem::path& start) {
     current = current.parent_path();
   }
 
-  std::filesystem::path mcpp_root;
   while (!current.empty()) {
     const bool has_cmake = std::filesystem::is_regular_file(current / "CMakeLists.txt");
     const bool has_platforms = std::filesystem::is_directory(current / "platform");
     const bool has_library_headers = std::filesystem::is_directory(current / "include");
-    if (has_cmake && (has_platforms || has_library_headers)) {
+    if ((has_cmake && (has_platforms || has_library_headers)) || IsMcppProjectRoot(current)) {
       return InspectProjectRoot(current);
-    }
-    // Recorded rather than returned: the walk still prefers a CMake project
-    // further up, which is what a CMake project holding an mcpp example needs.
-    if (mcpp_root.empty() && IsMcppProjectRoot(current)) {
-      mcpp_root = current;
     }
 
     const std::filesystem::path parent = current.parent_path();
@@ -683,15 +972,73 @@ Project DiscoverProject(const std::filesystem::path& start) {
     }
     current = parent;
   }
-  if (!mcpp_root.empty()) {
-    throw std::runtime_error("this is an mcpp project, which mcpp drives rather than the huxerui CLI"
-                             " -- build it with `mcpp build` and run it with `mcpp run`: " +
-                             mcpp_root.string());
-  }
   throw std::runtime_error("no HuxerUI project found from " + start.string());
 }
 
+LibraryModules DescribeLibraryModules(const Project& project) {
+  if (!IsLibraryRoot(project.root)) {
+    return {};
+  }
+  const bool headers = std::filesystem::is_directory(project.root / "include");
+  if (!project.Declares(BuildSystem::Mcpp)) {
+    return {headers ? LibraryModules::State::NoMcpp : LibraryModules::State::NotLibrary};
+  }
+  const std::string manifest = ReadFile(project.root / "mcpp.toml");
+  const std::string lib_path = ManifestValue(manifest, "lib", "path");
+  const std::filesystem::path unit = project.root / lib_path;
+  const std::string text = !lib_path.empty() && std::filesystem::is_regular_file(unit) ? ReadFile(unit) : std::string();
+  // The unit's own declaration, as an importer reads it, wherever the author put the file.
+  std::string module;
+  std::vector<std::string> reexports;
+  for (std::size_t start = 0; start < text.size();) {
+    const std::size_t end = std::min(text.find('\n', start), text.size());
+    std::string_view line = std::string_view(text).substr(start, end - start);
+    start = end + 1;
+    while (!line.empty() && (line.front() == ' ' || line.front() == '\t')) {
+      line.remove_prefix(1);
+    }
+    const auto name = [](std::string_view rest) {
+      const std::size_t length = rest.find_first_of("; \t\r");
+      return std::string(rest.substr(0, length == std::string_view::npos ? rest.size() : length));
+    };
+    if (line.starts_with("export module ")) {
+      module = name(line.substr(std::string_view("export module ").size()));
+    } else if (line.starts_with("export import ")) {
+      reexports.push_back(name(line.substr(std::string_view("export import ").size())));
+    }
+  }
+  if (headers && module.empty()) {
+    std::string reason;
+    if (ManifestValue(manifest, "package.metadata.huxerui", "namespace").empty()) {
+      reason = "name the C++ namespace to export as `namespace` under [package.metadata.huxerui]";
+    } else if (lib_path.empty()) {
+      reason = "name the interface file as the [lib] path";
+    } else if (!std::filesystem::is_regular_file(unit)) {
+      reason = "create " + lib_path + "; the mcpp build writes it";
+    } else {
+      reason = "build with mcpp once to generate " + lib_path;
+    }
+    return {LibraryModules::State::NotExported, {}, {}, {}, reason};
+  }
+  // The documentation names a module after its package identity, which is unique where packages are published.
+  std::string recommended = ManifestValue(manifest, "package", "namespace");
+  recommended += (recommended.empty() ? "" : ".") + ManifestValue(manifest, "package", "name");
+  std::ranges::replace(recommended, '-', '_');
+  if (module.empty()) {
+    // A C++ modules library whose unit is not readable yet; the build reports the unit itself.
+    module = recommended;
+  }
+  std::erase_if(reexports, [&](const std::string& name) { return !name.starts_with(module + "."); });
+  if (recommended == module || recommended.empty()) {
+    recommended.clear();
+  }
+  return {LibraryModules::State::Module, module, reexports, recommended};
+}
+
 ProjectTemplate LoadProjectTemplate(const Project& project) {
+  if (!project.Declares(BuildSystem::CMake)) {
+    return LoadMcppProjectTemplate(project);
+  }
   const std::filesystem::path temporary = TemporaryPath(std::filesystem::temp_directory_path(), "project-plan");
   TemporaryTree cleanup(temporary);
   std::filesystem::create_directories(temporary);
@@ -738,9 +1085,19 @@ ProjectTemplate LoadProjectTemplate(const Project& project) {
   return LibraryTemplateContext{std::move(context), std::move(cpp_namespace), std::move(public_target)};
 }
 
+bool Project::Declares(BuildSystem build_system) const noexcept {
+  return std::ranges::find(build_systems, build_system) != build_systems.end();
+}
+
+BuildSystem Project::DefaultBuildSystem() const noexcept {
+  // `build_systems` is in `BuildSystem` order, so a root declaring both starts with CMake.
+  return build_systems.empty() ? BuildSystem::CMake : build_systems.front();
+}
+
 Project ResolveApplicationProject(const Project& project) {
-  if (std::filesystem::is_regular_file(project.root / "examples/preview/CMakeLists.txt") &&
-      std::filesystem::is_directory(project.root / "include")) {
+  const std::filesystem::path preview = project.root / "examples/preview";
+  if ((std::filesystem::is_regular_file(preview / "CMakeLists.txt") || IsMcppProjectRoot(preview)) &&
+      IsLibraryRoot(project.root)) {
     return InspectProjectRoot(project.root / "examples/preview");
   }
   return project;
@@ -749,17 +1106,18 @@ Project ResolveApplicationProject(const Project& project) {
 void CreateProject(const std::filesystem::path& destination, const ProjectTemplate& project_template,
     std::span<const PlatformDriver* const> application_platforms,
     std::span<const PlatformDriver* const> library_platforms, const std::filesystem::path& skill_source,
-    std::span<const AgentSkillDirectory> agent_skill_directories, BuildSystem build_system,
+    std::span<const AgentSkillDirectory> agent_skill_directories, const CreateSelection& selection,
     const std::filesystem::path& huxerui_home, std::string_view template_name) {
   if (std::filesystem::exists(destination)) {
     throw std::runtime_error("destination already exists: " + destination.string());
   }
+  if (selection.build_systems.empty()) {
+    throw std::logic_error("HuxerUI CLI received a project selection without a build system");
+  }
   const auto* library = std::get_if<LibraryTemplateContext>(&project_template);
-  const ProjectTemplateContext& context = ProjectContext(project_template);
-  // An mcpp project has no platform shells: mcpp builds Linux, Windows and
-  // macOS from one manifest, and the three platforms CMake owns alone --
-  // Android, iOS and Web -- are outside mcpp's target language entirely.
-  if (build_system == BuildSystem::CMake && library == nullptr && application_platforms.empty()) {
+  ProjectTemplateContext context = ProjectContext(project_template);
+  context.source_style = selection.style;
+  if (library == nullptr && application_platforms.empty()) {
     throw std::invalid_argument("application creation requires at least one platform");
   }
   if (library != nullptr && application_platforms.empty()) {
@@ -778,31 +1136,60 @@ void CreateProject(const std::filesystem::path& destination, const ProjectTempla
 
   TemporaryTree cleanup(temporary);
   std::filesystem::create_directories(temporary);
-  if (build_system == BuildSystem::Mcpp) {
-    // The template a kind maps to when none was named. `mcpp new` picks the
-    // one whose template.toml says `default = true`, which is `app`; the CLI
-    // knows something mcpp does not -- whether the caller asked for a library
-    // -- so it names that one instead of falling back to the default.
-    const std::string_view selected =
-        !template_name.empty() ? template_name
-                               : (library != nullptr ? std::string_view("library") : std::string_view("app"));
-    WriteFiles(temporary, McppApplicationProjectFiles(context, huxerui_home, selected));
-    CopyApplicationDevelopmentSkill(temporary, skill_source, agent_skill_directories);
-    std::filesystem::rename(temporary, destination);
-    cleanup.Commit();
-    return;
-  }
-  if (library == nullptr) {
-    WriteFiles(temporary, ApplicationProjectFiles(context));
+  if (library == nullptr && selection.style == SourceStyle::Modules) {
+    // The C++ modules sources come from the mcpp package template that `mcpp new --template` also renders.
+    const std::string_view selected = !template_name.empty() ? template_name : std::string_view("app");
+    std::vector<GeneratedFile> files = McppApplicationProjectFiles(context, huxerui_home, selected);
+    // The template carries every platform's entry; the project keeps the selected platforms' only.
+    std::erase_if(files, [&](const GeneratedFile& file) {
+      const auto component = file.path.begin();
+      if (component == file.path.end() || *component != "platform" || std::next(component) == file.path.end()) {
+        return false;
+      }
+      const std::string id = std::next(component)->string();
+      return std::ranges::none_of(application_platforms, [&id](const PlatformDriver* platform) {
+        return platform->Id() == id;
+      });
+    });
+    // `mcpp new` cannot know the identifier, so the template leaves it commented out in its identity table; the CLI
+    // states it there, where `platform add` and the package formats read it.
+    std::string& manifest = FindGeneratedFile(files, "mcpp.toml", "templates/" + std::string(selected)).content;
+    // A Windows checkout may embed the template with CRLF line endings; the line's own ending is kept.
+    const std::size_t table = manifest.find("[package.metadata.huxerui]");
+    const std::size_t placeholder = table == std::string::npos ? table : manifest.find("\n# id = ", table);
+    if (placeholder == std::string::npos) {
+      throw std::logic_error("templates/" + std::string(selected) + " has no identity table with an id placeholder");
+    }
+    const std::size_t end = manifest.find_first_of("\r\n", placeholder + 1);
+    manifest.replace(placeholder + 1, end - placeholder - 1, "id   = \"" + context.project_id + "\"");
+    WriteFiles(temporary, files);
+    for (const PlatformDriver* platform : application_platforms) {
+      WriteFiles(temporary / "platform" / platform->Id(), platform->CreateShell(context));
+    }
+  } else if (library == nullptr) {
+    std::vector<GeneratedFile> files = ApplicationProjectFiles(context);
+    SelectDeclarations(files, selection, McppApplicationDeclaration(context, huxerui_home));
+    WriteFiles(temporary, files);
     CreateResourceDirectories(temporary);
     for (const PlatformDriver* platform : application_platforms) {
       WriteFiles(temporary / "platform" / platform->Id(), platform->CreateShell(context));
     }
   } else {
-    const ProjectTemplateContext preview = PreviewContext(*library);
-    WriteFiles(temporary, LibraryProjectFiles(*library));
-    CreateResourceDirectories(temporary);
-    WriteFiles(temporary / "examples/preview", PreviewProjectFiles(*library));
+    ProjectTemplateContext preview = PreviewContext(*library);
+    preview.source_style = selection.style;
+    std::vector<GeneratedFile> preview_files;
+    if (selection.style == SourceStyle::Modules) {
+      WriteFiles(temporary, McppModulesLibraryFiles(*library, huxerui_home));
+      preview_files = ModulesPreviewProjectFiles(*library, huxerui_home);
+    } else {
+      std::vector<GeneratedFile> files = LibraryProjectFiles(*library);
+      SelectDeclarations(files, selection, McppLibraryDeclaration(*library, huxerui_home));
+      WriteFiles(temporary, files);
+      CreateResourceDirectories(temporary);
+      preview_files = PreviewProjectFiles(*library);
+      SelectDeclarations(preview_files, selection, McppPreviewDeclaration(*library, huxerui_home));
+    }
+    WriteFiles(temporary / "examples/preview", preview_files);
     CreateResourceDirectories(temporary / "examples/preview");
     for (const PlatformDriver* platform : library_platforms) {
       const GeneratedTree package = platform->CreateLibraryPackage(*library, temporary);

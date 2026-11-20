@@ -1,0 +1,9 @@
+// The build program: huxerui.rules arrives through the huxerui dependency and schedules the composable transform
+// and the resource compiler as build-graph edges.
+
+import mcpp;
+import huxerui.rules;
+
+int main() {
+    return huxerui::rules::configure({ .resources = "resources" }) ? 0 : 1;
+}

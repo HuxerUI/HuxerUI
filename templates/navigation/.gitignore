@@ -1,3 +1,4 @@
 target/
 .mcpp/
 compile_commands.json
+.huxerui/

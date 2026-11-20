@@ -24,6 +24,37 @@ Packaging uses the same application target and platform shell as `build`. Interm
 
 Check packaging prerequisites with `huxerui doctor <platform> --operation package`. Windows builds an x64 installer and restores verified WiX v5 dependencies during `package`. WiX needs `Microsoft.NETCore.App` 6.0 or newer on that build host. macOS uses the system `otool`, `install_name_tool`, `lipo`, `codesign`, and `hdiutil`.
 
+## mcpp projects
+
+For a project built with mcpp, `huxerui package <platform>` runs `mcpp pack` with the platform's format and publishes the result under `dist/<platform>` the same way.
+The official `mcpp:plugins` members write the packages, and mcpp installs each member's tool only when a package asks for it, so no packaging tool is needed on the machine.
+
+| Platform | Default | Other formats with `mcpp pack --pkg-format` |
+| --- | --- | --- |
+| Linux | AppImage (`--format deb` and `--format rpm` select the others) | `deb`, `rpm` |
+| Windows | Burn setup executable chaining the application MSI | `msi` |
+| macOS | DMG containing the application bundle | `app` |
+| Web | the page with the module, its WebAssembly, and the preloaded resources | |
+| Android | APK signed with the debug key | `aab` |
+| iOS | application bundle for the simulator | |
+
+The application states its identity in `mcpp.toml`, which `huxerui create` writes:
+
+```toml
+[package.metadata.huxerui]
+name = "My App"
+id   = "com.example.myapp"
+```
+
+Android, iOS, and macOS packages need `id`; the Windows upgrade code is derived from it as the CMake path derives it.
+DEB and RPM take their maintainer from the first `[package] authors` entry; set `.package.maintainer` and `.package.depends` in `huxerui::rules::configure()` to state them explicitly.
+
+The mcpp packages differ from the CMake packages in these ways:
+
+- The Windows setup uses WiX's standard bootstrapper interface rather than the HuxerUI installer interface.
+- DEB and RPM install the staged application under `/opt/<name>` with the GTK libraries mcpp resolved, rather than depending on the distribution's GTK.
+- Android packages need no Gradle project: the build rules generate the application and activity classes, and the framework's Java host and manifest entries come from its own manifest.
+
 ## Linux package formats
 
 ```bash

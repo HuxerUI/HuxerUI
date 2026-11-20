@@ -11,11 +11,15 @@ Use this skill for consumer projects. For framework development, follow the fram
 
 Use the selected SDK or resolved package revision as the authority for public APIs and build behavior. For an explicit source dependency, use that checkout's public contracts. Inspect the existing entry point, target, state ownership, and affected platform configuration before editing.
 
-- Use the [CMake and CLI workflow](references/project-workflow.md) for SDK discovery, scaffolding, ABI selection, packaging, and windowless UI tests.
-- Use the [mcpp package workflow](references/cpp-modules-and-mcpp.md) for projects with `huxerui.huxerui` and `huxerui.rules`. Read `mcpp.toml` and `build.mcpp` to identify the integration.
+Identify the project style first, then its build system:
+
+- A headers project writes `#include <huxerui/huxerui.h>` and carries `CMakeLists.txt`, an `mcpp.toml`, or both. Use the [project workflow](references/project-workflow.md) for SDK discovery, scaffolding, ABI selection, packaging, and windowless UI tests.
+- A C++ modules project writes `import huxerui;` in module units, carries `mcpp.toml` and a `build.mcpp` that imports `huxerui.rules`, and is built with mcpp. Use [C++ Modules and mcpp](references/cpp-modules-and-mcpp.md).
 - Use the [manual SDK workflow](references/mcpp-build.md) for existing mcpp projects that link SDK binaries directly.
 
 Keep the project's build system and compatible toolchain. Report build and run results for the host and affected platforms actually validated.
+
+Create a library with both declarations, `--build-system cmake,mcpp`, which is a library's default. Other libraries and applications consume a library, and both declarations let each of them include its headers or import it as a C++ module, while only the headers are maintained: the mcpp build generates the module interface from them. To give an existing headers library that interface, follow [Add C++ modules to an existing headers library](references/cpp-modules-and-mcpp.md#add-c-modules-to-an-existing-headers-library). An application has no consumer, so it keeps its single build system, headers with CMake by default.
 
 ## Shared rules
 

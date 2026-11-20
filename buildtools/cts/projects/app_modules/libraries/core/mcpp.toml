@@ -1,0 +1,20 @@
+[package]
+name     = "ctskit_core"
+version  = "0.1.0"
+standard = "c++23"
+
+[package.metadata.huxerui]
+library   = "CtsKit::Core"
+resources = "resources"
+
+[dependencies]
+huxerui = { path = "../../../../../.." }
+
+[targets.ctskit_core]
+kind = "lib"
+
+[lib]
+path = "src/core.cppm"
+
+[build]
+sources = []

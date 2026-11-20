@@ -1,0 +1,7 @@
+// The same build program as any HuxerUI package: the rules generate the
+// interface the [lib] path names from the headers and compile modules/macros.cppm.
+
+import mcpp;
+import huxerui.rules;
+
+int main() { return huxerui::rules::configure({}) ? 0 : 1; }

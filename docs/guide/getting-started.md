@@ -11,11 +11,36 @@ cd hello_huxer
 
 The command creates `src/app.cpp`, the resource directories, the selected shells under `platform`, and the application-development Skill. The CMake scaffold enables all six shells by default. Use a subset with `--platform` and add another shell later with `huxerui platform add <platform-list>`.
 
+Run in a terminal, `huxerui create` asks for whatever the command line leaves out: the kind and name, the build system, the template, the platforms, and the agents whose skill files to add. It confirms before writing anything, then names the command to run next.
+`--yes`, or running without a terminal, applies the defaults instead, and the command prints the options that recreate the same project.
+
+A project's source style follows its build systems:
+
+| `--build-system` | Source style | Sources write |
+| --- | --- | --- |
+| `cmake` (an application's default) | headers | `#include <huxerui/huxerui.h>` |
+| `mcpp` | C++ modules | `import huxerui;` in module units |
+| `cmake,mcpp`, application | headers, with both declarations | `#include <huxerui/huxerui.h>` |
+| `cmake,mcpp`, library (a library's default, recommended) | headers and C++ modules | headers; consumers include them or import the library's module |
+
+Keep both for a library: other libraries and applications consume it, and with both declarations each of them can, whether it includes headers or imports C++ modules, while you maintain only the headers.
+An existing headers library gains the module interface without changing its sources, as [Add C++ modules to an existing headers library](../../skills/huxerui-app-development/references/cpp-modules-and-mcpp.md#add-c-modules-to-an-existing-headers-library) describes.
+Such a library is a module named after its package as well: the mcpp build generates its interface, `modules/<package name>.cppm`, from its public headers, so a consumer built with mcpp writes `import <module>;` and one built with CMake includes the headers. Set `cpp_modules_gen = false` under `[package.metadata.huxerui]` to write that file yourself; the build then reports the names it leaves out.
+
+```bash
+huxerui create app hello_modules --build-system mcpp
+huxerui create app hello_both --build-system cmake,mcpp
+```
+
+`--template` selects a C++ modules application's content, `app` (the default) or `navigation`.
+`build`, `run`, and `package` are the same commands for every style and build system.
+A project with both declarations builds with CMake; add `--build-system mcpp` to a command to build it with mcpp instead.
+
 Use `--agent` to select where the SDK copies the Skill. To enable the Claude and ZCode directories, pass `--agent claude,zcode` when creating the project.
 
 `codex`, `antigravity`, `opencode`, `command-code`, `omp`, and `dsh` share `.agents/skills`. `claude` uses `.claude/skills` and `zcode` uses `.zcode/skills`. The default is `codex`. Use `all` for all three directories or `none` to omit the Skill.
 
-For a desktop C++ modules project, use `--build mcpp` and omit `--platform`. See [C++ Modules and mcpp](../../skills/huxerui-app-development/references/cpp-modules-and-mcpp.md).
+See [C++ Modules and mcpp](../../skills/huxerui-app-development/references/cpp-modules-and-mcpp.md) for C++ modules projects.
 
 ## Diagnose the environment
 
@@ -25,6 +50,7 @@ huxerui doctor web,android
 ```
 
 `doctor` reports SDK, project, and tool readiness without changing the machine. With no platform list it checks the common environment and, inside a project, the enabled targets available on the host. `--operation` defaults to `build`; select `run`, `devices`, or `package` to check a different workflow.
+For a library it also states whether importers can `import` it as a C++ module.
 
 For supported downloadable prerequisites:
 
@@ -49,6 +75,17 @@ huxerui run web
 Use `huxerui run <platform> --watch` to rebuild after edits and relaunch the application or refresh the Web page. A build failure leaves the current instance running. Each successful reload starts a new application session. Press Ctrl+C to end the watch session.
 
 `build` and `run` default to `debug`. Use `--config release` for a release build or [package the application](packaging.md) to produce distributable output. `--generator <name>` selects a compatible CMake generator for macOS, Linux, or Web. Desktop builds honor `CMAKE_BUILD_PARALLEL_LEVEL`.
+
+### Select the build system
+
+A project's build system is identified by its native declaration: `CMakeLists.txt`, or `mcpp.toml` with `build.mcpp`.
+`build`, `run`, and `package` dispatch to that integration, so the same commands drive a CMake project and an mcpp project.
+A project that declares both builds with CMake and says so before it starts; `--build-system mcpp` selects mcpp for one command.
+For an mcpp project, desktop platforms and the Web build with `mcpp build`, run with `mcpp run`, and package with `mcpp pack`; Android and iOS build, run, and package through the same Gradle and Xcode shells as a CMake project, and `--no-shell` packages them with `mcpp pack` instead. Packages are published below `dist/<platform>` either way.
+An mcpp project takes HuxerUI from the `huxerui` dependency in `mcpp.toml`, so `--sdk` is a usage error there. `--optimization` and `--lto` select the release profiles `huxerui create` declares, `--profile` opens the framework's profiling feature, and `--abi`, `--device`, and `--java-home` apply to the shells.
+`--generator` steers only the CMake driver; for an mcpp project the CLI reports it with a warning and does not apply it.
+mcpp provisions its own compilers and libraries, so it needs nothing from the host but itself: install it with `xlings install mcpp -y`, as its [installation guide](https://github.com/mcpp-community/mcpp#install) describes. `huxerui doctor` checks the build system a project builds with and lists what is missing.
+Capabilities that only mcpp offers are used through `mcpp` directly.
 
 ### Select an SDK for one invocation
 
@@ -126,8 +163,53 @@ const Application application{
 };
 ```
 
+In a C++ modules project the same application is a module unit, `src/app.cppm`, and each desktop platform's `main.cpp` holds the process entry:
+
+```cpp
+export module app;
+
+import std;
+import huxerui;
+
+using namespace huxerui;
+
+[[huxerui::composable]]
+View Counter() {
+  auto count = UseState(0);
+
+  return Column {
+    Text::Format("Count: {}", count),
+    Button("Increment").OnClick([count] {
+      count += 1;
+    }),
+  }.With(
+      Padding(24.0F),
+      Spacing(12.0F)
+  );
+}
+
+View App() {
+  return MaterialTheme {
+    Counter(),
+  };
+}
+
+const Application application{
+    App,
+    {
+        .window = {
+            .title = "Counter",
+            .initial_size = {480.0F, 320.0F},
+            .minimum_size = Size{320.0F, 240.0F},
+        },
+    }
+};
+```
+
+`import std;` makes the standard-library declarations that HuxerUI's templates instantiate visible to the module unit.
+
 Mark a reusable function `[[huxerui::composable]]` when it directly calls a composition-bound `UseXxx()` function.
-Composable code generation is enabled by the generated CMake project.
+Composable code generation is enabled by the generated project, under either build system.
 
 ## Resources
 
@@ -165,10 +247,9 @@ Run `huxerui --help` for the command list and supported options. `build`, `run`,
 | Discover destinations | `huxerui devices [platform]` |
 | Build, launch, or distribute an application | `huxerui build [platform-list]`, `huxerui run <platform>`, `huxerui package <platform-list>` |
 | Open an iOS project | `huxerui open ios` |
-| Build an mcpp project through the bundled CLI | `huxerui mcpp build [--project <dir>]` |
 
 Use a comma-separated platform list or `all`. For `build`, `all` selects the enabled shells and an omitted list selects the host platform if enabled. Build intermediates live under `.huxerui`. For ABI selection, signing, and final artifacts, see [Packaging Applications](packaging.md).
 
-The `huxerui mcpp build` command delegates to the installed `mcpp` executable. `--project` selects the directory containing `mcpp.toml` and defaults to the current directory.
+`build`, `run`, and `package` reach the project's build system; `--build-system` selects one when the project declares several.
 
 Continue with [Core Concepts](core-concepts.md) and [Components and Input](components.md).

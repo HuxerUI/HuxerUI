@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "target": "cts_app_modules",
+  "requires": [
+    "modules"
+  ],
+  "sameModelAs": "app_library",
+  "facts": {
+    "profile": "debug",
+    "artifact.name": "cts_app_modules",
+    "framework.linkage": "static",
+    "resources.location": "<artifact>.resources/huxerui/resources.bin",
+    "libraries": [
+      "CtsKit::Widgets",
+      "CtsKit::Core"
+    ],
+    "artifact.bundle": "<none>"
+  },
+  "launch": {
+    "app.title": "CTS library application",
+    "widgets.caption": "Caption from the widgets library",
+    "core.name": "Name from the core library"
+  },
+  "targets": {
+    "macos": {
+      "facts": {
+        "artifact.bundle": "cts_app_modules.app",
+        "resources.location": "<bundle>/Contents/Resources/HuxerUI/huxerui/resources.bin"
+      }
+    },
+    "web": {
+      "facts": {
+        "resources.location": "<artifact>.data:/huxerui/resources.bin"
+      }
+    },
+    "android": {
+      "facts": {
+        "artifact.name": "libcts_app_modules.so",
+        "resources.location": "application core",
+        "android.exports": "JNI entries only"
+      }
+    },
+    "ios": {
+      "facts": {
+        "artifact.name": "libcts_app_modules_huxerui.a",
+        "resources.location": "application core",
+        "ios.link_inputs": "present"
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+# c++23 for the same reason as the other examples: mcpp's clang-on-Windows path
+# refuses `import std;` below it (mcpp-community/mcpp#603).
+[package]
+name        = "huxerui-example-headers-library"
+version     = "0.1.0"
+standard    = "c++23"
+description = "An application importing a headers library as a C++ module"
+
+[dependencies]
+huxerui = { path = "../../../.." }
+gauge   = { path = "gauge" }
+
+[targets.huxerui_example_headers_library]
+kind = "bin"
+main = "src/main.cpp"
+
+[build]
+sources = []
