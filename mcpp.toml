@@ -29,12 +29,6 @@ path = "modules/huxerui.cppm"
 # huxerui/huxerui_static pair is the author's.
 kind = "lib"
 
-# The entry an application selects on the Web and Android, where the platform layer starts it; see the file. mcpp
-# never compiles a target's `main` as an ordinary source, and `src/*/*.cpp` does not reach it in either integration.
-[targets.platform-entry]
-kind = "entry"
-main = "src/application/entry/platform_entry.cpp"
-
 [build]
 # Mirrors the core glob in cmake/HuxerUIBuild.cmake; `huxerui-build-check`
 # asserts the two agree. modules/huxerui.cppm re-exports the public headers'

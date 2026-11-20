@@ -43,7 +43,8 @@
           "org.huxerui.ctsprobe.core.CoreAndroid",
           "org.huxerui.ctsprobe.widgets.WidgetsAndroid",
           "org.huxerui.ctsprobe.widgets.WidgetsExtra"
-        ]
+        ],
+        "package.abis": "the selection"
       }
     },
     "ios": {

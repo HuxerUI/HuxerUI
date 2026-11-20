@@ -91,9 +91,9 @@ The target's entry is the one file the rule never transforms, for the same
 reason: a transformed copy of `main.cpp` would link beside the original.
 
 On the Web and Android the platform layer starts the application: the page mounts the module through its exports, and the Java host loads the shared library.
-No `main` runs application code there, and the CMake declaration compiles no entry for them, but mcpp links one translation unit as every program's entry.
-The framework therefore declares an entry target, `[targets.platform-entry] kind = "entry"`, whose translation unit defines nothing, and an application's Web and Android rows select it with `main = { from = "huxerui/platform-entry" }`, naming the key its dependency table gives HuxerUI.
-The file is outside `src/*/*.cpp`, so neither integration compiles it as a framework source.
+No `main` runs application code there, and the CMake declaration compiles no entry for them.
+An application's Web and Android rows therefore state `main = false`: the image has no program start, and mcpp links the Web module with `--no-entry` itself.
+The platform's entry points, the JNI exports and the Web module's factory, stay in the framework, retained by `build.mcpp` as CMake's link interface retains them.
 
 ### Resources and libraries
 

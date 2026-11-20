@@ -38,7 +38,7 @@ permissions:
 
 env:
   # Pin mcpp and the Linux Clang toolchain for reproducible validation.
-  MCPP_VERSION: '2026.11.17.1'
+  MCPP_VERSION: '2026.11.20.1'
   MCPP_LLVM: 'llvm@22.1.8'
   XLINGS_NON_INTERACTIVE: '1'
 

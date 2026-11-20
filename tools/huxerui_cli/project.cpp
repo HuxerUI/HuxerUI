@@ -409,10 +409,7 @@ std::vector<GeneratedFile> McppApplicationDeclaration(const ProjectTemplateConte
                                                       const std::filesystem::path& huxerui_home,
                                                       std::string_view extra_dependencies = {}) {
   const std::string dependencies = McppDependencies(huxerui_home, extra_dependencies);
-  // The key the dependency table gives HuxerUI, which an entry selected from it names.
-  const std::string key = IsMcppSourcePackage(huxerui_home) ? "huxerui" : "huxerui.huxerui";
-  const std::array replacements{TemplateReplacement{"@MCPP_DEPENDENCIES@", dependencies},
-                                TemplateReplacement{"@MCPP_HUXERUI@", key}};
+  const std::array replacements{TemplateReplacement{"@MCPP_DEPENDENCIES@", dependencies}};
   return RenderTemplateTree("project/mcpp_app", context, replacements);
 }
 

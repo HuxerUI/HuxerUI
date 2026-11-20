@@ -76,7 +76,7 @@ permissions:
   contents: read
 
 env:
-  MCPP_VERSION: '2026.11.17.1'
+  MCPP_VERSION: '2026.11.20.1'
   XLINGS_NON_INTERACTIVE: '1'
 
 defaults:

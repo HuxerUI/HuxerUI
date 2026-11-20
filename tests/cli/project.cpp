@@ -126,9 +126,9 @@ TEST_CASE("HuxerUICliKeepsOnlySelectedPlatformEntries") {
   REQUIRE_FALSE(std::filesystem::exists(project / "platform/ios"));
 }
 
-TEST_CASE("HuxerUICliSelectsTheFrameworkEntryOnTheWebAndAndroid") {
+TEST_CASE("HuxerUICliStatesNoProgramStartOnTheWebAndAndroid") {
   // The platform layer starts the application on the Web and Android, so a project without the Linux shell still
-  // builds there: those rows select the framework's entry through the key the dependency table gives HuxerUI.
+  // builds there: those rows state that the image has no program start.
   TemporaryDirectory temporary;
   REQUIRE(Invoke(temporary.Path(), {"create", "app", "Web-Only", "--build-system", "mcpp", "--platform", "web,android",
                                     "--agent", "none"})
@@ -142,8 +142,8 @@ TEST_CASE("HuxerUICliSelectsTheFrameworkEntryOnTheWebAndAndroid") {
     const std::string manifest = Read(project / "mcpp.toml");
     REQUIRE(manifest.find("[target.'cfg(os = \"emscripten\")'.targets.") != std::string::npos);
     REQUIRE(manifest.find("[target.'cfg(env = \"android\")'.targets.") != std::string::npos);
-    REQUIRE(manifest.find("main = { from = \"huxerui/platform-entry\" }") != std::string::npos);
-    REQUIRE(manifest.find("huxerui.huxerui/") == std::string::npos);
+    REQUIRE(manifest.find("main = false") != std::string::npos);
+    REQUIRE(manifest.find("platform/linux/main.cpp") != std::string::npos);
   }
 }
 

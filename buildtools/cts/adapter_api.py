@@ -56,6 +56,7 @@ RECORD_FIELDS: dict[str, tuple[bool, type]] = {
     "artifact": (True, str),
     "profile": (True, str),
     "libraries": (True, list),
+    "library_graph": (False, str),
     "bundle": (False, str),
     "resources": (False, str),
     "link_inputs": (False, str),
@@ -84,4 +85,4 @@ def validate_record(integration: str, record) -> dict:
         problems.append("launch_environment maps names to values that are not all strings")
     if problems:
         raise RecordError(f"the {integration} adapter returned an invalid record: " + "; ".join(problems))
-    return {"bundle": "", "launch_environment": {}, **record}
+    return {"bundle": "", "library_graph": "", "launch_environment": {}, **record}

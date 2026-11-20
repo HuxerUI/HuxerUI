@@ -77,7 +77,8 @@
             "artifact.name": "lib{name}.so",
             "resources.location": "application core",
             "android.exports": "JNI entries only",
-            "package.kind": "apk"
+            "package.kind": "apk",
+            "package.abis": "the selection"
           }
         }
       }
@@ -109,7 +110,8 @@
             "artifact.name": "lib{name}.so",
             "resources.location": "application core",
             "android.exports": "JNI entries only",
-            "package.kind": "apk"
+            "package.kind": "apk",
+            "package.abis": "the selection"
           }
         }
       }
@@ -141,7 +143,8 @@
             "artifact.name": "libexample_{name}.so",
             "resources.location": "application core",
             "android.exports": "JNI entries only",
-            "package.kind": "apk"
+            "package.kind": "apk",
+            "package.abis": "the selection"
           }
         }
       }
@@ -176,7 +179,8 @@
             "artifact.name": "libexample_{name}.so",
             "resources.location": "application core",
             "android.exports": "JNI entries only",
-            "package.kind": "apk"
+            "package.kind": "apk",
+            "package.abis": "the selection"
           }
         }
       }

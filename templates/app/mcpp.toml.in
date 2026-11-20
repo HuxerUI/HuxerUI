@@ -27,8 +27,7 @@ llvm.compiler-rt-builtins = "22.1.8.6"
 
 # `app` is a program on the desktop and the Web and the application's shared library on Android.
 # The platform shell owns the process entry, so each desktop and Apple platform names its own. On
-# the Web and Android the platform layer starts the application, so the entry is the framework's,
-# which runs nothing.
+# the Web and Android the platform layer starts the application, so the image has no program start.
 [targets.{{project.name}}]
 kind = "app"
 main = "platform/linux/main.cpp"
@@ -44,10 +43,10 @@ main = "platform/macos/main.cpp"
 main = "platform/ios/App/main.mm"
 
 [target.'cfg(os = "emscripten")'.targets.{{project.name}}]
-main = { from = "{{self.name}}/platform-entry" }
+main = false
 
 [target.'cfg(env = "android")'.targets.{{project.name}}]
-main = { from = "{{self.name}}/platform-entry" }
+main = false
 
 [build]
 # huxerui.rules owns the source selection: a build program can ADD a source but

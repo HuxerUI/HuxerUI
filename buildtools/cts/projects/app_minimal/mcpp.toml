@@ -28,12 +28,12 @@ main = "platform/macos/main.cpp"
 [target.'cfg(os = "ios")'.targets.cts_app_minimal]
 main = "platform/ios/App/main.mm"
 
-# On the Web and Android the platform layer starts the application, so the entry is the framework's.
+# On the Web and Android the platform layer starts the application, so the image has no program start.
 [target.'cfg(os = "emscripten")'.targets.cts_app_minimal]
-main = { from = "huxerui/platform-entry" }
+main = false
 
 [target.'cfg(env = "android")'.targets.cts_app_minimal]
-main = { from = "huxerui/platform-entry" }
+main = false
 
 [build]
 sources = []

@@ -35,7 +35,8 @@
         "artifact.name": "libcts_app_minimal.so",
         "resources.location": "application core",
         "android.exports": "JNI entries only",
-        "package.kind": "apk"
+        "package.kind": "apk",
+        "package.abis": "the selection"
       }
     },
     "ios": {

@@ -78,6 +78,7 @@ class Adapter:
         elif graph.exists():
             graph.unlink()
         libraries = load_json(graph)["libraries"] if graph.exists() else []
+        library_graph = str(graph) if graph.exists() else ""
 
         name = load_json(project / "expected.json")["target"]
         artifacts = [a for a in envelope["data"]["artifacts"] if a["name"] == name and a["kind"] in ("bin", "app", "shared")]
@@ -96,6 +97,7 @@ class Adapter:
                 "bundle": str(bundle),
                 "profile": profile,
                 "libraries": libraries,
+                "library_graph": library_graph,
                 "launch_environment": launch,
             }
         if target == "ios":
@@ -108,6 +110,7 @@ class Adapter:
                 "resources": str(core / "resources" / "package"),
                 "profile": profile,
                 "libraries": libraries,
+                "library_graph": library_graph,
             }
         resources = artifact.parent / f"{name}.resources"
         if target == "android":
@@ -123,5 +126,6 @@ class Adapter:
             "resources": str(resources),
             "profile": profile,
             "libraries": libraries,
+            "library_graph": library_graph,
             "launch_environment": launch,
         }

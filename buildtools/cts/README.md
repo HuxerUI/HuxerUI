@@ -40,13 +40,14 @@ The suite is divided into checkpoints so a run shows which part of the contract 
 | `build` | `profile`, `artifact.name`, `artifact.bundle`; `rebuild`, which the contract fixes: the runner builds every project twice and the second build of unchanged inputs must succeed; for created projects, `create.declarations` | |
 | `linkage` | `framework.linkage`, read from the artifact's dynamic dependencies; on Android also `android.exports`, on iOS `ios.link_inputs` | |
 | `resources` | `resources.location`: the final package where the Runtime looks for it | `resources.sha256`, `resources.files` |
-| `libraries` | `libraries`: the ordered library-graph record | `libraries.roots` |
+| `libraries` | `libraries`: the ordered library-graph record; `libraries.schema`, which the contract fixes: the record the integration generated states its schema version as an integer | `libraries.roots` |
 | `launch` | `launch.*`: what the started application resolved | |
-| `package` | `package.kind`: the distributable `huxerui package` published; `package.location` and `package.resources`, which the contract fixes: it is below `dist/<platform>` and carries the resource package the build produced; `package.dispatch`: the CLI is called as a developer calls it, with no `--build-system` for a root that declares only the checked integration or that declares several when the checked integration is CMake, and with it otherwise, and must state that it built with the checked integration; on Android `package.library_code`, the libraries' platform-package classes the APK carries, which `app_library`'s libraries contribute once by the standard layout and once by a declaration that adds a source root | |
+| `package` | `package.kind`: the distributable `huxerui package` published; `package.location` and `package.resources`, which the contract fixes: it is below `dist/<platform>` and carries the resource package the build produced; `package.dispatch`: the CLI is called as a developer calls it, with no `--build-system` for a root that declares only the checked integration or that declares several when the checked integration is CMake, and with it otherwise, and must state that it built with the checked integration; on Android `package.library_code`, the libraries' platform-package classes the APK carries, which `app_library`'s libraries contribute once by the standard layout and once by a declaration that adds a source root; on Android `package.abis`: the APK carries native libraries for the ABI the package was built for and no other | |
 | `package-shellless` | The same facts for `huxerui package --no-shell`, on Android and iOS, where an integration packages without the standard shell | |
-| `usage` | The exit codes the contract fixes for `huxerui build`: `usage.unknown_build_system` and, on a root that does not declare another integration, `usage.undeclared_build_system` are invalid usage; `usage.product_option`, each product option the integration declares inapplicable, is invalid usage; `usage.driver_option`, each such driver option, is reported; `usage.operation_failure`, a build of a copy carrying an unknown platform directory, is an operation failure. A fact that does not apply is left out with its reason | |
+| `usage` | The exit codes the contract fixes for `huxerui build`: `usage.unknown_build_system` and, on a root that does not declare another integration, `usage.undeclared_build_system` are invalid usage; `usage.product_option`, each product option the integration declares inapplicable, is invalid usage; `usage.driver_option`, each such driver option, is reported; `usage.operation_failure`, a build of a copy carrying an unknown platform directory, is an operation failure; `usage.unsupported_abi`, an ABI no platform has, is invalid usage. A fact that does not apply is left out with its reason | |
 | `doctor` | `doctor.ready`: `huxerui doctor <platform>` run in a built project as a developer runs it reports ready; a run that needs `--build-system` to reach the checked integration has no verdict, since the diagnosis plans for the root's default | |
 
+The compared resource package and library roots come from the one `resources/` root and source layout every integration reads, so their agreement is also what the suite checks of the common layout.
 The compared facts are also checked between a project and the project it names in `sameModelAs`.
 A difference is accepted only when [`allowed-differences.json`](allowed-differences.json) lists it with its reason.
 The list is empty.
@@ -63,13 +64,13 @@ A clause is `checked` when some project's `expected.json`, or the contract itsel
 | --- | --- | --- |
 | `DEFAULT-PROFILE` | checked | `build` |
 | `EXIT-CODES` | checked | `usage` |
-| `ABI-SELECT` | not covered |  |
+| `ABI-SELECT` | checked | `package`, `usage` |
 | `DISPATCH-ROOT` | checked | `package`, `package-shellless`, `usage` |
 | `DISPATCH-DEFAULT` | checked | `package`, `package-shellless` |
 | `DOCTOR-DISPATCH` | checked | `doctor` |
 | `OPTION-INAPPLICABLE` | checked | `usage` |
 | `CREATE-SELECT` | checked | `build` |
-| `LAYOUT-COMMON` | not covered |  |
+| `LAYOUT-COMMON` | compared only | `libraries`, `resources` |
 | `SETTINGS-PRECEDENCE` | not covered |  |
 | `SETTINGS-DIAGNOSE` | not covered |  |
 | `SETTINGS-EFFECTIVE` | not covered |  |
@@ -86,7 +87,7 @@ A clause is `checked` when some project's `expected.json`, or the contract itsel
 | `RES-LOCATION` | checked | `resources` |
 | `SOURCE-SDK` | not covered |  |
 | `INCREMENTAL` | checked | `build` |
-| `RECORD-SCHEMA` | not covered |  |
+| `RECORD-SCHEMA` | checked | `libraries` |
 | `RECORD-EQUIVALENCE` | compared only | `libraries` |
 | `PKG-KIND` | checked | `package`, `package-shellless` |
 | `SHELL-EXPLICIT` | checked | `package-shellless` |

@@ -47,6 +47,7 @@ class RecordTests(unittest.TestCase):
     def test_optional_fields_are_filled_in(self):
         validated = adapter_api.validate_record("x", record())
         self.assertEqual(validated["bundle"], "")
+        self.assertEqual(validated["library_graph"], "")
         self.assertEqual(validated["launch_environment"], {})
 
     def test_missing_required_field_is_an_error(self):
@@ -224,7 +225,8 @@ class UsageTests(unittest.TestCase):
                                  "usage.undeclared_build_system": "invalid usage",
                                  "usage.product_option": "invalid usage",
                                  "usage.driver_option": "reported",
-                                 "usage.operation_failure": "operation failure"})
+                                 "usage.operation_failure": "operation failure",
+                                 "usage.unsupported_abi": "invalid usage"})
         self.assertEqual(notes, [])
         # The driver option rebuilds the release build the distributable checkpoint left.
         self.assertIn(["build", "linux", "--config", "release", "--generator", "Ninja"], calls)
@@ -241,6 +243,7 @@ class UsageTests(unittest.TestCase):
         self.assertEqual(facts["usage.product_option"], "--sdk: success")
         self.assertEqual(facts["usage.driver_option"], "--generator: silent")
         self.assertEqual(facts["usage.operation_failure"], "success")
+        self.assertEqual(facts["usage.unsupported_abi"], "success")
 
 
 class DoctorTests(unittest.TestCase):
@@ -333,6 +336,35 @@ class LibraryCodeTests(unittest.TestCase):
                 archive.writestr("assets/notes.txt", b"Lorg/huxerui/ctsprobe/elsewhere/NotCode;")
             self.assertEqual(cts.packaged_library_code(dist),
                              ["org.huxerui.ctsprobe.core.CoreAndroid", "org.huxerui.ctsprobe.widgets.WidgetsExtra"])
+
+
+class PackagedAbiTests(unittest.TestCase):
+    def test_the_abis_are_the_native_library_directories(self):
+        import zipfile
+
+        with tempfile.TemporaryDirectory() as directory:
+            dist = Path(directory)
+            with zipfile.ZipFile(dist / "app.apk", "w") as archive:
+                archive.writestr("lib/arm64-v8a/libapp.so", b"")
+                archive.writestr("lib/x86_64/libapp.so", b"")
+                archive.writestr("assets/lib/armeabi-v7a/notes.txt", b"")
+            self.assertEqual(cts.packaged_abis(dist), ["arm64-v8a", "x86_64"])
+            with zipfile.ZipFile(dist / "app.apk", "w") as archive:
+                archive.writestr("base/lib/arm64-v8a/libapp.so", b"")
+            self.assertEqual(cts.packaged_abis(dist), ["arm64-v8a"])
+
+
+class RecordSchemaTests(unittest.TestCase):
+    def test_a_record_states_an_integer_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            graph = Path(directory) / "libraries.json"
+            graph.write_text('{"schema": 1, "libraries": []}', encoding="utf-8")
+            self.assertEqual(cts.record_schema(str(graph)), "versioned")
+            graph.write_text('{"schema": "1", "libraries": []}', encoding="utf-8")
+            self.assertEqual(cts.record_schema(str(graph)), "unversioned")
+            graph.write_text('{"libraries": []}', encoding="utf-8")
+            self.assertEqual(cts.record_schema(str(graph)), "unversioned")
+        self.assertEqual(cts.record_schema(""), "<missing>")
 
 
 class ImportCheckTests(unittest.TestCase):

@@ -72,6 +72,7 @@ class Adapter:
             build += ["--target", f"{name}_huxerui_ios_core"]
         run_command(build, project)
         libraries = load_json(graph)["libraries"] if graph.exists() else []
+        library_graph = str(graph) if graph.exists() else ""
 
         if target == "ios":
             # The application core the Xcode shell links: one archive, its link inputs, and the resource package.
@@ -83,6 +84,7 @@ class Adapter:
                 "resources": str(core / "resources" / "package"),
                 "profile": profile_of(cached_build_type(work / "build")),
                 "libraries": libraries,
+                "library_graph": library_graph,
             }
 
         # The plan is written below a directory named by the configuration that produced it.
@@ -99,4 +101,5 @@ class Adapter:
             "resources": str(work / "build" / "huxerui-resources" / plan["target"] / "package"),
             "profile": profile_of(configuration),
             "libraries": libraries,
+            "library_graph": library_graph,
         }

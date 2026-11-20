@@ -123,7 +123,7 @@ int main() {
     if (std::string_view(mcpp::target_os()) == "emscripten") {
         // The link interface of cmake/platform/Web.cmake for an application.
         const std::string web = std::string(mcpp::manifest_dir()) + "/platform/web";
-        for (const char* flag : { "--bind", "--no-entry", "-lidbfs.js", "-sMODULARIZE=1", "-sEXPORT_ES6=1",
+        for (const char* flag : { "--bind", "-lidbfs.js", "-sMODULARIZE=1", "-sEXPORT_ES6=1",
                                   "-sEXPORT_NAME=createHuxerUIApp", "-sEXPORTED_RUNTIME_METHODS=stringToNewUTF8",
                                   "-sENVIRONMENT=web", "-sALLOW_MEMORY_GROWTH=1", "-sSTACK_SIZE=1048576",
                                   "-sNO_EXIT_RUNTIME=1" }) {

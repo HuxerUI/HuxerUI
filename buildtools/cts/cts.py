@@ -71,12 +71,15 @@ CHECKS: dict[str, dict] = {
     "resources": {
         "title": "Final resource package and its runtime location",
         "facts": {"resources.location": ["RES-LOCATION"]},
-        "equivalent": {"resources.sha256": ["RES-PACKAGE"], "resources.files": ["RES-PACKAGE"]},
+        # One `resources/` root gives every integration the same package.
+        "equivalent": {"resources.sha256": ["RES-PACKAGE", "LAYOUT-COMMON"],
+                       "resources.files": ["RES-PACKAGE", "LAYOUT-COMMON"]},
     },
     "libraries": {
         "title": "Ordered library-graph record",
-        "facts": {"libraries": ["LIB-GRAPH"]},
-        "equivalent": {"libraries.roots": ["RECORD-EQUIVALENCE", "LIB-IDENTITY"]},
+        "facts": {"libraries": ["LIB-GRAPH"], "libraries.schema": ["RECORD-SCHEMA"]},
+        "fixed": {"libraries.schema": "versioned"},
+        "equivalent": {"libraries.roots": ["RECORD-EQUIVALENCE", "LIB-IDENTITY", "LAYOUT-COMMON"]},
     },
     "launch": {
         "title": "Startup and resource resolution",
@@ -87,7 +90,7 @@ CHECKS: dict[str, dict] = {
         "title": "Distributable kind, publication, and the resource package it carries",
         "facts": {"package.kind": ["PKG-KIND"], "package.location": ["PKG-KIND", "PKG-PUBLISH"],
                   "package.resources": ["PKG-KIND"], "package.dispatch": ["DISPATCH-ROOT", "DISPATCH-DEFAULT"],
-                  "package.library_code": ["LIB-PLATFORM"]},
+                  "package.library_code": ["LIB-PLATFORM"], "package.abis": ["ABI-SELECT"]},
         "fixed": {"package.location": "dist/<platform>", "package.resources": "the built package",
                   "package.dispatch": DISPATCHED},
         "equivalent": {},
@@ -112,10 +115,11 @@ CHECKS: dict[str, dict] = {
                   "usage.undeclared_build_system": ["EXIT-CODES", "DISPATCH-ROOT"],
                   "usage.product_option": ["EXIT-CODES", "OPTION-INAPPLICABLE"],
                   "usage.driver_option": ["OPTION-INAPPLICABLE"],
+                  "usage.unsupported_abi": ["EXIT-CODES", "ABI-SELECT"],
                   "usage.operation_failure": ["EXIT-CODES"]},
         "fixed": {"usage.unknown_build_system": "invalid usage", "usage.undeclared_build_system": "invalid usage",
                   "usage.product_option": "invalid usage", "usage.driver_option": "reported",
-                  "usage.operation_failure": "operation failure"},
+                  "usage.unsupported_abi": "invalid usage", "usage.operation_failure": "operation failure"},
         "equivalent": {},
     },
     # The environment diagnosis agrees with the build: where the project was built, `huxerui doctor` reports ready.
@@ -337,8 +341,17 @@ def collect_facts(target: str, project: Path, record: dict) -> dict:
     return facts
 
 
+def record_schema(path: str) -> str:
+    """Whether a generated record states its schema version, as an integer `schema` field."""
+    if not path or not Path(path).is_file():
+        return "<missing>"
+    schema = load_json(Path(path)).get("schema")
+    return "versioned" if isinstance(schema, int) and not isinstance(schema, bool) else "unversioned"
+
+
 def library_facts(project: Path, record: dict) -> dict:
     return {
+        "libraries.schema": record_schema(record.get("library_graph", "")),
         "libraries": [entry["target"] for entry in record["libraries"]],
         "libraries.roots": [
             os.path.relpath(os.path.realpath(entry["sourceRoot"]), os.path.realpath(project)).replace(os.sep, "/")
@@ -782,6 +795,16 @@ def packaged_library_code(dist: Path) -> list[str]:
     return sorted(descriptor[1:-1].replace("/", ".") for descriptor in descriptors)
 
 
+def packaged_abis(dist: Path) -> list[str]:
+    """The ABIs whose native libraries the published APK or AAB carries, read from its `lib/<abi>/` directories."""
+    import zipfile
+
+    artifact = next(path for path in sorted(dist.iterdir()) if path.suffix.lower() in (".apk", ".aab"))
+    with zipfile.ZipFile(artifact) as archive:
+        return sorted({parts[-2] for parts in (name.split("/") for name in archive.namelist())
+                       if len(parts) >= 3 and parts[-3] == "lib" and parts[-1].endswith(".so")})
+
+
 def packaged_resources(kind: str, dist: Path, project: Path, work: Path, timeout: float) -> set[str]:
     """The digests of every final resource package the distributable carries."""
     unpacked = work / "unpacked"
@@ -899,6 +922,8 @@ def usage_facts(cli: str | None, integration: str, target: str, project: Path, w
     (failing / "platform" / "nonesuch").mkdir(parents=True, exist_ok=True)
     facts["usage.operation_failure"] = meaning(build([*selection, *common], failing))
     shutil.rmtree(failing, ignore_errors=True)
+    # An explicit ABI selection that cannot be satisfied is rejected, not replaced by another.
+    facts["usage.unsupported_abi"] = meaning(build([*selection, "--abi", "nonesuch", *common]))
     return facts, notes
 
 
@@ -933,12 +958,14 @@ def package_facts(cli: str | None, integration: str, target: str, project: Path,
     created = [project / name for name in PACKAGE_OUTPUTS if not (project / name).exists()]
     # The integration is reached the way a developer reaches it, so the dispatch is checked with the package.
     command = [cli, "package", target, *dispatch_selection(integration, project), *cli_arguments(integration)]
+    selected = None
     if shellless:
         command.append("--no-shell")
     elif target == "android":
         # One ABI bounds the run; the shell's handling of several is the same for every integration. It is the
         # attached device's, so the launch checkpoint can start the published APK.
-        command += ["--abi", android_device_abi() or "arm64-v8a"]
+        selected = android_device_abi() or "arm64-v8a"
+        command += ["--abi", selected]
     elif target == "ios":
         # A generic Simulator build compiles the core for every architecture; the launch checkpoint needs only the
         # Simulator's, which is the host's.
@@ -973,6 +1000,9 @@ def package_facts(cli: str | None, integration: str, target: str, project: Path,
                  "package.dispatch": dispatch}
         if kind in ("apk", "aab"):
             facts["package.library_code"] = packaged_library_code(dist)
+            if selected:
+                abis = packaged_abis(dist)
+                facts["package.abis"] = "the selection" if abis == [selected] else abis
         return facts
     except subprocess.CalledProcessError as failure:
         raise RuntimeError(f"reading the package failed: {' '.join(failure.cmd)} exited with {failure.returncode}")
