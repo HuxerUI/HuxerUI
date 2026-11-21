@@ -435,8 +435,7 @@ All UIKit lifecycle and status-bar work stays on the main thread.
 
 ## OHOS mapping
 
-The future OHOS application host uses a full-window ArkUI surface and keeps Window ownership in its ArkTS or UIAbility layer.
-The native XComponent does not acquire or retain an application Window directly.
+The OHOS application host enables immersive layout on the main Window before loading the full-window ArkUI surface. The ArkTS host owns the Window.
 
 The host obtains and observes:
 
@@ -444,11 +443,11 @@ The host obtains and observes:
 - `AvoidAreaType.TYPE_NAVIGATION_INDICATOR`.
 - `AvoidAreaType.TYPE_CUTOUT`.
 
-It listens for `avoidAreaChange` so rotation, split-screen changes, foldable posture, and window-mode changes update `WindowMetrics`.
-The safe area takes the maximum resolved obstruction on every physical edge.
+The attached surface listens for avoid-area and window-size changes. It reports the maximum obstruction on each physical edge in pixels, and `OhosUiWindow` converts these to logical units. When the system manages the page's insets outside immersive layout, the host reports zero additional insets.
 
-`AvoidAreaType.TYPE_KEYBOARD` belongs to the IME viewport path and is not merged into `safe_area`.
-System-bar foreground maps through `setWindowSystemBarProperties` in the ArkTS Window owner.
+ArkUI resizes the surface above the keyboard. `OhosUiWindow` limits the bottom inset to the part that still overlaps the viewport.
+
+The ArkTS Window owner applies the resolved status-bar foreground with `setWindowSystemBarProperties`. HarmonyOS owns the color of the bottom gesture indicator. The initial system brightness and subsequent color-mode changes follow the ability configuration.
 
 Both HuxerUI content modes keep the platform surface full-window for consistency.
 The shared Runtime simulates safe content in `SafeArea` mode and owns edge-to-edge layout in `EdgeToEdge` mode.

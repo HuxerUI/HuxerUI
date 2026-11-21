@@ -310,9 +310,9 @@ std::uintptr_t next_frame_token = 0;
 class OhosUiWindow final : public UiWindow {
 public:
   OhosUiWindow(OhosRuntime& application, ArkUI_NodeContentHandle content, UiContext context, float scale,
-               napi_env env, napi_value text_input_host, napi_value picker_host)
-      : content_(content), context_(std::move(context)), scale_(scale), active_(application.IsActive()),
-        node_api_(GetNodeApi()),
+               ThemeBrightness brightness, napi_env env, napi_value text_input_host, napi_value picker_host)
+      : content_(content), context_(std::move(context)), scale_(scale), system_brightness_(brightness),
+        active_(application.IsActive()), env_(env), node_api_(GetNodeApi()),
         root_(node_api_->createNode(ARKUI_NODE_STACK), node_api_->disposeNode),
         node_(node_api_->createNode(ARKUI_NODE_XCOMPONENT), node_api_->disposeNode),
         holder_(node_ ? OH_ArkUI_SurfaceHolder_Create(node_.get()) : nullptr, &OH_ArkUI_SurfaceHolder_Dispose),
@@ -342,6 +342,9 @@ public:
 
   ~OhosUiWindow() override {
     Retire();
+    if (status_bar_callback_) {
+      napi_delete_reference(env_, status_bar_callback_);
+    }
     platform_views_.Clear();
     file_picker_->ReleaseHost();
     if (receiver_added_) {
@@ -369,7 +372,9 @@ public:
     }
   }
 
-  void Attach() {
+  void Attach(napi_value status_bar_callback) {
+    Require(napi_create_reference(env_, status_bar_callback, 1, &status_bar_callback_) == napi_ok,
+            "HuxerUI could not retain the OHOS status bar callback");
     OH_ArkUI_SurfaceHolder_SetUserData(holder_.get(), this);
     OH_ArkUI_SurfaceCallback_SetSurfaceCreatedEvent(callback_.get(), OnSurfaceCreated);
     OH_ArkUI_SurfaceCallback_SetSurfaceChangedEvent(callback_.get(), OnSurfaceChanged);
@@ -419,7 +424,7 @@ public:
     }
   }
 
-  void SetConfiguration(ResourceConfiguration configuration) {
+  void SetConfiguration(ResourceConfiguration configuration, ThemeBrightness brightness) {
     if (scale_ != configuration.display_scale) {
       scale_ = configuration.display_scale;
       if (surface_) {
@@ -427,6 +432,18 @@ public:
       }
     }
     UpdateResourceConfiguration(std::move(configuration));
+    if (system_brightness_ != brightness) {
+      system_brightness_ = brightness;
+      UpdateSystemThemeBrightness(brightness);
+    }
+  }
+
+  void SetSystemInsets(EdgeInsets insets, float window_height) {
+    system_insets_px_ = insets;
+    window_height_px_ = window_height;
+    if (surface_) {
+      UpdateViewport();
+    }
   }
 
   void RequestFrameAt(double deadline) override {
@@ -493,6 +510,25 @@ public:
   }
 
 private:
+  ThemeBrightness QuerySystemThemeBrightness() const override { return system_brightness_; }
+
+  void SetSystemBarsContentBrightness(SystemBarContentBrightness status, SystemBarContentBrightness) override {
+    napi_handle_scope scope = nullptr;
+    if (!status_bar_callback_ || napi_open_handle_scope(env_, &scope) != napi_ok) {
+      return;
+    }
+    napi_value callback = nullptr;
+    napi_value receiver = nullptr;
+    napi_value argument = nullptr;
+    if (napi_get_reference_value(env_, status_bar_callback_, &callback) != napi_ok ||
+        napi_get_undefined(env_, &receiver) != napi_ok ||
+        napi_get_boolean(env_, status == SystemBarContentBrightness::Light, &argument) != napi_ok ||
+        napi_call_function(env_, receiver, callback, 1, &argument, nullptr) != napi_ok) {
+      LogError("HuxerUI could not update the OHOS status bar appearance");
+    }
+    napi_close_handle_scope(env_, scope);
+  }
+
   std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override { return file_picker_; }
 
   static void OnSurfaceCreated(OH_ArkUI_SurfaceHolder* holder) noexcept {
@@ -678,8 +714,13 @@ private:
   }
 
   void UpdateViewport() {
-    SetWindowMetrics({.viewport = {static_cast<float>(pixel_width_) / scale_,
-                                  static_cast<float>(pixel_height_) / scale_}});
+    const auto height = static_cast<float>(pixel_height_);
+    // ArkUI resizes this surface above the IME. Only the part of the bottom inset still inside it applies.
+    const float bottom = std::clamp(height - (window_height_px_ - system_insets_px_.bottom),
+                                    0.0F, system_insets_px_.bottom);
+    SetWindowMetrics({.viewport = {static_cast<float>(pixel_width_) / scale_, height / scale_},
+                      .safe_area = {system_insets_px_.top / scale_, system_insets_px_.right / scale_,
+                                    bottom / scale_, system_insets_px_.left / scale_}});
   }
 
   void HandleTouch(const ArkUI_UIInputEvent* input, Point origin = {}) {
@@ -834,7 +875,10 @@ private:
   ArkUI_NodeContentHandle content_;
   UiContext context_;
   float scale_;
+  ThemeBrightness system_brightness_;
   bool active_;
+  napi_env env_;
+  napi_ref status_bar_callback_ = nullptr;
   ArkUI_NativeNodeAPI_1* node_api_;
   SurfaceNode root_;
   SurfaceNode node_;
@@ -858,6 +902,8 @@ private:
   std::shared_ptr<OhosFilePicker> file_picker_;
   std::uint64_t pixel_width_ = 0;
   std::uint64_t pixel_height_ = 0;
+  EdgeInsets system_insets_px_;
+  float window_height_px_ = 0.0F;
   std::unordered_map<std::int64_t, Point> touches_;
   std::optional<Point> mouse_position_;
   PointerButton mouse_buttons_ = PointerButton::None;
@@ -910,6 +956,12 @@ float ReadDisplayScale(napi_env env, napi_value value) {
 
 ResourceConfiguration ReadConfiguration(napi_env env, napi_value locale, napi_value density) {
   return {.locale = Locale::FromLanguageTag(ReadString(env, locale)), .display_scale = ReadDisplayScale(env, density)};
+}
+
+ThemeBrightness ReadSystemBrightness(napi_env env, napi_value value) {
+  bool dark = false;
+  Require(napi_get_value_bool(env, value, &dark) == napi_ok, "HuxerUI expected an OHOS dark mode flag");
+  return dark ? ThemeBrightness::Dark : ThemeBrightness::Light;
 }
 
 std::optional<NotificationActivation> ReadNotificationActivation(napi_env env, napi_value value) {
@@ -982,15 +1034,15 @@ napi_value SetActive(napi_env env, napi_callback_info info) {
 }
 
 napi_value SetConfiguration(napi_env env, napi_callback_info info) {
-  napi_value args[2];
+  napi_value args[3];
   std::size_t count = std::size(args);
   Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args),
-          "HuxerUI OHOS setConfiguration expects the locale and scale");
+          "HuxerUI OHOS setConfiguration expects the locale, scale, and dark mode flag");
   if (runtime) {
     auto configuration = ReadConfiguration(env, args[0], args[1]);
     runtime->SetConfiguration(configuration);
     if (attachment) {
-      attachment->SetConfiguration(std::move(configuration));
+      attachment->SetConfiguration(std::move(configuration), ReadSystemBrightness(env, args[2]));
     }
   }
   return nullptr;
@@ -998,7 +1050,7 @@ napi_value SetConfiguration(napi_env env, napi_callback_info info) {
 
 napi_value Attach(napi_env env, napi_callback_info info) {
   Require(runtime && !attachment, "HuxerUI OHOS needs a running application and a new UI attachment");
-  napi_value args[5];
+  napi_value args[7];
   std::size_t count = std::size(args);
   ArkUI_NodeContentHandle content = nullptr;
   Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args) &&
@@ -1010,14 +1062,34 @@ napi_value Attach(napi_env env, napi_callback_info info) {
           "HuxerUI OHOS attach expects a UI context");
   // The NDK allocates an opaque context that the caller releases with C++ delete.
   UiContext context(handle, [](ArkUI_ContextHandle value) { ::operator delete(value); });
-  auto window = std::make_unique<OhosUiWindow>(*runtime, content, std::move(context), scale, env, args[3], args[4]);
-  window->Attach();
+  auto window = std::make_unique<OhosUiWindow>(*runtime, content, std::move(context), scale,
+      ReadSystemBrightness(env, args[5]), env, args[3], args[4]);
+  window->Attach(args[6]);
   attachment = std::move(window);
   return nullptr;
 }
 
 napi_value Detach(napi_env, napi_callback_info) {
   attachment.reset();
+  return nullptr;
+}
+
+napi_value SetSystemInsets(napi_env env, napi_callback_info info) {
+  napi_value args[5];
+  std::size_t count = std::size(args);
+  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args),
+          "HuxerUI OHOS setSystemInsets expects four insets and the window height");
+  std::array<float, 5> values{};
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    double value = 0.0;
+    Require(napi_get_value_double(env, args[index], &value) == napi_ok &&
+                value >= 0.0 && value <= std::numeric_limits<float>::max(),
+            "HuxerUI expected nonnegative OHOS inset and window dimensions");
+    values[index] = static_cast<float>(value);
+  }
+  if (attachment) {
+    attachment->SetSystemInsets({values[0], values[1], values[2], values[3]}, values[4]);
+  }
   return nullptr;
 }
 
@@ -1108,6 +1180,7 @@ napi_value InitializeOhosModule(napi_env env, napi_value exports) {
       {"setConfiguration", nullptr, Invoke<SetConfiguration>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"attach", nullptr, Invoke<Attach>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"detach", nullptr, Invoke<Detach>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"setSystemInsets", nullptr, Invoke<SetSystemInsets>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"handleBack", nullptr, Invoke<HandleBack>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"scroll", nullptr, Invoke<Scroll>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"editText", nullptr, Invoke<EditText>, nullptr, nullptr, nullptr, napi_default, nullptr},

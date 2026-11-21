@@ -53,10 +53,11 @@ export interface HuxerUIApplicationModule {
     http: HuxerUIHttpHost, activation: HuxerUIActivation | undefined, files: HuxerUIFilePickerHost): void;
   stop(): void;
   setActive(active: boolean): void;
-  setConfiguration(locale: string, scale: number): void;
+  setConfiguration(locale: string, scale: number, systemDark: boolean): void;
   attach(content: NodeContent, context: UIContext, scale: number, textInput: HuxerUITextInputHost,
-    filePicker: HuxerUIFilePickerHost): void;
+    filePicker: HuxerUIFilePickerHost, systemDark: boolean, setStatusBarBrightness: (light: boolean) => void): void;
   detach(): void;
+  setSystemInsets(top: number, right: number, bottom: number, left: number, windowHeight: number): void;
   handleBack(): boolean;
   scroll(x: number, y: number, deltaX: number, deltaY: number, touchpad: boolean, shift: boolean, control: boolean,
     alt: boolean): boolean;

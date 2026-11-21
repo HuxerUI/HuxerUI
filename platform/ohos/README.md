@@ -23,6 +23,8 @@ For device testing, use DevEco Studio to configure debug signing for `org.huxeru
 
 For the Windows DevEco emulator, select `x86_64` locally in `externalNativeOptions.abiFilters` and use an x86_64 OHOS toolchain. Install the unsigned HAP with `hdc app install <path-to-hap>`.
 
+The main window supports `SafeArea` and `EdgeToEdge` content, drawing behind the system bars in immersive layout. `SystemBarsAppearance` controls the status-bar icons, and HarmonyOS controls the bottom gesture indicator. `UseSystemThemeBrightness()` follows system light and dark mode changes.
+
 Text measurement and replay use Native Drawing typography. Application-supplied fonts use private font collections, and attributed inline objects use paragraph placeholders. Line limits and ellipsis use the shared overflow implementation. `TextLayout` exposes line, caret, hit-test, and range geometry in logical units with UTF-16 offsets. When the API 19 drawing engine groups multiple graphemes into a glyph, it estimates the interior caret positions and retains the shaped line width. Editable clients use system keyboard sessions with selection, preedit, and action keys. Secure editors suppress surrounding text.
 
 The renderer supports solid and gradient fills and strokes, rounded rectangle and path shadows, clips, transforms, group opacity, and raster images. Image Kit decodes PNG and JPEG assets and encodes bitmaps to PNG or JPEG. Use `ohos::PixelTexture` for live software frames. On API 22 or later, `ohos::NativeBufferTexture` imports completed RGBA8 buffers into the drawing backend. Check `IsSupported()` before selecting the buffer path.

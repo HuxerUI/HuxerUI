@@ -1,5 +1,5 @@
-import { UIAbility, Want, wantConstant } from '@kit.AbilityKit';
-import { display, NodeContent, window } from '@kit.ArkUI';
+import { Configuration, ConfigurationConstant, UIAbility, Want, wantConstant } from '@kit.AbilityKit';
+import { display, KeyboardAvoidMode, NodeContent, window } from '@kit.ArkUI';
 import { i18n } from '@kit.LocalizationKit';
 import { HuxerUIActivation, HuxerUIApplicationModule } from './HuxerUIApplicationModule';
 import { HuxerUIFilePicker, withGrantedFiles } from './HuxerUIFilePicker';
@@ -9,13 +9,31 @@ import { HuxerUITextInput } from './HuxerUITextInput';
 
 let applicationModule: HuxerUIApplicationModule | undefined;
 let filePicker: HuxerUIFilePicker | undefined;
-let applicationWindowId: number | undefined;
+let applicationWindow: window.Window | undefined;
+let systemDark = false;
+
+const systemAvoidAreaTypes: window.AvoidAreaType[] = [
+  window.AvoidAreaType.TYPE_SYSTEM,
+  window.AvoidAreaType.TYPE_CUTOUT,
+  window.AvoidAreaType.TYPE_NAVIGATION_INDICATOR,
+];
 
 function displayScale(): number {
   try {
     return display.getDefaultDisplaySync().densityPixels;
   } catch (_) {
     return 1;
+  }
+}
+
+async function setStatusBarBrightness(mainWindow: window.Window, light: boolean): Promise<void> {
+  try {
+    await mainWindow.setWindowSystemBarProperties({
+      statusBarColor: '#00000000',
+      statusBarContentColor: light ? '#FFFFFFFF' : '#FF000000',
+    });
+  } catch (error) {
+    console.warn(`HuxerUI could not set the status bar appearance: ${error}`);
   }
 }
 
@@ -69,6 +87,7 @@ export abstract class HuxerUIAbility extends UIAbility {
     const module = this.getApplicationModule();
     const services = new HuxerUISystemServices(module, this.context);
     const files = new HuxerUIFilePicker(module, this.context);
+    systemDark = this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
     withActivation(want, activation => {
       module.start(this.context, i18n.System.getSystemLocale(), displayScale(), services, new HuxerUIHttp(module),
         activation, files);
@@ -78,8 +97,13 @@ export abstract class HuxerUIAbility extends UIAbility {
   }
 
   onWindowStageCreate(stage: window.WindowStage): void {
-    applicationWindowId = stage.getMainWindowSync().getWindowProperties().id;
-    stage.loadContent('pages/Index');
+    const mainWindow = stage.getMainWindowSync();
+    applicationWindow = mainWindow;
+    void this.loadWindowContent(stage, mainWindow);
+  }
+
+  onWindowStageDestroy(): void {
+    applicationWindow = undefined;
   }
 
   onForeground(): void {
@@ -90,8 +114,11 @@ export abstract class HuxerUIAbility extends UIAbility {
     applicationModule?.setActive(false);
   }
 
-  onConfigurationUpdate(): void {
-    applicationModule?.setConfiguration(i18n.System.getSystemLocale(), displayScale());
+  onConfigurationUpdate(configuration: Configuration = this.context.config): void {
+    if (configuration.colorMode !== undefined) {
+      systemDark = configuration.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
+    }
+    applicationModule?.setConfiguration(i18n.System.getSystemLocale(), displayScale(), systemDark);
   }
 
   onNewWant(want: Want): void {
@@ -106,7 +133,22 @@ export abstract class HuxerUIAbility extends UIAbility {
     applicationModule?.stop();
     applicationModule = undefined;
     filePicker = undefined;
-    applicationWindowId = undefined;
+    applicationWindow = undefined;
+  }
+
+  private async loadWindowContent(stage: window.WindowStage, mainWindow: window.Window): Promise<void> {
+    try {
+      await mainWindow.setWindowLayoutFullScreen(true);
+    } catch (error) {
+      console.warn(`HuxerUI could not enable immersive layout: ${error}`);
+    }
+    if (applicationWindow === mainWindow) {
+      try {
+        await stage.loadContent('pages/Index');
+      } catch (error) {
+        console.error(`HuxerUI could not load the application page: ${error}`);
+      }
+    }
   }
 }
 
@@ -122,6 +164,38 @@ export function handleHuxerUIBack(): boolean {
 @Component
 export struct HuxerUISurface {
   private surface: NodeContent = new NodeContent();
+  private attachedWindow?: window.Window;
+
+  private updateInsets = (): void => {
+    const mainWindow = this.attachedWindow;
+    if (!mainWindow) {
+      return;
+    }
+    const properties = mainWindow.getWindowProperties();
+    let top = 0;
+    let right = 0;
+    let bottom = 0;
+    let left = 0;
+    if (properties.isLayoutFullScreen) {
+      for (const type of systemAvoidAreaTypes) {
+        const area = mainWindow.getWindowAvoidArea(type);
+        // A cutout rectangle can start inside the window edge.
+        if (area.topRect.height > 0) {
+          top = Math.max(top, area.topRect.top + area.topRect.height);
+        }
+        if (area.rightRect.width > 0) {
+          right = Math.max(right, properties.windowRect.width - area.rightRect.left);
+        }
+        if (area.bottomRect.height > 0) {
+          bottom = Math.max(bottom, properties.windowRect.height - area.bottomRect.top);
+        }
+        if (area.leftRect.width > 0) {
+          left = Math.max(left, area.leftRect.left + area.leftRect.width);
+        }
+      }
+    }
+    applicationModule?.setSystemInsets(top, right, bottom, left, properties.windowRect.height);
+  };
 
   build() {
     Column() {
@@ -145,13 +219,26 @@ export struct HuxerUISurface {
       event.propagation();
     })
     .onAttach(() => {
-      if (!applicationModule || !filePicker) {
+      const mainWindow = applicationWindow;
+      if (!applicationModule || !filePicker || !mainWindow) {
         throw new Error('HuxerUI surface requires a running application');
       }
       const context = this.getUIContext();
-      const textInput = new HuxerUITextInput(applicationModule, applicationWindowId);
-      applicationModule.attach(this.surface, context, context.vp2px(1), textInput, filePicker);
+      context.setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
+      const textInput = new HuxerUITextInput(applicationModule, mainWindow.getWindowProperties().id);
+      applicationModule.attach(this.surface, context, context.vp2px(1), textInput, filePicker, systemDark,
+        light => setStatusBarBrightness(mainWindow, light));
+      this.attachedWindow = mainWindow;
+      mainWindow.on('avoidAreaChange', this.updateInsets);
+      mainWindow.on('windowSizeChange', this.updateInsets);
+      this.updateInsets();
     })
-    .onDetach(() => applicationModule?.detach())
+    .onDetach(() => {
+      const mainWindow = this.attachedWindow;
+      this.attachedWindow = undefined;
+      mainWindow?.off('avoidAreaChange', this.updateInsets);
+      mainWindow?.off('windowSizeChange', this.updateInsets);
+      applicationModule?.detach();
+    })
   }
 }
