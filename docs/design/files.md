@@ -106,7 +106,7 @@ Linux uses the FileChooser portal on a dedicated GLib context. It supplies the r
 
 ### HarmonyOS
 
-The document picker, clipboard, and file drop open system-granted file URIs through the application host. C++ duplicates the descriptors before the host releases them. Picked files use the writable descriptor when the provider grants write access. Picked directories reuse the descriptor-relative enumeration and creation paths and keep their path private. Clipboard and drop references use read-only descriptors. The application stores remembered picker URIs in its private preferences, activates the read grant before reopening an item, and revokes the grant when its last key is removed.
+The document picker, clipboard, and file drop open system-granted file URIs through the application host. C++ duplicates the descriptors before the host releases them. Picked files use the writable descriptor when the provider grants write access. Picked directories retain the display name and descriptor. Enumeration, creation, and copy containment checks use the retained directory authority. Clipboard and drop references use read-only descriptors. The application stores remembered picker URIs in its private preferences, activates the read grant before reopening an item, and revokes the grant when its last key is removed.
 
 ### Web
 

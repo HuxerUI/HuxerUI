@@ -1095,6 +1095,9 @@ class ReferenceOutputStreamBackend final : public OutputStreamBackend,
                                            public AsyncOutputStreamBackend,
                                            public std::enable_shared_from_this<ReferenceOutputStreamBackend> {
 public:
+  explicit ReferenceOutputStreamBackend(ReferenceDescriptor output)
+      : ReferenceOutputStreamBackend(std::move(output), [](const auto& operation) { operation(); }, false) {}
+
   ReferenceOutputStreamBackend(ReferenceDescriptor output, ReferenceStreamCoordination coordinate, bool persist)
       : coordinate_(std::move(coordinate)), output_(std::move(output)), persist_(persist) {}
 
@@ -1501,8 +1504,9 @@ class LocalFileReferenceBackend final : public FileReferenceBackend,
 public:
   LocalFileReferenceBackend(File file, bool writable, FileReferenceCoordination coordination = {},
                             FileReferenceBookmark bookmark = {});
-#if defined(__OHOS__)
-  LocalFileReferenceBackend(File file, ReferenceDescriptor directory, bool writable, FileReferenceBookmark bookmark);
+#if !defined(_WIN32)
+  LocalFileReferenceBackend(std::string name, ReferenceDescriptor directory, bool writable,
+                            FileReferenceBookmark bookmark);
 #endif
   ~LocalFileReferenceBackend() override;
   [[nodiscard]] FileReference Reference(std::optional<std::string> content_type = {});
@@ -1537,7 +1541,8 @@ private:
   friend Task<IoResult<std::shared_ptr<FileReferenceBackend>>> MakeLocalDirectoryBackend(File directory);
   LocalFileReferenceBackend(const LocalFileReferenceBackend& parent, std::string name, int parent_descriptor);
   [[nodiscard]] std::shared_ptr<LocalFileReferenceBackend> ChildBackend(std::string name, int parent_descriptor = -1);
-  void Coordinate(const File& item, bool writing, const std::function<void()>& operation);
+  void Coordinate(bool writing, const std::function<void()>& operation);
+  bool NeedsPersistence() const noexcept;
 
   [[nodiscard]] InputStream OpenInput(const std::atomic<bool>& canceled);
   [[nodiscard]] std::shared_ptr<ReferenceOutputStreamBackend> OpenOutput(const std::atomic<bool>& canceled);
@@ -1548,7 +1553,7 @@ private:
   [[nodiscard]] ReferenceStreamCoordination StreamCoordination(bool writing);
 
   struct Anchor;
-  File file_;
+  std::optional<File> path_;
   FileReferenceCoordination coordination_;
   FileReferenceBookmark bookmark_;
   bool writable_;
@@ -1556,9 +1561,6 @@ private:
   std::string relative_;
   std::string entry_key_;
   FileReferenceMetadata metadata_;
-#if defined(__OHOS__)
-  bool exposes_path_ = true;
-#endif
 #if defined(_WIN32)
   [[nodiscard]] ReferenceHandle OpenNative(ACCESS_MASK access = FILE_READ_ATTRIBUTES) const;
 #else
@@ -1585,39 +1587,41 @@ struct LocalFileReferenceBackend::Anchor {
       : descriptor(open(directory.Path().c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)) {
     CheckLocalIo(descriptor.Get() >= 0);
   }
-#if defined(__OHOS__)
   explicit Anchor(ReferenceDescriptor directory) : descriptor(std::move(directory)) {}
-#endif
   ReferenceDescriptor descriptor;
 #endif
 };
 
 LocalFileReferenceBackend::LocalFileReferenceBackend(
     File file, bool writable, FileReferenceCoordination coordination, FileReferenceBookmark bookmark
-) : file_(std::move(file)), coordination_(std::move(coordination)), bookmark_(std::move(bookmark)), writable_(writable) {
-  const fs::path canonical = fs::canonical(PlatformPath(file_.Path()));
-  file_ = File(PublicPath(canonical));
+) : coordination_(std::move(coordination)), bookmark_(std::move(bookmark)), writable_(writable) {
+  const fs::path canonical = fs::canonical(PlatformPath(file.Path()));
+  path_.emplace(PublicPath(canonical));
+  metadata_.name = path_->Name();
+  if (metadata_.name.empty()) {
+    metadata_.name = "/";
+  }
 #if defined(_WIN32)
   // A metadata-only anchor preserves the selected object, including an individually selected file,
   // without requiring parent enumeration/creation rights. Its lifetime can still block ancestor renames.
-  anchor_ = std::make_shared<Anchor>(file_);
+  anchor_ = std::make_shared<Anchor>(*path_);
 #else
   const bool directory = fs::is_directory(canonical);
   if (directory) {
     // A directory grant anchors descendant resolution. A separately selected file must not require
     // opening its parent for enumeration or obtaining authority to replace its directory entry.
-    anchor_ = std::make_shared<Anchor>(file_);
+    anchor_ = std::make_shared<Anchor>(*path_);
   }
-  relative_ = directory ? std::string{} : file_.Name();
+  relative_ = directory ? std::string{} : path_->Name();
 #endif
   metadata_ = Metadata(&entry_key_);
 }
 
-#if defined(__OHOS__)
-LocalFileReferenceBackend::LocalFileReferenceBackend(File file, ReferenceDescriptor directory, bool writable,
+#if !defined(_WIN32)
+LocalFileReferenceBackend::LocalFileReferenceBackend(std::string name, ReferenceDescriptor directory, bool writable,
                                                      FileReferenceBookmark bookmark)
-    : file_(std::move(file)), bookmark_(std::move(bookmark)), writable_(writable),
-      anchor_(std::make_shared<Anchor>(std::move(directory))), exposes_path_(false) {
+    : bookmark_(std::move(bookmark)), writable_(writable), anchor_(std::make_shared<Anchor>(std::move(directory))),
+      metadata_{.name = std::move(name)} {
   metadata_ = Metadata(&entry_key_);
   CheckReference(metadata_.type == FileType::Directory, IoErrorCode::NotDirectory);
 }
@@ -1625,11 +1629,9 @@ LocalFileReferenceBackend::LocalFileReferenceBackend(File file, ReferenceDescrip
 
 LocalFileReferenceBackend::LocalFileReferenceBackend(const LocalFileReferenceBackend& parent, std::string name,
                                                      int parent_descriptor)
-    : file_(parent.file_.Child(name)), coordination_(parent.coordination_), writable_(parent.writable_),
-      anchor_(parent.anchor_), relative_(parent.relative_.empty() ? name : parent.relative_ + "/" + name) {
-#if defined(__OHOS__)
-  exposes_path_ = parent.exposes_path_;
-#endif
+    : path_(parent.path_ ? std::optional{parent.path_->Child(name)} : std::nullopt),
+      coordination_(parent.coordination_), writable_(parent.writable_), anchor_(parent.anchor_),
+      relative_(parent.relative_.empty() ? name : parent.relative_ + "/" + name), metadata_{.name = std::move(name)} {
   metadata_ = Metadata(&entry_key_, parent_descriptor);
 }
 
@@ -1638,12 +1640,7 @@ std::string LocalFileReferenceBackend::EntryKey() const {
   return entry_key_;
 }
 std::optional<File> LocalFileReferenceBackend::AsFile() const {
-#if defined(__OHOS__)
-  if (!exposes_path_) {
-    return std::nullopt;
-  }
-#endif
-  return file_;
+  return path_;
 }
 
 IoResult<Bytes> LocalFileReferenceBackend::MakeBookmark() {
@@ -1652,13 +1649,13 @@ IoResult<Bytes> LocalFileReferenceBackend::MakeBookmark() {
 
 ReferenceStreamCoordination LocalFileReferenceBackend::StreamCoordination(bool writing) {
   return [self = shared_from_this(), writing](const std::function<void()>& operation) {
-    self->Coordinate(self->file_, writing, operation);
+    self->Coordinate(writing, operation);
   };
 }
 
 InputStream LocalFileReferenceBackend::OpenInput(const std::atomic<bool>& canceled) {
   std::shared_ptr<InputStreamBackend> stream;
-  Coordinate(file_, false, [&] {
+  Coordinate(false, [&] {
     const auto type = Metadata().type;
     CheckReference(type == FileType::File, type == FileType::Directory ? IoErrorCode::IsDirectory
                                                                       : IoErrorCode::Unsupported);
@@ -1672,7 +1669,7 @@ InputStream LocalFileReferenceBackend::OpenInput(const std::atomic<bool>& cancel
 
 std::shared_ptr<ReferenceOutputStreamBackend> LocalFileReferenceBackend::OpenOutput(const std::atomic<bool>& canceled) {
   std::shared_ptr<ReferenceOutputStreamBackend> stream;
-  Coordinate(file_, true, [&] {
+  Coordinate(true, [&] {
     const auto type = Metadata().type;
     CheckReference(type == FileType::File, type == FileType::Directory ? IoErrorCode::IsDirectory
                                                                       : IoErrorCode::Unsupported);
@@ -1681,7 +1678,7 @@ std::shared_ptr<ReferenceOutputStreamBackend> LocalFileReferenceBackend::OpenOut
     ReferenceDescriptor output(OpenFile(FileAccessMode::WriteOnly));
     TruncateDescriptor(output.Get());
     stream = std::make_shared<ReferenceOutputStreamBackend>(
-        std::move(output), StreamCoordination(true), RequiresPersistence(file_.Path()));
+        std::move(output), StreamCoordination(true), NeedsPersistence());
   });
   CheckReference(stream != nullptr, IoErrorCode::Io);
   return stream;
@@ -1692,7 +1689,7 @@ IoResult<InputStream> LocalFileReferenceBackend::OpenReadSync() {
 }
 
 IoResult<OutputStream> LocalFileReferenceBackend::OpenWriteSync() {
-  if (RequiresPersistence(file_.Path())) {
+  if (NeedsPersistence()) {
     return Failure<OutputStream>(IoErrorCode::Unsupported,
                                  "HuxerUI persistent Web files require asynchronous finalization");
   }
@@ -1704,9 +1701,9 @@ IoResult<OutputStream> LocalFileReferenceBackend::OpenWriteSync() {
 IoResult<RandomAccessStream> LocalFileReferenceBackend::OpenRandomAccessSync(FileAccessMode access, FileOpenMode mode) {
   return LocalReferenceResult<RandomAccessStream>([&] {
     const bool writing = access != FileAccessMode::ReadOnly;
-    CheckReference(!writing || !RequiresPersistence(file_.Path()), IoErrorCode::Unsupported);
+    CheckReference(!writing || !NeedsPersistence(), IoErrorCode::Unsupported);
     std::shared_ptr<RandomAccessStreamImpl> stream;
-    Coordinate(file_, writing, [&] {
+    Coordinate(writing, [&] {
       CheckReference(!writing || writable_, IoErrorCode::PermissionDenied);
       ReferenceDescriptor descriptor(OpenFile(access));
       stream = MakeRandomAccessStreamImpl(std::move(descriptor), access, mode, StreamCoordination(writing));
@@ -1730,12 +1727,17 @@ std::function<void()> LocalFileReferenceBackend::OpenWrite(FileReferenceOutputSt
       std::move(completion));
 }
 
-void LocalFileReferenceBackend::Coordinate(const File& item, bool writing, const std::function<void()>& operation) {
+void LocalFileReferenceBackend::Coordinate(bool writing, const std::function<void()>& operation) {
   if (coordination_) {
-    coordination_(writing ? nullptr : &item, writing ? &item : nullptr, operation);
+    const auto* path = &path_.value();
+    coordination_(writing ? nullptr : path, writing ? path : nullptr, operation);
   } else {
     operation();
   }
+}
+
+bool LocalFileReferenceBackend::NeedsPersistence() const noexcept {
+  return path_ && RequiresPersistence(path_->Path());
 }
 
 #if defined(_WIN32)
@@ -1777,7 +1779,7 @@ int LocalFileReferenceBackend::OpenFile(FileAccessMode access) const {
   CheckReference(!relative_.empty(), IoErrorCode::IsDirectory);
   ReferenceDescriptor parent(anchor_ ? dup(anchor_->descriptor.Get()) : -1);
   CheckLocalIo(!anchor_ || parent.Get() >= 0);
-  const fs::path relative(anchor_ ? relative_ : file_.Path());
+  const fs::path relative(anchor_ ? relative_ : path_.value().Path());
   if (anchor_) {
     for (const fs::path& segment : relative.parent_path()) {
       ReferenceDescriptor next(openat(parent.Get(), segment.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW));
@@ -1796,10 +1798,7 @@ int LocalFileReferenceBackend::OpenFile(FileAccessMode access) const {
 }
 
 FileReferenceMetadata LocalFileReferenceBackend::Metadata(std::string* entry_key, int parent_descriptor) const {
-  FileReferenceMetadata result{.name = file_.Name()};
-  if (result.name.empty()) {
-    result.name = "/";
-  }
+  FileReferenceMetadata result{.name = metadata_.name};
 #if defined(_WIN32)
   HUXERUI_UNUSED(parent_descriptor);
   ReferenceHandle handle = OpenNative();
@@ -1842,7 +1841,7 @@ FileReferenceMetadata LocalFileReferenceBackend::Metadata(std::string* entry_key
       parent = std::move(next);
     }
   }
-  const std::string name = !anchor_ ? file_.Path() : relative_.empty() ? "." : relative.filename().string();
+  const std::string name = !anchor_ ? path_.value().Path() : relative_.empty() ? "." : relative.filename().string();
   const int descriptor = anchor_ ? parent.Get() : AT_FDCWD;
   struct stat info {};
   CheckLocalIo(fstatat(descriptor, name.c_str(), &info, AT_SYMLINK_NOFOLLOW) == 0);
@@ -1896,7 +1895,7 @@ LocalFileReferenceBackend::ChildBackend(std::string name, int parent_descriptor)
 
 std::vector<FileReference> LocalFileReferenceBackend::ReadChildren(const std::atomic<bool>& canceled) {
   std::vector<FileReference> children;
-  Coordinate(file_, false, [&] {
+  Coordinate(false, [&] {
     CheckReference(Metadata().type == FileType::Directory, IoErrorCode::NotDirectory);
 #if defined(_WIN32)
     ReferenceHandle directory = OpenNative(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES);
@@ -1977,7 +1976,7 @@ LocalFileReferenceBackend::FindChild(std::string name,
   return RunLocalReference<std::optional<FileReference>>(
       [self = shared_from_this(), name = std::move(name)](const auto&) {
         std::optional<FileReference> result;
-        self->Coordinate(self->file_, false, [&] {
+        self->Coordinate(false, [&] {
           CheckReferenceChildName(name);
           CheckReference(self->Metadata().type == FileType::Directory, IoErrorCode::NotDirectory);
           try {
@@ -1996,7 +1995,7 @@ LocalFileReferenceBackend::FindChild(std::string name,
 FileReferenceWriteResult LocalFileReferenceBackend::CreateChildDirectory(const std::string& name,
                                                                          const std::atomic<bool>& canceled) {
   std::optional<FileReferenceWriteResult> result;
-  Coordinate(file_, true, [&] {
+  Coordinate(true, [&] {
     CheckReference(Metadata().type == FileType::Directory, IoErrorCode::NotDirectory);
     CheckReference(writable_, IoErrorCode::PermissionDenied);
     CheckReferenceChildName(name);
@@ -2026,7 +2025,7 @@ FileReferenceWriteResult LocalFileReferenceBackend::CreateChildDirectory(const s
 }
 
 IoResult<FileReference> LocalFileReferenceBackend::CreateDirectorySync(std::string_view name) {
-  if (RequiresPersistence(file_.Path())) {
+  if (NeedsPersistence()) {
     return Failure<FileReference>(IoErrorCode::Unsupported,
                                   "HuxerUI persistent Web files require asynchronous finalization");
   }
@@ -2042,7 +2041,7 @@ LocalFileReferenceBackend::CreateDirectory(std::string name,
       [self = shared_from_this(), name = std::move(name)](const auto& canceled) {
         return self->CreateChildDirectory(name, canceled);
       },
-      std::move(completion), RequiresPersistence(file_.Path()));
+      std::move(completion), NeedsPersistence());
 }
 
 std::function<void()> LocalFileReferenceBackend::CheckCopyDestination(FileReferenceSource destination,
@@ -2054,10 +2053,10 @@ std::function<void()> LocalFileReferenceBackend::CheckCopyDestination(FileRefere
         if (const auto* file = std::get_if<File>(&destination)) {
           target = *file;
         } else if ((local = std::dynamic_pointer_cast<LocalFileReferenceBackend>(std::get<1>(destination)))) {
-          target = local->file_;
+          target = local->path_;
           CheckReference(local->Metadata().type == FileType::Directory, IoErrorCode::NotDirectory);
         }
-        CheckReference(target.has_value(), IoErrorCode::Unsupported);
+        CheckReference(local || target, IoErrorCode::Unsupported);
         CheckReference(self->Metadata().type == FileType::Directory, IoErrorCode::NotDirectory);
 #if defined(_WIN32)
         if (!local) { local = std::make_shared<LocalFileReferenceBackend>(*target, false); }
@@ -2085,7 +2084,41 @@ std::function<void()> LocalFileReferenceBackend::CheckCopyDestination(FileRefere
           return compared == CSTR_EQUAL && (child.size() == parent.size() || child[parent.size()] == L'\\');
         };
 #else
-        const fs::path source_path = fs::canonical(PlatformPath(self->file_.Path()));
+        if (!self->path_ || !target) {
+          if (!local) {
+            local = std::make_shared<LocalFileReferenceBackend>(*target, false);
+          }
+          ReferenceDescriptor source_directory(self->OpenDirectory());
+          ReferenceDescriptor target_directory(local->OpenDirectory());
+          const auto source_info = GetDescriptorInfo(source_directory.Get());
+          const auto target_info = GetDescriptorInfo(target_directory.Get());
+          const auto same = [](const DescriptorInfo& first, const DescriptorInfo& second) {
+            return first.st_dev == second.st_dev && first.st_ino == second.st_ino;
+          };
+          // The grant may have no path. Walk the opened directories' ancestry using their filesystem identities.
+          const auto contains = [&same](const DescriptorInfo& ancestor, ReferenceDescriptor directory,
+                                        DescriptorInfo current) {
+#if defined(O_SEARCH)
+            constexpr int access = O_SEARCH;
+#else
+            constexpr int access = O_RDONLY;
+#endif
+            while (!same(ancestor, current)) {
+              ReferenceDescriptor parent(openat(directory.Get(), "..", access | O_DIRECTORY | O_CLOEXEC));
+              CheckLocalIo(parent.Get() >= 0);
+              const auto parent_info = GetDescriptorInfo(parent.Get());
+              if (same(current, parent_info)) {
+                return false;
+              }
+              directory = std::move(parent);
+              current = parent_info;
+            }
+            return true;
+          };
+          return !contains(source_info, std::move(target_directory), target_info) &&
+                 !contains(target_info, std::move(source_directory), source_info);
+        }
+        const fs::path source_path = fs::canonical(PlatformPath(self->path_->Path()));
         const fs::path target_path = fs::canonical(PlatformPath(target->Path()));
         auto contains = [](const fs::path& ancestor, fs::path child) {
           while (true) {
@@ -2186,12 +2219,12 @@ FileReferenceWriteResult LocalFileReferenceBackend::CopyFromLocal(LocalFileRefer
     }
 #endif
   };
-  const File destination = file_.Child(name);
   // One coordinator receives both sides of a native copy. Both states remain alive throughout the
   // transfer, so their grant owners survive without nesting a second coordinated operation.
   const auto& coordination = coordination_ ? coordination_ : source.coordination_;
   if (coordination) {
-    coordination(&source.file_, &destination, transfer);
+    const auto destination = path_ ? std::optional{path_->Child(name)} : std::nullopt;
+    coordination(source.path_ ? &*source.path_ : nullptr, destination ? &*destination : nullptr, transfer);
   } else {
     transfer();
   }
@@ -2221,7 +2254,7 @@ LocalFileReferenceBackend::CopyFileFrom(FileReferenceSource source, std::string 
       error = IoErrorCode::PermissionDenied;
     } else if (metadata_.type != FileType::Directory) {
       error = IoErrorCode::NotDirectory;
-    } else if (!IsValidReferenceChildName(name) || (existing && existing->Name() != name)) {
+    } else if (!path_ || !IsValidReferenceChildName(name) || (existing && existing->Name() != name)) {
       error = IoErrorCode::Unsupported;
     } else if (existing && (!overwrite || existing->Type() != FileType::File)) {
       error = IoErrorCode::AlreadyExists;
@@ -2230,7 +2263,7 @@ LocalFileReferenceBackend::CopyFileFrom(FileReferenceSource source, std::string 
       completion(IoResult<FileReferenceWriteResult>(IoError{*error, "HuxerUI external file copy failed"}));
       return {};
     }
-    const File destination = file_.Child(name);
+    const File destination = path_->Child(name);
     auto canceled = std::make_shared<std::atomic<bool>>(false);
     auto cancel = (*input)->ImportTo(destination, overwrite,
         [self = shared_from_this(), name = std::move(name), created = !existing, canceled,
@@ -2248,7 +2281,7 @@ LocalFileReferenceBackend::CopyFileFrom(FileReferenceSource source, std::string 
               [self, name = std::move(name), created, canceled, bytes = transferred.Value()](const auto&) {
                 CheckReference(!canceled->load(), IoErrorCode::Io);
                 std::optional<FileReferenceWriteResult> result;
-                self->Coordinate(self->file_, false, [&] {
+                self->Coordinate(false, [&] {
                   auto reference = self->ChildBackend(name)->Reference();
                   CheckReference(reference.Type() == FileType::File && reference.Name() == name,
                                  IoErrorCode::Unsupported);
@@ -2285,7 +2318,7 @@ LocalFileReferenceBackend::CopyFileFrom(FileReferenceSource source, std::string 
         CheckReference(input != nullptr, IoErrorCode::Unsupported);
         return self->CopyFromLocal(*input, name, overwrite, canceled);
       },
-      std::move(completion), RequiresPersistence(file_.Path()));
+      std::move(completion), NeedsPersistence());
 }
 
 std::function<void()> LocalFileReferenceBackend::ImportTo(File destination, bool overwrite,
@@ -2302,7 +2335,7 @@ std::function<void()> LocalFileReferenceBackend::ImportTo(File destination, bool
 
 Bytes LocalFileReferenceBackend::ReadAll(const std::atomic<bool>& canceled) {
   Bytes result;
-  Coordinate(file_, false, [&] {
+  Coordinate(false, [&] {
     const auto type = Metadata().type;
     CheckReference(type == FileType::File, type == FileType::Directory ? IoErrorCode::IsDirectory
                                                                       : IoErrorCode::Unsupported);
@@ -2354,14 +2387,14 @@ std::function<void()> LocalFileReferenceBackend::ReplaceWith(File source, FileRe
           CheckLocalIo(reader.Close());
         };
         if (self->coordination_) {
-          self->coordination_(&source, &self->file_, transfer);
+          self->coordination_(&source, &self->path_.value(), transfer);
         } else {
           transfer();
         }
         return true;
       },
       [completion = std::move(completion)](auto result) { completion(result.Succeeded() && result.Value()); },
-      RequiresPersistence(file_.Path()));
+      NeedsPersistence());
 }
 
 FileReference MakeLocalFileReference(File file, bool writable, std::optional<std::string> content_type,
@@ -2381,20 +2414,18 @@ FileReference MakeLocalFileReference(File file, bool writable, std::optional<std
 }
 
 #if defined(__OHOS__)
-FileReference MakeDescriptorDirectoryReference(File path, ReferenceDescriptor descriptor, bool writable,
+FileReference MakeDescriptorDirectoryReference(std::string name, ReferenceDescriptor descriptor, bool writable,
                                                FileReferenceBookmark bookmark) {
-  return std::make_shared<LocalFileReferenceBackend>(std::move(path), std::move(descriptor), writable,
+  return std::make_shared<LocalFileReferenceBackend>(std::move(name), std::move(descriptor), writable,
                                                      std::move(bookmark))->Reference();
 }
 
 OutputStream MakeDescriptorOutputStream(ReferenceDescriptor descriptor) {
-  return StreamAccess::MakeOutputStream(std::make_shared<ReferenceOutputStreamBackend>(
-      std::move(descriptor), [](const auto& operation) { operation(); }, false));
+  return StreamAccess::MakeOutputStream(std::make_shared<ReferenceOutputStreamBackend>(std::move(descriptor)));
 }
 
 std::shared_ptr<AsyncOutputStreamBackend> MakeDescriptorAsyncOutputStream(ReferenceDescriptor descriptor) {
-  return std::make_shared<ReferenceOutputStreamBackend>(
-      std::move(descriptor), [](const auto& operation) { operation(); }, false);
+  return std::make_shared<ReferenceOutputStreamBackend>(std::move(descriptor));
 }
 #endif
 

@@ -195,7 +195,7 @@ void ValidateFileTypeFilter(const std::vector<std::string>& extensions, const st
 Task<IoResult<std::shared_ptr<FileReferenceBackend>>> MakeLocalDirectoryBackend(File directory);
 
 #if defined(__OHOS__)
-FileReference MakeDescriptorDirectoryReference(File path, ReferenceDescriptor descriptor, bool writable,
+FileReference MakeDescriptorDirectoryReference(std::string name, ReferenceDescriptor descriptor, bool writable,
                                                FileReferenceBookmark bookmark);
 OutputStream MakeDescriptorOutputStream(ReferenceDescriptor descriptor);
 std::shared_ptr<AsyncOutputStreamBackend> MakeDescriptorAsyncOutputStream(ReferenceDescriptor descriptor);

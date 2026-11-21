@@ -275,11 +275,10 @@ private:
   bool writable_;
 };
 
-std::optional<FileReference> ReadDirectory(ReferenceDescriptor descriptor, std::string_view name, const std::string& uri,
+std::optional<FileReference> ReadDirectory(ReferenceDescriptor descriptor, std::string name, const std::string& uri,
                                            bool writable) {
-  const File path = IsValidReferenceChildName(name) ? File("/").Child(name) : File("/");
   try {
-    return MakeDescriptorDirectoryReference(path, std::move(descriptor), writable, [uri] {
+    return MakeDescriptorDirectoryReference(std::move(name), std::move(descriptor), writable, [uri] {
       const auto bytes = std::as_bytes(std::span(uri));
       return IoResult<Bytes>::Success(Bytes(bytes.begin(), bytes.end()));
     });
@@ -302,7 +301,7 @@ std::optional<FileReference> ReadSelection(napi_env env, napi_value result, bool
   bool writable = false;
   Check(napi_get_value_bool(env, Property(env, result, "writable"), &writable));
   if (S_ISDIR(info.st_mode) && can_persist) {
-    return ReadDirectory(std::move(descriptor), metadata.name, uri, writable);
+    return ReadDirectory(std::move(descriptor), std::move(metadata.name), uri, writable);
   }
   if (!S_ISREG(info.st_mode)) {
     return std::nullopt;
