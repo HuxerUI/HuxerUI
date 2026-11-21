@@ -1,5 +1,7 @@
 #include <ace/xcomponent/native_interface_xcomponent.h>
+#include <arkui/drag_and_drop.h>
 #include <arkui/native_interface.h>
+#include <arkui/native_key_event.h>
 #include <arkui/native_node.h>
 #include <arkui/native_node_napi.h>
 #include <arkui/ui_input_event.h>
@@ -9,28 +11,43 @@
 #include <native_drawing/drawing_gpu_context.h>
 #include <native_drawing/drawing_surface.h>
 #include <native_window/external_window.h>
+#include <rawfile/raw_file_manager.h>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
-#include <cmath>
 #include <cstdint>
 #include <functional>
 #include <iterator>
 #include <limits>
 #include <memory>
 #include <new>
+#include <optional>
+#include <span>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <type_traits>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include <huxerui/app.h>
+#include <huxerui/file.h>
 #include <huxerui/resource.h>
+#include <huxerui/stream.h>
 
-#include "graphics/bitmap_internal.h"
+#include "application/system_task_internal.h"
+#include "internal_access.h"
 #include "text/text_internal.h"
 
+#include "ohos_clipboard.h"
+#include "ohos_file_picker.h"
+#include "ohos_http.h"
+#include "ohos_platform_view.h"
 #include "ohos_renderer.h"
+#include "ohos_system_services.h"
+#include "ohos_text_input.h"
 #include "ohos_text_layout.h"
 
 namespace huxerui::detail {
@@ -38,6 +55,87 @@ namespace {
 
 constexpr unsigned int log_domain = 0xCAFE;
 constexpr const char* log_tag = "HuxerUI";
+constexpr std::array input_events{NODE_TOUCH_EVENT, NODE_ON_MOUSE, NODE_ON_HOVER, NODE_ON_AXIS,
+                                 NODE_ON_KEY_EVENT, NODE_ON_BLUR};
+constexpr std::array file_drop_events{NODE_ON_DRAG_ENTER, NODE_ON_DRAG_MOVE, NODE_ON_DRAG_LEAVE, NODE_ON_DROP};
+constexpr std::int64_t mouse_pointer_id = std::numeric_limits<std::int64_t>::min();
+
+Key TranslateKey(int code) {
+  if (code >= ARKUI_KEYCODE_A && code <= ARKUI_KEYCODE_Z) {
+    return static_cast<Key>(static_cast<int>(Key::A) + code - ARKUI_KEYCODE_A);
+  }
+  if (code >= ARKUI_KEYCODE_0 && code <= ARKUI_KEYCODE_9) {
+    return static_cast<Key>(static_cast<int>(Key::Digit0) + code - ARKUI_KEYCODE_0);
+  }
+  if (code >= ARKUI_KEYCODE_F1 && code <= ARKUI_KEYCODE_F12) {
+    return static_cast<Key>(static_cast<int>(Key::F1) + code - ARKUI_KEYCODE_F1);
+  }
+  if (code >= ARKUI_KEYCODE_NUMPAD_0 && code <= ARKUI_KEYCODE_NUMPAD_9) {
+    return static_cast<Key>(static_cast<int>(Key::Numpad0) + code - ARKUI_KEYCODE_NUMPAD_0);
+  }
+  switch (code) {
+  case ARKUI_KEYCODE_DEL: return Key::Backspace;
+  case ARKUI_KEYCODE_TAB: return Key::Tab;
+  case ARKUI_KEYCODE_ENTER: return Key::Enter;
+  case ARKUI_KEYCODE_ESCAPE: return Key::Escape;
+  case ARKUI_KEYCODE_SPACE: return Key::Space;
+  case ARKUI_KEYCODE_INSERT: return Key::Insert;
+  case ARKUI_KEYCODE_FORWARD_DEL: return Key::Delete;
+  case ARKUI_KEYCODE_MOVE_HOME: return Key::Home;
+  case ARKUI_KEYCODE_MOVE_END: return Key::End;
+  case ARKUI_KEYCODE_PAGE_UP: return Key::PageUp;
+  case ARKUI_KEYCODE_PAGE_DOWN: return Key::PageDown;
+  case ARKUI_KEYCODE_DPAD_LEFT: return Key::ArrowLeft;
+  case ARKUI_KEYCODE_DPAD_RIGHT: return Key::ArrowRight;
+  case ARKUI_KEYCODE_DPAD_UP: return Key::ArrowUp;
+  case ARKUI_KEYCODE_DPAD_DOWN: return Key::ArrowDown;
+  case ARKUI_KEYCODE_GRAVE: return Key::Backquote;
+  case ARKUI_KEYCODE_MINUS: return Key::Minus;
+  case ARKUI_KEYCODE_EQUALS: return Key::Equal;
+  case ARKUI_KEYCODE_LEFT_BRACKET: return Key::BracketLeft;
+  case ARKUI_KEYCODE_RIGHT_BRACKET: return Key::BracketRight;
+  case ARKUI_KEYCODE_BACKSLASH: return Key::Backslash;
+  case ARKUI_KEYCODE_SEMICOLON: return Key::Semicolon;
+  case ARKUI_KEYCODE_APOSTROPHE: return Key::Quote;
+  case ARKUI_KEYCODE_COMMA: return Key::Comma;
+  case ARKUI_KEYCODE_PERIOD: return Key::Period;
+  case ARKUI_KEYCODE_SLASH: return Key::Slash;
+  case ARKUI_KEYCODE_SHIFT_LEFT: return Key::ShiftLeft;
+  case ARKUI_KEYCODE_SHIFT_RIGHT: return Key::ShiftRight;
+  case ARKUI_KEYCODE_CTRL_LEFT: return Key::ControlLeft;
+  case ARKUI_KEYCODE_CTRL_RIGHT: return Key::ControlRight;
+  case ARKUI_KEYCODE_ALT_LEFT: return Key::AltLeft;
+  case ARKUI_KEYCODE_ALT_RIGHT: return Key::AltRight;
+  case ARKUI_KEYCODE_META_LEFT: return Key::MetaLeft;
+  case ARKUI_KEYCODE_META_RIGHT: return Key::MetaRight;
+  case ARKUI_KEYCODE_CAPS_LOCK: return Key::CapsLock;
+  case ARKUI_KEYCODE_NUM_LOCK: return Key::NumLock;
+  case ARKUI_KEYCODE_SCROLL_LOCK: return Key::ScrollLock;
+  case ARKUI_KEYCODE_SYSRQ: return Key::PrintScreen;
+  case ARKUI_KEYCODE_BREAK: return Key::Pause;
+  case ARKUI_KEYCODE_MENU: return Key::ContextMenu;
+  case ARKUI_KEYCODE_NUMPAD_DOT: return Key::NumpadDecimal;
+  case ARKUI_KEYCODE_NUMPAD_DIVIDE: return Key::NumpadDivide;
+  case ARKUI_KEYCODE_NUMPAD_MULTIPLY: return Key::NumpadMultiply;
+  case ARKUI_KEYCODE_NUMPAD_SUBTRACT: return Key::NumpadSubtract;
+  case ARKUI_KEYCODE_NUMPAD_ADD: return Key::NumpadAdd;
+  case ARKUI_KEYCODE_NUMPAD_ENTER: return Key::NumpadEnter;
+  case ARKUI_KEYCODE_NUMPAD_EQUALS: return Key::NumpadEqual;
+  case ARKUI_KEYCODE_NUMPAD_COMMA: return Key::NumpadComma;
+  default: return Key::Unknown;
+  }
+}
+
+PointerButton TranslateMouseButton(int button) {
+  switch (button) {
+  case UI_MOUSE_EVENT_BUTTON_LEFT: return PointerButton::Primary;
+  case UI_MOUSE_EVENT_BUTTON_RIGHT: return PointerButton::Secondary;
+  case UI_MOUSE_EVENT_BUTTON_MIDDLE: return PointerButton::Middle;
+  case UI_MOUSE_EVENT_BUTTON_BACK: return PointerButton::Back;
+  case UI_MOUSE_EVENT_BUTTON_FORWARD: return PointerButton::Forward;
+  default: return PointerButton::None;
+  }
+}
 
 void LogError(const char* message) noexcept {
   OH_LOG_Print(LOG_APP, LOG_ERROR, log_domain, log_tag, "%{public}s", message);
@@ -79,13 +177,76 @@ UiThreadDispatcher CreateDispatcher(napi_env env) {
   };
 }
 
-class OhosRuntime final : public Runtime {
+class OhosResources final : public PlatformResources {
 public:
-  explicit OhosRuntime(napi_env env) : Runtime(CreateDispatcher(env)) {
-    InitializeApplication(CurrentApplication());
+  OhosResources(napi_env env, napi_value manager, ResourceConfiguration configuration)
+      : manager_(OH_ResourceManager_InitNativeResourceManager(env, manager), &OH_ResourceManager_ReleaseNativeResourceManager),
+        configuration_(std::move(configuration)) {
+    Require(static_cast<bool>(manager_), "HuxerUI could not initialize OHOS package resources");
   }
 
-  ~OhosRuntime() override { Retire(); }
+  ResourceConfiguration Configuration() const override { return configuration_; }
+
+  void SetConfiguration(ResourceConfiguration configuration) { configuration_ = std::move(configuration); }
+
+  std::optional<InputStream> OpenRead(std::string_view package_path) override {
+    const std::string path(package_path);
+    auto* raw_file = OH_ResourceManager_OpenRawFile64(manager_.get(), path.c_str());
+    if (!raw_file) {
+      return std::nullopt;
+    }
+    const auto file = std::shared_ptr<RawFile64>(raw_file, [manager = manager_](RawFile64* handle) {
+      OH_ResourceManager_CloseRawFile64(handle);
+    });
+    return InputStream::FromReader([file](std::span<std::byte> buffer) {
+      const auto remaining = OH_ResourceManager_GetRawFileRemainingLength64(file.get());
+      if (remaining == 0) {
+        return IoResult<std::size_t>::Success(0);
+      }
+      const auto count = remaining > 0 ? OH_ResourceManager_ReadRawFile64(
+          file.get(), buffer.data(), static_cast<std::int64_t>(
+              std::min<std::uint64_t>(static_cast<std::uint64_t>(remaining), buffer.size()))) : -1;
+      if (count <= 0) {
+        return IoResult<std::size_t>::Failure({IoErrorCode::Io, "HuxerUI could not read an OHOS package resource"});
+      }
+      return IoResult<std::size_t>::Success(static_cast<std::size_t>(count));
+    });
+  }
+
+private:
+  std::shared_ptr<NativeResourceManager> manager_;
+  ResourceConfiguration configuration_;
+};
+
+class OhosRuntime final : public Runtime {
+public:
+  OhosRuntime(napi_env env, UiThreadDispatcher dispatch, AppDirectories directories, napi_value manager,
+              ResourceConfiguration configuration, napi_value system_services, napi_value http_host,
+              ApplicationActivation activation, napi_value file_host)
+      : Runtime(dispatch), directories_(std::move(directories)),
+        resources_(env, manager, std::move(configuration)),
+        file_access_(std::make_shared<OhosFileAccess>(env, file_host)), clipboard_(file_access_),
+        system_services_(std::make_shared<OhosSystemServices>(env, system_services)),
+        http_(std::make_shared<OhosHttpTransport>(env, http_host, std::move(dispatch))) {
+    InitializeApplication(CurrentApplication(), std::move(activation));
+  }
+
+  ~OhosRuntime() override {
+    Retire();
+    file_access_->Disconnect();
+    http_->Disconnect();
+    system_services_->Disconnect();
+  }
+
+  OhosResources* Resources() noexcept override { return &resources_; }
+
+  PlatformClipboard* Clipboard() noexcept override { return &clipboard_; }
+
+  OhosSystemServices& SystemServices() noexcept { return *system_services_; }
+
+  OhosHttpTransport& Http() noexcept { return *http_; }
+
+  OhosFileAccess& FileAccess() noexcept { return *file_access_; }
 
   bool IsActive() const noexcept { return active_; }
 
@@ -94,9 +255,36 @@ public:
     UpdateApplicationLifecycleState(active ? ApplicationLifecycleState::Active : ApplicationLifecycleState::Background);
   }
 
+  void SetConfiguration(ResourceConfiguration configuration) {
+    resources_.SetConfiguration(configuration);
+    UpdateResourceConfiguration(std::move(configuration));
+  }
+
 private:
+  std::optional<AppDirectories> CreateAppDirectories() override { return directories_; }
+
+  std::shared_ptr<FileAccessStore> CreateFileAccessStore(const AppDirectories&) override { return file_access_; }
+
+  std::shared_ptr<HttpTransport> CreateHttpTransport() override { return http_; }
+
+  std::shared_ptr<LocalNotificationTransport> CreateLocalNotificationTransport() override {
+    return system_services_;
+  }
+
+  std::shared_ptr<PermissionTransport> CreatePermissionTransport() override { return system_services_; }
+
+  std::shared_ptr<SystemTaskTransport> CreateSystemTaskTransport() override {
+    return std::make_shared<ProcessLocalSystemTasks>();
+  }
+
   void OnRuntimeStopped() override {}
 
+  AppDirectories directories_;
+  OhosResources resources_;
+  std::shared_ptr<OhosFileAccess> file_access_;
+  OhosClipboard clipboard_;
+  std::shared_ptr<OhosSystemServices> system_services_;
+  std::shared_ptr<OhosHttpTransport> http_;
   bool active_ = false;
 };
 
@@ -121,34 +309,52 @@ std::uintptr_t next_frame_token = 0;
 
 class OhosUiWindow final : public UiWindow {
 public:
-  OhosUiWindow(OhosRuntime& application, ArkUI_NodeContentHandle content, UiContext context, float scale)
+  OhosUiWindow(OhosRuntime& application, ArkUI_NodeContentHandle content, UiContext context, float scale,
+               napi_env env, napi_value text_input_host, napi_value picker_host)
       : content_(content), context_(std::move(context)), scale_(scale), active_(application.IsActive()),
         node_api_(GetNodeApi()),
+        root_(node_api_->createNode(ARKUI_NODE_STACK), node_api_->disposeNode),
         node_(node_api_->createNode(ARKUI_NODE_XCOMPONENT), node_api_->disposeNode),
         holder_(node_ ? OH_ArkUI_SurfaceHolder_Create(node_.get()) : nullptr, &OH_ArkUI_SurfaceHolder_Dispose),
-        callback_(OH_ArkUI_SurfaceCallback_Create(), &OH_ArkUI_SurfaceCallback_Dispose) {
-    Require(static_cast<bool>(node_), "HuxerUI could not create the OHOS surface node");
+        callback_(OH_ArkUI_SurfaceCallback_Create(), &OH_ArkUI_SurfaceCallback_Dispose),
+        platform_views_(*node_api_, root_.get(), *this, InternalAccess::ApplicationRegistry(application), renderer_,
+                        [this](const ArkUI_UIInputEvent* input, Point origin) { HandleTouch(input, origin); }),
+        text_input_(*this, node_.get(), scale_, env, text_input_host),
+        file_picker_(std::make_shared<OhosFilePicker>(env, picker_host)) {
+    Require(root_ && node_, "HuxerUI could not create the OHOS surface node");
     Require(static_cast<bool>(holder_), "HuxerUI could not create the OHOS surface holder");
     Require(static_cast<bool>(callback_), "HuxerUI could not create the OHOS surface callback");
     const ArkUI_NumberValue fill{.f32 = 1.0F};
     const ArkUI_AttributeItem size{.value = &fill, .size = 1, .string = nullptr, .object = nullptr};
-    Require(node_api_->setAttribute(node_.get(), NODE_WIDTH_PERCENT, &size) == 0 &&
+    Require(node_api_->setAttribute(root_.get(), NODE_WIDTH_PERCENT, &size) == 0 &&
+                node_api_->setAttribute(root_.get(), NODE_HEIGHT_PERCENT, &size) == 0 &&
+                node_api_->setAttribute(node_.get(), NODE_WIDTH_PERCENT, &size) == 0 &&
                 node_api_->setAttribute(node_.get(), NODE_HEIGHT_PERCENT, &size) == 0,
             "HuxerUI could not size the OHOS surface node");
     Require(OH_ArkUI_XComponent_SetAutoInitialize(node_.get(), false) == 0,
             "HuxerUI could not configure OHOS surface initialization");
     const auto& app = CurrentApplication();
-    InitializeWindow(application, app.root_factory, app.options.window, ResourceConfiguration{.display_scale = scale},
+    auto configuration = application.Resources()->Configuration();
+    configuration.display_scale = scale;
+    InitializeWindow(application, app.root_factory, app.options.window, std::move(configuration),
                      active_ ? WindowLifecycleState::Active : WindowLifecycleState::Background);
   }
 
   ~OhosUiWindow() override {
     Retire();
-    if (touch_registered_) {
-      node_api_->unregisterNodeEvent(node_.get(), NODE_TOUCH_EVENT);
-    }
+    platform_views_.Clear();
+    file_picker_->ReleaseHost();
     if (receiver_added_) {
+      for (std::size_t index = 0; index < input_events_registered_; ++index) {
+        node_api_->unregisterNodeEvent(node_.get(), input_events[index]);
+      }
       node_api_->removeNodeEventReceiver(node_.get(), OnNodeEvent);
+    }
+    if (drop_receiver_added_) {
+      for (std::size_t index = 0; index < drop_events_registered_; ++index) {
+        node_api_->unregisterNodeEvent(root_.get(), file_drop_events[index]);
+      }
+      node_api_->removeNodeEventReceiver(root_.get(), OnDropEvent);
     }
     ReleaseSurface();
     if (callback_added_) {
@@ -156,7 +362,10 @@ public:
     }
     if (node_added_) {
       OH_ArkUI_XComponent_Finalize(node_.get());
-      OH_ArkUI_NodeContent_RemoveNode(content_, node_.get());
+      OH_ArkUI_NodeContent_RemoveNode(content_, root_.get());
+    }
+    if (surface_added_) {
+      node_api_->removeChild(root_.get(), node_.get());
     }
   }
 
@@ -171,10 +380,30 @@ public:
     Require(node_api_->addNodeEventReceiver(node_.get(), OnNodeEvent) == 0,
             "HuxerUI could not add the OHOS input receiver");
     receiver_added_ = true;
-    Require(node_api_->registerNodeEvent(node_.get(), NODE_TOUCH_EVENT, NODE_TOUCH_EVENT, this) == 0,
-            "HuxerUI could not register OHOS touch input");
-    touch_registered_ = true;
-    Require(OH_ArkUI_NodeContent_AddNode(content_, node_.get()) == 0, "HuxerUI could not attach the OHOS surface node");
+    const ArkUI_NumberValue enabled{.i32 = 1};
+    const ArkUI_AttributeItem focus{.value = &enabled, .size = 1, .string = nullptr, .object = nullptr};
+    Require(node_api_->setAttribute(node_.get(), NODE_FOCUSABLE, &focus) == 0 &&
+                node_api_->setAttribute(node_.get(), NODE_DEFAULT_FOCUS, &focus) == 0 &&
+                node_api_->setAttribute(node_.get(), NODE_FOCUS_ON_TOUCH, &focus) == 0,
+            "HuxerUI could not configure OHOS input focus");
+    for (const auto type : input_events) {
+      Require(node_api_->registerNodeEvent(node_.get(), type, type, this) == 0,
+              "HuxerUI could not register OHOS surface input");
+      ++input_events_registered_;
+    }
+    // ArkUI can advertise a file's content type instead of its URI type. Validate the records at drop time.
+    Require(OH_ArkUI_AllowNodeAllDropDataTypes(root_.get()) == 0 &&
+                node_api_->addNodeEventReceiver(root_.get(), OnDropEvent) == 0,
+            "HuxerUI could not set up the OHOS file drop receiver");
+    drop_receiver_added_ = true;
+    for (const auto type : file_drop_events) {
+      Require(node_api_->registerNodeEvent(root_.get(), type, type, this) == 0,
+              "HuxerUI could not register OHOS file drop input");
+      ++drop_events_registered_;
+    }
+    Require(node_api_->addChild(root_.get(), node_.get()) == 0, "HuxerUI could not parent the OHOS surface node");
+    surface_added_ = true;
+    Require(OH_ArkUI_NodeContent_AddNode(content_, root_.get()) == 0, "HuxerUI could not attach the OHOS surface");
     node_added_ = true;
     Require(OH_ArkUI_XComponent_Initialize(node_.get()) == 0, "HuxerUI could not initialize the OHOS surface");
   }
@@ -186,8 +415,18 @@ public:
       RequestFrameAt(Now());
     } else {
       CancelFrame();
-      CancelTouches();
+      CancelInput();
     }
+  }
+
+  void SetConfiguration(ResourceConfiguration configuration) {
+    if (scale_ != configuration.display_scale) {
+      scale_ = configuration.display_scale;
+      if (surface_) {
+        UpdateViewport();
+      }
+    }
+    UpdateResourceConfiguration(std::move(configuration));
   }
 
   void RequestFrameAt(double deadline) override {
@@ -216,6 +455,9 @@ public:
     if (OH_ArkUI_PostFrameCallback(context_.get(), reinterpret_cast<void*>(frame_token_), OnFrame) != 0) {
       frame_token_ = 0;
       LogError("HuxerUI could not request an OHOS frame");
+    } else {
+      // Posting observes the next ArkUI frame. An asynchronous update also needs to request one.
+      node_api_->markDirty(node_.get(), NODE_NEED_RENDER);
     }
   }
 
@@ -235,14 +477,31 @@ public:
     return CreateOhosTextLayout(text, style, width, options);
   }
 
+  OhosTextInput* TextInput() noexcept override { return &text_input_; }
+
+  OhosFilePicker& FilePicker() noexcept { return *file_picker_; }
+
+  bool Scroll(Point position, Point delta, bool touchpad, KeyModifiers modifiers) {
+    if (!active_ || !surface_ || (delta.x == 0.0F && delta.y == 0.0F)) {
+      return false;
+    }
+    modifiers.meta = pressed_keys_.contains(ARKUI_KEYCODE_META_LEFT) || pressed_keys_.contains(ARKUI_KEYCODE_META_RIGHT);
+    // Touchpad deltas are physical pixels. A 15-degree wheel step matches the desktop 120-DIP scroll increment.
+    const float delta_y = touchpad ? -delta.y / scale_ : -delta.y * (120.0F / 15.0F);
+    const Point consumed = HandleScrollInput({position, -delta.x / scale_, delta_y, modifiers});
+    return consumed.x != 0.0F || consumed.y != 0.0F;
+  }
+
 private:
+  std::shared_ptr<FilePickerTransport> CreateFilePickerTransport() override { return file_picker_; }
+
   static void OnSurfaceCreated(OH_ArkUI_SurfaceHolder* holder) noexcept {
     auto& window = *static_cast<OhosUiWindow*>(OH_ArkUI_SurfaceHolder_GetUserData(holder));
-    window.native_window_ = OH_ArkUI_XComponent_GetNativeWindow(holder);
+    window.platform_window_ = OH_ArkUI_XComponent_GetNativeWindow(holder);
     std::int32_t width = 0;
     std::int32_t height = 0;
-    if (window.native_window_ &&
-        OH_NativeWindow_NativeWindowHandleOpt(window.native_window_, GET_BUFFER_GEOMETRY, &height, &width) == 0 &&
+    if (window.platform_window_ &&
+        OH_NativeWindow_NativeWindowHandleOpt(window.platform_window_, GET_BUFFER_GEOMETRY, &height, &width) == 0 &&
         width > 0 && height > 0) {
       OnSurfaceChanged(holder, width, height);
     }
@@ -263,18 +522,80 @@ private:
   }
 
   static void OnNodeEvent(ArkUI_NodeEvent* event) noexcept {
-    if (OH_ArkUI_NodeEvent_GetEventType(event) != NODE_TOUCH_EVENT) {
-      return;
-    }
     auto* window = static_cast<OhosUiWindow*>(OH_ArkUI_NodeEvent_GetUserData(event));
-    const auto* input = OH_ArkUI_NodeEvent_GetInputEvent(event);
-    if (!window || !window->active_ || !window->surface_ || !input) {
+    if (!window || !window->active_ || !window->surface_) {
       return;
     }
     try {
-      window->HandleTouch(input);
+      const auto type = OH_ArkUI_NodeEvent_GetEventType(event);
+      if (type == NODE_ON_BLUR) {
+        window->pressed_keys_.clear();
+      } else if (type == NODE_ON_HOVER) {
+        const auto* hover = OH_ArkUI_NodeEvent_GetNodeComponentEvent(event);
+        if (hover && hover->data[0].i32 == 0 && window->mouse_buttons_ == PointerButton::None) {
+          window->CancelMouse();
+        }
+      } else if (const auto* input = OH_ArkUI_NodeEvent_GetInputEvent(event)) {
+        switch (type) {
+        case NODE_TOUCH_EVENT: window->HandleTouch(input); break;
+        case NODE_ON_MOUSE: window->HandleMouse(input); break;
+        case NODE_ON_AXIS:
+          // XComponent stops axis events by default. The ArkTS host receives them with the source tool intact.
+          OH_ArkUI_AxisEvent_SetPropagation(input, true);
+          break;
+        case NODE_ON_KEY_EVENT: window->HandleKey(input); break;
+        default: break;
+        }
+      }
     } catch (const std::exception& error) {
       LogError(error.what());
+    }
+  }
+
+  static void OnDropEvent(ArkUI_NodeEvent* event) noexcept {
+    auto* window = static_cast<OhosUiWindow*>(OH_ArkUI_NodeEvent_GetUserData(event));
+    auto* drag = OH_ArkUI_NodeEvent_GetDragEvent(event);
+    if (!window || !drag) {
+      return;
+    }
+    const auto type = OH_ArkUI_NodeEvent_GetEventType(event);
+    try {
+      window->HandleDropEvent(type, *drag);
+    } catch (const std::exception& error) {
+      LogError(error.what());
+      if (type == NODE_ON_DROP) {
+        OH_ArkUI_DragEvent_SetDragResult(drag, ARKUI_DRAG_RESULT_FAILED);
+      }
+    }
+  }
+
+  void HandleDropEvent(ArkUI_NodeEventType type, ArkUI_DragEvent& drag) {
+    if (type == NODE_ON_DRAG_LEAVE) {
+      if (std::exchange(file_drag_active_, false)) {
+        HandleFileDragExited(file_drag_session_);
+      }
+      return;
+    }
+    ArkUI_IntOffset origin{};
+    Require(OH_ArkUI_NodeUtils_GetLayoutPositionInWindow(root_.get(), &origin) == 0,
+            "HuxerUI could not locate the OHOS file drop receiver");
+    const Point position{(OH_ArkUI_DragEvent_GetTouchPointXToWindow(&drag) - origin.x) / scale_,
+                         (OH_ArkUI_DragEvent_GetTouchPointYToWindow(&drag) - origin.y) / scale_};
+    if (!std::exchange(file_drag_active_, true)) {
+      if (HandleFileDragEntered(++file_drag_session_, {}, position)) {
+        OH_ArkUI_DragEvent_SetSuggestedDropOperation(&drag, ARKUI_DROP_OPERATION_COPY);
+      }
+    } else if (type != NODE_ON_DROP && HandleFileDragMoved(file_drag_session_, {}, position)) {
+      OH_ArkUI_DragEvent_SetSuggestedDropOperation(&drag, ARKUI_DROP_OPERATION_COPY);
+    }
+    if (type == NODE_ON_DROP) {
+      file_drag_active_ = false;
+      if (runtime && OH_ArkUI_DragEvent_SetSuggestedDropOperation(&drag, ARKUI_DROP_OPERATION_COPY) == 0 &&
+          HandleFileDrop(file_drag_session_, {}, position, runtime->FileAccess().PrepareDrop(drag))) {
+        return;
+      }
+      HandleFileDragExited(file_drag_session_);
+      OH_ArkUI_DragEvent_SetDragResult(&drag, ARKUI_DRAG_RESULT_FAILED);
     }
   }
 
@@ -301,8 +622,25 @@ private:
     CancelFrame();
     surface_.reset();
     drawing_.reset();
-    native_window_ = nullptr;
+    platform_window_ = nullptr;
+    CancelInput();
+  }
+
+  void CancelInput() noexcept {
+    pressed_keys_.clear();
+    CancelMouse();
     CancelTouches();
+  }
+
+  void CancelMouse() noexcept {
+    mouse_buttons_ = PointerButton::None;
+    if (auto position = std::exchange(mouse_position_, std::nullopt)) {
+      try {
+        HandlePointerEvent({PointerEventType::Cancel, mouse_pointer_id, *position, PointerDeviceKind::Mouse});
+      } catch (const std::exception& error) {
+        LogError(error.what());
+      }
+    }
   }
 
   void CancelTouches() noexcept {
@@ -316,7 +654,7 @@ private:
   }
 
   void Resize(std::uint64_t width, std::uint64_t height) {
-    if (!native_window_ || width == 0 || height == 0 || width > std::numeric_limits<std::int32_t>::max() ||
+    if (!platform_window_ || width == 0 || height == 0 || width > std::numeric_limits<std::int32_t>::max() ||
         height > std::numeric_limits<std::int32_t>::max()) {
       return;
     }
@@ -331,15 +669,24 @@ private:
     Require(static_cast<bool>(drawing_), "HuxerUI failed to create the OHOS drawing context");
     const OH_Drawing_Image_Info info{static_cast<std::int32_t>(width), static_cast<std::int32_t>(height),
                                      COLOR_FORMAT_RGBA_8888, ALPHA_FORMAT_PREMUL};
-    surface_.reset(OH_Drawing_SurfaceCreateOnScreen(drawing_.get(), info, native_window_));
+    surface_.reset(OH_Drawing_SurfaceCreateOnScreen(drawing_.get(), info, platform_window_));
     Require(static_cast<bool>(surface_), "HuxerUI failed to create the OHOS drawing surface");
     pixel_width_ = width;
     pixel_height_ = height;
-    SetWindowMetrics({.viewport = {static_cast<float>(width) / scale_, static_cast<float>(height) / scale_}});
+    UpdateViewport();
     RequestFrameAt(Now());
   }
 
-  void HandleTouch(const ArkUI_UIInputEvent* input) {
+  void UpdateViewport() {
+    SetWindowMetrics({.viewport = {static_cast<float>(pixel_width_) / scale_,
+                                  static_cast<float>(pixel_height_) / scale_}});
+  }
+
+  void HandleTouch(const ArkUI_UIInputEvent* input, Point origin = {}) {
+    // ArkUI can also deliver mouse presses through its touch callback.
+    if (OH_ArkUI_UIInputEvent_GetSourceType(input) == UI_INPUT_EVENT_SOURCE_TYPE_MOUSE) {
+      return;
+    }
     PointerEventType type;
     switch (OH_ArkUI_UIInputEvent_GetAction(input)) {
     case UI_TOUCH_EVENT_ACTION_DOWN: type = PointerEventType::Down; break;
@@ -351,8 +698,8 @@ private:
     const auto send = [&](std::uint32_t index) {
       const auto id = OH_ArkUI_PointerEvent_GetPointerId(input, index);
       // ArkUI node touch coordinates are already in local viewport units.
-      const Point position{OH_ArkUI_PointerEvent_GetXByIndex(input, index),
-                           OH_ArkUI_PointerEvent_GetYByIndex(input, index)};
+      const Point position{origin.x + OH_ArkUI_PointerEvent_GetXByIndex(input, index),
+                           origin.y + OH_ArkUI_PointerEvent_GetYByIndex(input, index)};
       if (type != PointerEventType::Down && !touches_.contains(id)) {
         return;
       }
@@ -378,15 +725,106 @@ private:
     }
   }
 
+  KeyModifiers Modifiers(const ArkUI_UIInputEvent* input) const {
+    std::uint64_t keys = 0;
+    OH_ArkUI_UIInputEvent_GetModifierKeyStates(input, &keys);
+    const auto held = [this](int left, int right) {
+      return pressed_keys_.contains(left) || pressed_keys_.contains(right);
+    };
+    return {
+        .shift = (keys & ARKUI_MODIFIER_KEY_SHIFT) != 0 || held(ARKUI_KEYCODE_SHIFT_LEFT, ARKUI_KEYCODE_SHIFT_RIGHT),
+        .control = (keys & ARKUI_MODIFIER_KEY_CTRL) != 0 || held(ARKUI_KEYCODE_CTRL_LEFT, ARKUI_KEYCODE_CTRL_RIGHT),
+        .alt = (keys & ARKUI_MODIFIER_KEY_ALT) != 0 || held(ARKUI_KEYCODE_ALT_LEFT, ARKUI_KEYCODE_ALT_RIGHT),
+        .meta = held(ARKUI_KEYCODE_META_LEFT, ARKUI_KEYCODE_META_RIGHT),
+    };
+  }
+
+  void HandleMouse(const ArkUI_UIInputEvent* input) {
+    PointerEventType type;
+    switch (OH_ArkUI_MouseEvent_GetMouseAction(input)) {
+    case UI_MOUSE_EVENT_ACTION_PRESS: type = PointerEventType::Down; break;
+    case UI_MOUSE_EVENT_ACTION_RELEASE: type = PointerEventType::Up; break;
+    case UI_MOUSE_EVENT_ACTION_MOVE: type = PointerEventType::Move; break;
+    case UI_MOUSE_EVENT_ACTION_CANCEL: CancelMouse(); return;
+    default: return;
+    }
+    const auto changed = type == PointerEventType::Move ? PointerButton::None :
+        TranslateMouseButton(OH_ArkUI_MouseEvent_GetMouseButton(input));
+    if (type != PointerEventType::Move && changed == PointerButton::None) {
+      return;
+    }
+    std::array<std::int32_t, 5> buttons{};
+    auto count = static_cast<std::int32_t>(buttons.size());
+    if (OH_ArkUI_MouseEvent_GetPressedButtons(input, buttons.data(), &count) == 0) {
+      mouse_buttons_ = PointerButton::None;
+      for (std::int32_t index = 0; index < count; ++index) {
+        mouse_buttons_ |= TranslateMouseButton(buttons[index]);
+      }
+    }
+    if (type == PointerEventType::Down) {
+      mouse_buttons_ |= changed;
+    } else if (type == PointerEventType::Up) {
+      mouse_buttons_ &= static_cast<PointerButton>(~static_cast<std::uint32_t>(changed));
+    }
+    mouse_position_ = Point{OH_ArkUI_PointerEvent_GetX(input), OH_ArkUI_PointerEvent_GetY(input)};
+    HandlePointerEvent({type, mouse_pointer_id, *mouse_position_, PointerDeviceKind::Mouse, changed, mouse_buttons_,
+                        Modifiers(input)});
+  }
+
+  void HandleKey(const ArkUI_UIInputEvent* input) {
+    // ArkUI sends this callback after the input method has had a chance to handle the key.
+    const auto action = OH_ArkUI_KeyEvent_GetType(input);
+    if (action != ARKUI_KEY_EVENT_DOWN && action != ARKUI_KEY_EVENT_UP) {
+      return;
+    }
+    const bool down = action == ARKUI_KEY_EVENT_DOWN;
+    const auto code = OH_ArkUI_KeyEvent_GetKeyCode(input);
+    const auto key = TranslateKey(code);
+    bool repeat = false;
+    if (down) {
+      repeat = !pressed_keys_.insert(code).second;
+    } else {
+      pressed_keys_.erase(code);
+    }
+    const auto modifiers = Modifiers(input);
+    std::string text;
+    if (down && !modifiers.control && !modifiers.meta) {
+      auto unicode = OH_ArkUI_KeyEvent_GetUnicode(input);
+      if (unicode >= 'A' && unicode <= 'Z') {
+        // ArkUI can report an uppercase key value independently of Shift and Caps Lock.
+        bool caps_lock = false;
+        OH_ArkUI_KeyEvent_IsCapsLockOn(input, &caps_lock);
+        if (modifiers.shift == caps_lock) {
+          unicode += 'a' - 'A';
+        }
+      }
+      if (unicode >= 0x20 && unicode <= 0x7E) {
+        text.push_back(static_cast<char>(unicode));
+      } else if (key == Key::Space) {
+        text.push_back(' ');
+      }
+    }
+    if (HandleKeyEvent({down ? KeyEventType::Down : KeyEventType::Up, key, std::move(text), modifiers, repeat})) {
+      OH_ArkUI_KeyEvent_SetConsumed(input, true);
+      OH_ArkUI_KeyEvent_StopPropagation(input, true);
+    }
+  }
+
   void PaintFrame() {
     if (!active_ || !surface_) {
       return;
     }
-    const FrameCommit& frame = BuildFrame();
+    const FrameCommit& frame = BuildFrameOrErrorPage(LogError);
+    try {
+      platform_views_.Commit(frame.render_frame, scale_);
+    } catch (...) {
+      platform_views_.Clear();
+      throw;
+    }
     auto* canvas = OH_Drawing_SurfaceGetCanvas(surface_.get());
     Require(canvas != nullptr, "HuxerUI failed to prepare the OHOS drawing canvas");
     OH_Drawing_CanvasClear(canvas, 0xFFF7F8FA);
-    PaintOhosScene(canvas, frame.render_frame.scene, scale_);
+    platform_views_.DrawBase(canvas);
     Require(OH_Drawing_SurfaceFlush(surface_.get()) == OH_DRAWING_SUCCESS, "HuxerUI failed to present the OHOS frame");
     if (frame.next_frame_deadline) {
       RequestFrameAt(*frame.next_frame_deadline);
@@ -398,19 +836,32 @@ private:
   float scale_;
   bool active_;
   ArkUI_NativeNodeAPI_1* node_api_;
+  SurfaceNode root_;
   SurfaceNode node_;
   SurfaceHolder holder_;
   SurfaceCallback callback_;
   bool node_added_ = false;
+  bool surface_added_ = false;
   bool callback_added_ = false;
   bool receiver_added_ = false;
-  bool touch_registered_ = false;
-  OHNativeWindow* native_window_ = nullptr;
+  bool drop_receiver_added_ = false;
+  bool file_drag_active_ = false;
+  std::size_t input_events_registered_ = 0;
+  std::size_t drop_events_registered_ = 0;
+  std::uint64_t file_drag_session_ = 0;
+  OHNativeWindow* platform_window_ = nullptr;
   DrawingContext drawing_{nullptr, &OH_Drawing_GpuContextDestroy};
   DrawingSurface surface_{nullptr, &OH_Drawing_SurfaceDestroy};
+  OhosRenderer renderer_;
+  OhosPlatformViews platform_views_;
+  OhosTextInput text_input_;
+  std::shared_ptr<OhosFilePicker> file_picker_;
   std::uint64_t pixel_width_ = 0;
   std::uint64_t pixel_height_ = 0;
   std::unordered_map<std::int64_t, Point> touches_;
+  std::optional<Point> mouse_position_;
+  PointerButton mouse_buttons_ = PointerButton::None;
+  std::unordered_set<std::int32_t> pressed_keys_;
   std::uintptr_t frame_token_ = 0;
   std::function<void()> cancel_timer_;
   double timer_deadline_ = 0.0;
@@ -431,9 +882,86 @@ napi_value Invoke(napi_env env, napi_callback_info info) noexcept {
   }
 }
 
-napi_value Start(napi_env env, napi_callback_info) {
+std::string ReadString(napi_env env, napi_value value) {
+  std::size_t length = 0;
+  Require(napi_get_value_string_utf8(env, value, nullptr, 0, &length) == napi_ok && length != 0,
+          "HuxerUI expected a nonempty OHOS string");
+  std::string text(length + 1, '\0');
+  Require(napi_get_value_string_utf8(env, value, text.data(), text.size(), &length) == napi_ok,
+          "HuxerUI could not read an OHOS string");
+  text.resize(length);
+  return text;
+}
+
+napi_value ReadProperty(napi_env env, napi_value object, const char* name) {
+  napi_value value = nullptr;
+  Require(napi_get_named_property(env, object, name, &value) == napi_ok,
+          "HuxerUI could not read the OHOS application context");
+  return value;
+}
+
+float ReadDisplayScale(napi_env env, napi_value value) {
+  double scale = 0.0;
+  Require(napi_get_value_double(env, value, &scale) == napi_ok &&
+              scale >= std::numeric_limits<float>::min() && scale <= std::numeric_limits<float>::max(),
+          "HuxerUI expected a positive OHOS display scale");
+  return static_cast<float>(scale);
+}
+
+ResourceConfiguration ReadConfiguration(napi_env env, napi_value locale, napi_value density) {
+  return {.locale = Locale::FromLanguageTag(ReadString(env, locale)), .display_scale = ReadDisplayScale(env, density)};
+}
+
+std::optional<NotificationActivation> ReadNotificationActivation(napi_env env, napi_value value) {
+  napi_valuetype type = napi_undefined;
+  if (napi_typeof(env, value, &type) != napi_ok || type != napi_object) {
+    return std::nullopt;
+  }
+  return DecodeOhosNotificationActivation(ReadString(env, ReadProperty(env, value, "identifier")),
+                                          ReadString(env, ReadProperty(env, value, "payload")));
+}
+
+std::optional<ApplicationActivation> ReadActivation(napi_env env, napi_value value) {
+  napi_valuetype type = napi_undefined;
+  if (napi_typeof(env, value, &type) != napi_ok || type != napi_object) {
+    return std::nullopt;
+  }
+  if (auto notification = ReadNotificationActivation(env, ReadProperty(env, value, "notification"))) {
+    return std::move(*notification);
+  }
+  const auto url = ReadProperty(env, value, "url");
+  if (napi_typeof(env, url, &type) == napi_ok && type == napi_string) {
+    if (auto uri = Uri::Parse(ReadString(env, url))) {
+      return UrlActivation{std::move(*uri)};
+    }
+  }
+  const auto files = ReadProperty(env, value, "files");
+  bool is_array = false;
+  if (napi_is_array(env, files, &is_array) == napi_ok && is_array) {
+    if (auto references = ReadOhosGrantedFiles(env, files); references && !references->empty()) {
+      return FileActivation{std::move(*references)};
+    }
+  }
+  return std::nullopt;
+}
+
+napi_value Start(napi_env env, napi_callback_info info) {
   Require(!runtime, "HuxerUI OHOS application is already running");
-  runtime = std::make_unique<OhosRuntime>(env);
+  napi_value args[7];
+  std::size_t count = std::size(args);
+  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args),
+          "HuxerUI OHOS start expects the application context, locale, scale, and service hosts");
+  const napi_value context = args[0];
+  auto directories = AppDirectories{
+      .executable_directory = std::nullopt,
+      .data_directory = File(ReadString(env, ReadProperty(env, context, "filesDir"))),
+      .cache_directory = File(ReadString(env, ReadProperty(env, context, "cacheDir"))),
+      .temporary_directory = File(ReadString(env, ReadProperty(env, context, "tempDir"))),
+  };
+  auto activation = ReadActivation(env, args[5]).value_or(LaunchActivation{});
+  runtime = std::make_unique<OhosRuntime>(env, CreateDispatcher(env), std::move(directories),
+      ReadProperty(env, context, "resourceManager"), ReadConfiguration(env, args[1], args[2]),
+      args[3], args[4], std::move(activation), args[6]);
   return nullptr;
 }
 
@@ -453,22 +981,36 @@ napi_value SetActive(napi_env env, napi_callback_info info) {
   return nullptr;
 }
 
+napi_value SetConfiguration(napi_env env, napi_callback_info info) {
+  napi_value args[2];
+  std::size_t count = std::size(args);
+  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args),
+          "HuxerUI OHOS setConfiguration expects the locale and scale");
+  if (runtime) {
+    auto configuration = ReadConfiguration(env, args[0], args[1]);
+    runtime->SetConfiguration(configuration);
+    if (attachment) {
+      attachment->SetConfiguration(std::move(configuration));
+    }
+  }
+  return nullptr;
+}
+
 napi_value Attach(napi_env env, napi_callback_info info) {
   Require(runtime && !attachment, "HuxerUI OHOS needs a running application and a new UI attachment");
-  std::size_t count = 3;
-  napi_value args[3];
-  double scale = 0.0;
+  napi_value args[5];
+  std::size_t count = std::size(args);
   ArkUI_NodeContentHandle content = nullptr;
-  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == 3 &&
-              OH_ArkUI_GetNodeContentFromNapiValue(env, args[0], &content) == 0 && content &&
-              napi_get_value_double(env, args[2], &scale) == napi_ok && std::isfinite(scale) && scale > 0.0,
-          "HuxerUI OHOS attach expects node content and a positive scale");
+  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args) &&
+              OH_ArkUI_GetNodeContentFromNapiValue(env, args[0], &content) == 0 && content,
+          "HuxerUI OHOS attach expects node content, a UI context, scale, and service hosts");
+  const float scale = ReadDisplayScale(env, args[2]);
   ArkUI_ContextHandle handle = nullptr;
   Require(OH_ArkUI_GetContextFromNapiValue(env, args[1], &handle) == 0 && handle,
           "HuxerUI OHOS attach expects a UI context");
   // The NDK allocates an opaque context that the caller releases with C++ delete.
   UiContext context(handle, [](ArkUI_ContextHandle value) { ::operator delete(value); });
-  auto window = std::make_unique<OhosUiWindow>(*runtime, content, std::move(context), static_cast<float>(scale));
+  auto window = std::make_unique<OhosUiWindow>(*runtime, content, std::move(context), scale, env, args[3], args[4]);
   window->Attach();
   attachment = std::move(window);
   return nullptr;
@@ -481,9 +1023,74 @@ napi_value Detach(napi_env, napi_callback_info) {
 
 napi_value HandleBack(napi_env env, napi_callback_info) {
   napi_value result = nullptr;
-  Require(napi_get_boolean(env, attachment && attachment->HandleBack(), &result) == napi_ok,
+  const bool handled = attachment && (attachment->TextInput()->HandleBack() || attachment->HandleBack());
+  Require(napi_get_boolean(env, handled, &result) == napi_ok,
           "HuxerUI could not return the OHOS back action result");
   return result;
+}
+
+napi_value Scroll(napi_env env, napi_callback_info info) {
+  napi_value args[8];
+  std::size_t count = std::size(args);
+  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args),
+          "HuxerUI OHOS scroll expects a position, deltas, input device, and modifiers");
+  std::array<double, 4> values{};
+  for (std::size_t index = 0; index < values.size(); ++index) {
+    Require(napi_get_value_double(env, args[index], &values[index]) == napi_ok,
+            "HuxerUI expected numeric OHOS scroll coordinates and deltas");
+  }
+  bool touchpad = false;
+  KeyModifiers modifiers;
+  Require(napi_get_value_bool(env, args[4], &touchpad) == napi_ok &&
+              napi_get_value_bool(env, args[5], &modifiers.shift) == napi_ok &&
+              napi_get_value_bool(env, args[6], &modifiers.control) == napi_ok &&
+              napi_get_value_bool(env, args[7], &modifiers.alt) == napi_ok,
+          "HuxerUI expected boolean OHOS scroll device and modifier flags");
+  const Point position{static_cast<float>(values[0]), static_cast<float>(values[1])};
+  const Point delta{static_cast<float>(values[2]), static_cast<float>(values[3])};
+  const bool consumed = attachment && attachment->Scroll(position, delta, touchpad, modifiers);
+  napi_value result = nullptr;
+  Require(napi_get_boolean(env, consumed, &result) == napi_ok, "HuxerUI could not return the OHOS scroll result");
+  return result;
+}
+
+napi_value EditText(napi_env, napi_callback_info info) {
+  return attachment ? attachment->TextInput()->HandleCommand(info) : nullptr;
+}
+
+napi_value ReadTextContext(napi_env, napi_callback_info info) {
+  return attachment ? attachment->TextInput()->ReadContext(info) : nullptr;
+}
+
+napi_value CompleteOpenFiles(napi_env, napi_callback_info info) {
+  return attachment ? attachment->FilePicker().CompleteOpen(info) : nullptr;
+}
+
+napi_value CompleteSaveFile(napi_env, napi_callback_info info) {
+  return attachment ? attachment->FilePicker().CompleteSave(info) : nullptr;
+}
+
+napi_value CompleteFileAccess(napi_env, napi_callback_info info) {
+  return runtime ? runtime->FileAccess().Complete(info) : nullptr;
+}
+
+napi_value CompleteSystemService(napi_env, napi_callback_info info) {
+  return runtime ? runtime->SystemServices().Complete(info) : nullptr;
+}
+
+napi_value Activate(napi_env env, napi_callback_info info) {
+  napi_value value;
+  std::size_t count = 1;
+  if (runtime && napi_get_cb_info(env, info, &count, &value, nullptr, nullptr) == napi_ok && count == 1) {
+    if (auto activation = ReadActivation(env, value)) {
+      runtime->HandleApplicationActivation(std::move(*activation));
+    }
+  }
+  return nullptr;
+}
+
+napi_value HttpEvent(napi_env, napi_callback_info info) {
+  return runtime ? runtime->Http().Receive(info) : nullptr;
 }
 
 } // namespace
@@ -492,26 +1099,36 @@ int RunPlatformApplication(const Application&) {
   throw std::logic_error("HuxerUI applications on OHOS must start through UIAbility");
 }
 
-Task<Bitmap> DecodeBitmap(ImageAsset, std::uint16_t) {
-  throw std::logic_error("HuxerUI OHOS does not support image decoding yet");
-}
-
-Task<Bytes> EncodeBitmap(Bitmap, ImageEncodeOptions) {
-  throw std::logic_error("HuxerUI OHOS does not support image encoding yet");
-}
-
 napi_value InitializeOhosModule(napi_env env, napi_value exports) {
   const napi_property_descriptor properties[] = {
       {"start", nullptr, Invoke<Start>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"stop", nullptr, [](napi_env, napi_callback_info) -> napi_value { Stop(); return nullptr; },
        nullptr, nullptr, nullptr, napi_default, nullptr},
       {"setActive", nullptr, Invoke<SetActive>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"setConfiguration", nullptr, Invoke<SetConfiguration>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"attach", nullptr, Invoke<Attach>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"detach", nullptr, Invoke<Detach>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"handleBack", nullptr, Invoke<HandleBack>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"scroll", nullptr, Invoke<Scroll>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"editText", nullptr, Invoke<EditText>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"readTextContext", nullptr, Invoke<ReadTextContext>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"completeOpenFiles", nullptr, Invoke<CompleteOpenFiles>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"completeSaveFile", nullptr, Invoke<CompleteSaveFile>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"completeFileAccess", nullptr, Invoke<CompleteFileAccess>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"completeSystemService", nullptr, Invoke<CompleteSystemService>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"activate", nullptr, Invoke<Activate>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"httpEvent", nullptr, Invoke<HttpEvent>, nullptr, nullptr, nullptr, napi_default, nullptr},
   };
   if (napi_define_properties(env, exports, std::size(properties), properties) != napi_ok ||
-      napi_add_env_cleanup_hook(env, [](void*) { Stop(); }, nullptr) != napi_ok) {
+      napi_add_env_cleanup_hook(env, [](void*) {
+        if (attachment) {
+          attachment->TextInput()->ReleaseHost();
+        }
+        if (runtime) {
+          runtime->Http().ReleaseHost();
+        }
+        Stop();
+      }, nullptr) != napi_ok) {
     napi_throw_error(env, nullptr, "HuxerUI failed to expose the OHOS application host");
     return nullptr;
   }

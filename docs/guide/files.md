@@ -152,6 +152,8 @@ Run these tasks on the application thread, including from an application task sc
 
 Android provider selections with persistable grants, security-scoped bookmarks on iOS and macOS, and Web file system handles that can be stored in IndexedDB support this workflow. On Web, restore checks the browser's current permission and reports `PermissionDenied` when the browser requires a new grant. Temporary copies and browser uploads report `Unsupported`. Windows and Linux return `Unsupported`; applications using ordinary desktop filesystem access can save local paths instead.
 
+HarmonyOS can remember read access to document-picker items on devices and providers that support persistent file authorization. Declare `ohos.permission.FILE_ACCESS_PERSIST` in the application module. Check the [HarmonyOS setup](../../platform/ohos/README.md) for the device and permission requirements.
+
 Sandboxed macOS apps need the `com.apple.security.files.bookmarks.app-scope` entitlement to remember user-selected files or directories, in addition to the user-selected file access entitlement for their access mode.
 
 ### Passing a reference to a platform library
@@ -223,6 +225,8 @@ Use `UseService<FilePicker>()` to get the window's picker. `OpenFileAsync()` ret
 A `FilePickerFilter` combines extension and MIME hints. Use suffixes without a leading dot. MIME patterns can be exact or wildcarded, such as `image/*`. Give a nonempty filter a display name and validate the selected contents separately.
 
 `OpenDirectoryAsync()` selects one existing directory. Pass `true` to require write access. The default keeps the reference and its descendants read-only. On a writable directory, `CanWrite()` describes the ability to create children. It does not guarantee the ability to replace every existing item.
+
+On HarmonyOS, check `CanOpenDirectories()` before offering directory selection. An ordinary file selected on HarmonyOS can be written in place when `CanWrite()` reports that the provider granted access.
 
 Call Web pickers from a user action before asynchronous work consumes transient activation. Directory picking requires a browser with `showDirectoryPicker()` and live directory handles. Select source and destination from separate user actions. For embedded Android hosts, see [Android Activity results](platforms.md#window-owned-java-modules-and-activity-results).
 

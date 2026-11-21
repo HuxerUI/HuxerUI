@@ -271,6 +271,10 @@ Temporary activation snapshots do not become application documents. Their direct
 
 The repository iOS runner declares `huxerui-example` and `public.text` so `example_application` can exercise both paths. Generated and consumer applications own their URL schemes, document types, and associated entitlements in the source-controlled Xcode project. The adapter accepts custom and file URL contexts. Private window-request activities are consumed in the shell, and application activation continues to target its Runtime.
 
+### HarmonyOS
+
+The UIAbility normalizes the Want from `onCreate` before creating the Runtime and submits later Wants from `onNewWant` through the same normalization. Notification interactions keep their existing activation mapping. A `viewData` Want with a URL becomes `UrlActivation`. File URIs, including the optional `ability.params.stream` file list, become one `FileActivation` only when all referenced files can be opened. The adapter retains file descriptors, preserves a usable write grant when provided, and exposes no assumed local path. Applications register the link and document types they accept in their ability's `skills`.
+
 Hosts without a completed activation mapping deliver `LaunchActivation` and retain the same Runtime submission boundary.
 Embedded platform views do not consume an enclosing application shell's activation implicitly; their owner explicitly chooses the target Runtime.
 
@@ -278,7 +282,6 @@ Embedded platform views do not consume an enclosing application shell's activati
 
 - Map Linux desktop activation and Web PWA launch inputs through the same shared activation values.
 - Map iOS Universal Links and user activities into application activation when the corresponding application contracts are defined.
-- Define OHOS activation only through the existing platform normalization boundary.
 
 ## Implementation ownership
 

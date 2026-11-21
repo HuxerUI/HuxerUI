@@ -13,17 +13,20 @@
 #if defined(_WIN32)
 #include <huxerui/windows/external_texture.h>
 namespace platform_texture = huxerui::windows;
+#elif defined(__OHOS__)
+#include <huxerui/ohos/external_texture.h>
+namespace platform_texture = huxerui::ohos;
 #elif defined(__linux__)
 #include <huxerui/linux/external_texture.h>
 namespace platform_texture = huxerui::linux;
 #else
-#error "HuxerUI pixel texture demo requires Windows or Linux"
+#error "HuxerUI pixel texture demo requires Windows, Linux, or OHOS"
 #endif
 
 namespace {
 
-constexpr int texture_width = 320;
-constexpr int texture_height = 180;
+constexpr unsigned int texture_width = 320;
+constexpr unsigned int texture_height = 180;
 
 class PixelTextureDemo final : public huxerui::example::TextureDemo {
 public:
@@ -86,8 +89,8 @@ private:
 
   void PublishFrame() {
     std::vector<std::byte> pixels(static_cast<std::size_t>(texture_width * texture_height * 4));
-    for (int y = 0; y < texture_height; ++y) {
-      for (int x = 0; x < texture_width; ++x) {
+    for (unsigned int y = 0; y < texture_height; ++y) {
+      for (unsigned int x = 0; x < texture_width; ++x) {
         std::byte* pixel = pixels.data() + static_cast<std::size_t>((y * texture_width + x) * 4);
         pixel[0] = static_cast<std::byte>((x + phase_ * 3U) % 256U);
         pixel[1] = static_cast<std::byte>((y * 255) / (texture_height - 1));

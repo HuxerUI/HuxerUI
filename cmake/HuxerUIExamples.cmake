@@ -16,6 +16,11 @@ function(huxerui_add_example target_name bundle_name bundle_identifier)
                 RESOURCE_OUTPUT_DIRECTORY
                 "${HUXERUI_ANDROID_RESOURCE_OUTPUT_ROOT}/${ANDROID_ABI}"
         )
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "OHOS" AND HUXERUI_OHOS_RESOURCE_OUTPUT_ROOT)
+        list(APPEND HUXERUI_EXAMPLE_RESOURCE_OUTPUT_ARGUMENTS
+                RESOURCE_OUTPUT_DIRECTORY
+                "${HUXERUI_OHOS_RESOURCE_OUTPUT_ROOT}/${OHOS_ARCH}"
+        )
     endif ()
 
     huxerui_add_app(${target_name}

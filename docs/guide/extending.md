@@ -148,6 +148,8 @@ The existing PlatformChannel close contract still discards pending callbacks; an
 Use PlatformView only when a real platform visual control must participate in HuxerUI layout and ordering.
 Use ExternalTexture when a producer supplies image frames rather than an interactive platform view.
 
+On HarmonyOS, register a C++ factory from `<huxerui/ohos/platform_registry.h>`. The factory owns its unparented ArkUI node and its event bindings. HuxerUI attaches the node in scene order and clips it to the effective rectangular viewport.
+
 ## Platform backends
 
 Adding or changing a backend is framework work, not an application extension.

@@ -209,7 +209,7 @@ function(_huxerui_configure_resources target_name)
                     "$<TARGET_BUNDLE_DIR:${target_name}>/Contents/Resources/HuxerUI"
             )
         endif ()
-    elseif (WIN32 OR (UNIX AND NOT APPLE))
+    elseif (WIN32 OR (UNIX AND NOT APPLE AND NOT CMAKE_SYSTEM_NAME STREQUAL "OHOS"))
         set(HUXERUI_RESOURCE_STAGE_DIRECTORY
                 "$<TARGET_FILE_DIR:${target_name}>/$<TARGET_FILE_BASE_NAME:${target_name}>.resources"
         )

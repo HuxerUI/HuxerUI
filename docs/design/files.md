@@ -104,6 +104,10 @@ The Windows picker uses the window-owned COM dialogs. References retain handles 
 
 Linux uses the FileChooser portal on a dedicated GLib context. It supplies the realized X11 parent identifier where available. The transport subscribes to the predicted Request path before invoking the portal and switches subscriptions when the portal returns a different path. Cancellation closes the Request without waiting for a Response. Directory mode requires FileChooser version 3 or later. Successful local file URI results use the shared path-backed backend.
 
+### HarmonyOS
+
+The document picker, clipboard, and file drop open system-granted file URIs through the application host. C++ duplicates the descriptors before the host releases them. Picked files use the writable descriptor when the provider grants write access. Picked directories reuse the descriptor-relative enumeration and creation paths and keep their path private. Clipboard and drop references use read-only descriptors. The application stores remembered picker URIs in its private preferences, activates the read grant before reopening an item, and revokes the grant when its last key is removed.
+
 ### Web
 
 The picker uses the browser File System Access APIs when available. Ordinary open can fall back to a read-only upload snapshot. A directory selection requires a live directory handle, and saving requires a writable handle that can close and report completion. Picker presentation starts within transient user activation. The shared queue waits for an undismissable browser dialog to settle before admitting another presentation.

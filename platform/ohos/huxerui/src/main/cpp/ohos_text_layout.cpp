@@ -4,6 +4,7 @@
 #include <native_drawing/drawing_canvas.h>
 #include <native_drawing/drawing_font_collection.h>
 #include <native_drawing/drawing_rect.h>
+#include <native_drawing/drawing_register_font.h>
 #include <native_drawing/drawing_text_line.h>
 #include <native_drawing/drawing_text_typography.h>
 #include <unicode/ubidi.h>
@@ -20,6 +21,7 @@
 #include <utility>
 #include <vector>
 
+#include "text/font_internal.h"
 #include "text/text_internal.h"
 
 #include "ohos_renderer.h"
@@ -35,19 +37,44 @@ auto Own(T* value) {
   return std::unique_ptr<T, decltype(destroy)>(value, destroy);
 }
 
-auto MakeStyle(const TextStyle& style, const TextShapingOptions& shaping, Color background = Color::Transparent()) {
+struct ParagraphFonts {
+  std::string Family(const Font& font) {
+    if (const auto face = ResolveFontFace(font)) {
+      const auto name = "HuxerUI-" + std::to_string(face->identity);
+      if (!collection) {
+        collection = Own<OH_Drawing_DestroyFontCollection>(OH_Drawing_CreateFontCollection());
+      }
+      const auto found = std::ranges::find_if(faces, [&](const auto& entry) { return entry.first == face; });
+      if (found == faces.end()) {
+        auto* bytes = reinterpret_cast<std::uint8_t*>(const_cast<std::byte*>(face->bytes.data()));
+        const bool registered = OH_Drawing_RegisterFontBuffer(collection.get(), name.c_str(), bytes,
+                                                               face->bytes.size()) == 0;
+        faces.emplace_back(face, registered);
+        return registered ? name : std::string{};
+      }
+      return found->second ? name : std::string{};
+    }
+    return font.FamilyKind() == FontFamilyKind::Monospace ? "monospace" : std::string(font.FamilyName());
+  }
+
+  OH_Drawing_FontCollection* Get() const {
+    return collection ? collection.get() : OH_Drawing_GetFontCollectionGlobalInstance();
+  }
+
+  std::vector<std::pair<std::shared_ptr<const FontFaceData>, bool>> faces;
+  std::unique_ptr<OH_Drawing_FontCollection, decltype(&OH_Drawing_DestroyFontCollection)>
+      collection{nullptr, &OH_Drawing_DestroyFontCollection};
+};
+
+auto MakeStyle(const TextStyle& style, const TextShapingOptions& shaping, ParagraphFonts& fonts,
+               Color background = Color::Transparent()) {
   auto result = Own<OH_Drawing_DestroyTextStyle>(OH_Drawing_CreateTextStyle());
   const Font& font = style.font;
   OH_Drawing_SetTextStyleFontSize(result.get(), font.Size());
   OH_Drawing_SetTextStyleFontWeight(result.get(), static_cast<int>(font.Weight()) / 100 - 1);
   const auto slant = font.Slant() == FontSlant::Italic ? FONT_STYLE_ITALIC : FONT_STYLE_NORMAL;
   OH_Drawing_SetTextStyleFontStyle(result.get(), slant);
-  if (font.FamilyKind() == FontFamilyKind::Custom) {
-    throw std::logic_error("HuxerUI OHOS does not support application-supplied fonts yet");
-  }
-  if (font.FamilyKind() == FontFamilyKind::Named || font.FamilyKind() == FontFamilyKind::Monospace) {
-    const std::string family = font.FamilyKind() == FontFamilyKind::Monospace
-        ? "monospace" : std::string(font.FamilyName());
+  if (const auto family = fonts.Family(font); !family.empty()) {
     const char* name = family.c_str();
     OH_Drawing_SetTextStyleFontFamilies(result.get(), 1, &name);
   }
@@ -76,6 +103,7 @@ auto MakeStyle(const TextStyle& style, const TextShapingOptions& shaping, Color 
 using Typography = std::unique_ptr<OH_Drawing_Typography, decltype(&OH_Drawing_DestroyTypography)>;
 
 struct Paragraph {
+  ParagraphFonts fonts;
   Typography typography;
   float offset_x = 0.0F;
 };
@@ -149,16 +177,33 @@ Paragraph Shape(const AttributedText& text, const TextStyle& style, float width,
                     (options.align == TextAlign::Leading) != rtl ? TEXT_ALIGN_LEFT : TEXT_ALIGN_RIGHT;
   OH_Drawing_SetTypographyTextDirection(paragraph.get(), rtl ? TEXT_DIRECTION_RTL : TEXT_DIRECTION_LTR);
   OH_Drawing_SetTypographyTextAlign(paragraph.get(), align);
-  auto base = MakeStyle(style, options.shaping);
+  ParagraphFonts fonts;
+  auto base = MakeStyle(style, options.shaping, fonts);
   OH_Drawing_SetTypographyTextStyle(paragraph.get(), base.get());
-  auto handler = Own<OH_Drawing_DestroyTypographyHandler>(
-      OH_Drawing_CreateTypographyHandler(paragraph.get(), OH_Drawing_GetFontCollectionGlobalInstance()));
-  const auto& source = text.PlainText();
-  for (const auto& run : ResolveTextRuns(text, style)) {
-    if (run.inline_object) {
-      throw std::logic_error("HuxerUI OHOS does not support inline text objects yet");
+  const auto runs = ResolveTextRuns(text, style);
+  // The handler captures its font collection when it is created.
+  for (const auto& run : runs) {
+    if (run.style.font.FamilyKind() == FontFamilyKind::Custom) {
+      fonts.Family(run.style.font);
     }
-    auto run_style = MakeStyle(run.style, options.shaping, run.background);
+  }
+  auto handler = Own<OH_Drawing_DestroyTypographyHandler>(
+      OH_Drawing_CreateTypographyHandler(paragraph.get(), fonts.Get()));
+  const auto& source = text.PlainText();
+  for (const auto& run : runs) {
+    if (run.inline_object) {
+      const auto& object = *run.inline_object;
+      OH_Drawing_PlaceholderSpan span{object.width, object.ascent + object.descent, ALIGNMENT_OFFSET_AT_BASELINE,
+                                    TEXT_BASELINE_ALPHABETIC, object.ascent};
+      OH_Drawing_TypographyHandlerAddPlaceholder(handler.get(), &span);
+      if (paragraph_source) {
+        paragraph_source->text.push_back(u'\uFFFC');
+        paragraph_source->boundaries.push_back(
+            {static_cast<TextOffset>(paragraph_source->text.size()), object.offset + 1, false});
+      }
+      continue;
+    }
+    auto run_style = MakeStyle(run.style, options.shaping, fonts, run.background);
     const auto utf8 = NormalizeTextRun(source, run, paragraph_source);
     OH_Drawing_TypographyHandlerPushTextStyle(handler.get(), run_style.get());
     OH_Drawing_TypographyHandlerAddText(handler.get(), utf8.c_str());
@@ -167,7 +212,7 @@ Paragraph Shape(const AttributedText& text, const TextStyle& style, float width,
   auto typography = Own<OH_Drawing_DestroyTypography>(OH_Drawing_CreateTypography(handler.get()));
   if (std::isfinite(width) && options.wrap == TextWrap::Word) {
     OH_Drawing_TypographyLayout(typography.get(), std::max(0.0F, width));
-    return {std::move(typography)};
+    return {std::move(fonts), std::move(typography)};
   }
   OH_Drawing_TypographyLayout(typography.get(), std::numeric_limits<float>::infinity());
   const double intrinsic_width = std::ceil(OH_Drawing_TypographyGetMaxIntrinsicWidth(typography.get()));
@@ -175,14 +220,13 @@ Paragraph Shape(const AttributedText& text, const TextStyle& style, float width,
   OH_Drawing_TypographyLayout(typography.get(), layout_width);
   const float overflow = std::isfinite(width) ? static_cast<float>(width - layout_width) : 0.0F;
   const float offset = align == TEXT_ALIGN_RIGHT ? overflow : align == TEXT_ALIGN_CENTER ? overflow * 0.5F : 0.0F;
-  return {std::move(typography), offset};
+  return {std::move(fonts), std::move(typography), offset};
 }
 
-FontMetrics ReadFontMetrics(OH_Drawing_Typography* typography, const TextStyle& style,
-                            const TextShapingOptions& shaping) {
-  auto native_style = MakeStyle(style, shaping);
+FontMetrics ReadFontMetrics(Paragraph& paragraph, const TextStyle& style, const TextShapingOptions& shaping) {
+  auto native_style = MakeStyle(style, shaping, paragraph.fonts);
   OH_Drawing_Font_Metrics metrics{};
-  if (!OH_Drawing_TextStyleGetFontMetrics(typography, native_style.get(), &metrics)) {
+  if (!OH_Drawing_TextStyleGetFontMetrics(paragraph.typography.get(), native_style.get(), &metrics)) {
     throw std::runtime_error("HuxerUI could not read OHOS font metrics");
   }
   return {std::abs(metrics.ascent), std::abs(metrics.descent), std::max(0.0F, metrics.leading),
@@ -430,6 +474,27 @@ public:
     return rects;
   }
 
+  std::vector<InlineObjectPlacement> InlineObjectPlacements(
+      std::span<const TextInlineObject> objects, std::span<const TextLineMetrics> lines) const override {
+    const std::unique_ptr<OH_Drawing_TextBox, decltype(&OH_Drawing_TypographyDestroyTextBox)> boxes(
+        OH_Drawing_TypographyGetRectsForPlaceholders(paragraph_.typography.get()),
+        &OH_Drawing_TypographyDestroyTextBox);
+    if (!boxes || OH_Drawing_GetSizeOfTextBox(boxes.get()) != objects.size()) {
+      return TextLayoutBackend::InlineObjectPlacements(objects, lines);
+    }
+    std::vector<InlineObjectPlacement> placements;
+    placements.reserve(objects.size());
+    for (std::size_t index = 0; index < objects.size(); ++index) {
+      const int box = static_cast<int>(index);
+      const auto left = OH_Drawing_GetLeftFromTextBox(boxes.get(), box) + paragraph_.offset_x;
+      const auto right = OH_Drawing_GetRightFromTextBox(boxes.get(), box) + paragraph_.offset_x;
+      const auto baseline = OH_Drawing_GetTopFromTextBox(boxes.get(), box) + objects[index].ascent;
+      const bool rtl = OH_Drawing_GetTextDirectionFromTextBox(boxes.get(), box) == TEXT_DIRECTION_RTL;
+      placements.push_back({rtl ? right : left, rtl ? left : right, baseline});
+    }
+    return placements;
+  }
+
   TextOffset PreviousCaretOffset(TextOffset offset) const override {
     const auto next = std::lower_bound(graphemes_.begin(), graphemes_.end(), offset);
     return next == graphemes_.begin() ? graphemes_.front() : *std::prev(next);
@@ -443,10 +508,17 @@ public:
   const Paragraph& ShapedParagraph() const noexcept { return paragraph_; }
 
 private:
+  const TextInlineObject* ObjectAt(TextOffset offset) const {
+    const auto objects = text_.InlineObjects();
+    const auto found = std::ranges::lower_bound(objects, offset, {}, &TextInlineObject::offset);
+    return found != objects.end() && found->offset == offset ? &*found : nullptr;
+  }
+
   void SetBoxWidths(std::span<GraphemeBox> boxes, std::span<const float> advances, float line_width) const {
     if (boxes.size() == advances.size()) {
       for (std::size_t i = 0; i < boxes.size(); ++i) {
-        boxes[i].width = advances[i];
+        const auto* object = text_.InlineObjects().empty() ? nullptr : ObjectAt(boxes[i].range.start);
+        boxes[i].width = object ? object->width : advances[i];
       }
       return;
     }
@@ -454,8 +526,14 @@ private:
     // The API reports glyph advances, so ligatures can span several graphemes without providing their boundaries.
     // Estimate interior stops proportionally and keep the final stop at the width of the shaped line.
     float total = 0.0F;
+    float object_width = 0.0F;
     const auto styles = text_.StyleRanges();
     for (auto& box : boxes) {
+      if (const auto* object = ObjectAt(box.range.start)) {
+        box.width = object->width;
+        object_width += box.width;
+        continue;
+      }
       const auto next = std::upper_bound(styles.begin(), styles.end(), box.range.start,
           [](TextOffset value, const TextStyleRange& candidate) { return value < candidate.range.start; });
       const auto style_range = next == styles.begin() ? styles.end() : std::prev(next);
@@ -468,9 +546,11 @@ private:
     }
     if (total > 0.0F) {
       const float width = std::max(line_width, std::accumulate(advances.begin(), advances.end(), 0.0F));
-      const float scale = width / total;
+      const float scale = std::max(0.0F, width - object_width) / total;
       for (auto& box : boxes) {
-        box.width *= scale;
+        if (!ObjectAt(box.range.start)) {
+          box.width *= scale;
+        }
       }
     }
   }
@@ -531,15 +611,15 @@ private:
 
 FontMetrics MeasureOhosFont(const Font& font) {
   const TextStyle style{.font = font};
-  const auto paragraph = Shape(AttributedText("Hg"), style, std::numeric_limits<float>::infinity(), {});
-  return ReadFontMetrics(paragraph.typography.get(), style, {});
+  auto paragraph = Shape(AttributedText("Hg"), style, std::numeric_limits<float>::infinity(), {});
+  return ReadFontMetrics(paragraph, style, {});
 }
 
 TextRunMetrics MeasureOhosRun(std::string_view text, const TextStyle& style, const TextShapingOptions& options) {
   RequireSingleLineTextRun(text);
-  const auto paragraph = Shape(AttributedText(std::string(text)), style, std::numeric_limits<float>::infinity(),
-                               {.shaping = options, .wrap = TextWrap::NoWrap});
-  const auto font_metrics = ReadFontMetrics(paragraph.typography.get(), style, options);
+  auto paragraph = Shape(AttributedText(std::string(text)), style, std::numeric_limits<float>::infinity(),
+                         {.shaping = options, .wrap = TextWrap::NoWrap});
+  const auto font_metrics = ReadFontMetrics(paragraph, style, options);
   const float advance = static_cast<float>(OH_Drawing_TypographyGetMaxIntrinsicWidth(paragraph.typography.get()));
   return {advance, {0.0F, -font_metrics.ascent, advance, font_metrics.LineHeight()}, font_metrics};
 }

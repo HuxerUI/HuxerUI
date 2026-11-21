@@ -1,26 +1,40 @@
 #include "ohos_renderer.h"
 
+#include <native_drawing/drawing_bitmap.h>
 #include <native_drawing/drawing_brush.h>
 #include <native_drawing/drawing_canvas.h>
+#include <native_drawing/drawing_filter.h>
+#include <native_drawing/drawing_mask_filter.h>
 #include <native_drawing/drawing_matrix.h>
 #include <native_drawing/drawing_path.h>
 #include <native_drawing/drawing_path_effect.h>
 #include <native_drawing/drawing_pen.h>
+#include <native_drawing/drawing_pixel_map.h>
 #include <native_drawing/drawing_point.h>
 #include <native_drawing/drawing_rect.h>
 #include <native_drawing/drawing_round_rect.h>
+#include <native_drawing/drawing_sampling_options.h>
+#include <native_drawing/drawing_shader_effect.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <limits>
 #include <memory>
 #include <numbers>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <variant>
+#include <vector>
+
+#include <huxerui/ohos/external_texture.h>
 
 #include "graphics/path_internal.h"
+#include "graphics/shadow_internal.h"
 #include "internal_access.h"
 
+#include "ohos_bitmap.h"
 #include "ohos_text_layout.h"
 
 namespace huxerui::detail {
@@ -52,6 +66,13 @@ auto MakeRoundRect(Rect rect, float radius) {
   return Own<OH_Drawing_RoundRectDestroy>(OH_Drawing_RoundRectCreate(bounds.get(), radius, radius));
 }
 
+auto MakeMatrix(const Transform2D& transform) {
+  auto matrix = Own<OH_Drawing_MatrixDestroy>(OH_Drawing_MatrixCreate());
+  OH_Drawing_MatrixSetMatrix(matrix.get(), transform.m11, transform.m21, transform.translate_x,
+                             transform.m12, transform.m22, transform.translate_y, 0.0F, 0.0F, 1.0F);
+  return matrix;
+}
+
 auto MakePath(const Path& path, PathFillRule rule = PathFillRule::NonZero) {
   auto result = Own<OH_Drawing_PathDestroy>(OH_Drawing_PathCreate());
   auto* target = result.get();
@@ -73,12 +94,46 @@ auto MakePath(const Path& path, PathFillRule rule = PathFillRule::NonZero) {
   return result;
 }
 
-Color SolidColor(const Brush& brush) {
-  const auto* color = std::get_if<Color>(&brush.Get());
-  if (!color) {
-    throw std::logic_error("HuxerUI OHOS does not support gradients yet");
-  }
-  return *color;
+struct PaintSource {
+  std::uint32_t color;
+  std::unique_ptr<OH_Drawing_ShaderEffect, decltype(&OH_Drawing_ShaderEffectDestroy)> shader{
+      nullptr, &OH_Drawing_ShaderEffectDestroy};
+};
+
+PaintSource ResolvePaintSource(const Brush& brush, Rect bounds) {
+  return std::visit([bounds](const auto& value) -> PaintSource {
+    using Value = std::remove_cvref_t<decltype(value)>;
+    if constexpr (std::is_same_v<Value, Color>) {
+      return {OhosDrawingColor(value)};
+    } else {
+      if (bounds.IsEmpty()) {
+        return {OhosDrawingColor(value.stops.back().color)};
+      }
+      std::vector<std::uint32_t> colors;
+      std::vector<float> positions;
+      colors.reserve(value.stops.size());
+      positions.reserve(value.stops.size());
+      for (const GradientStop& stop : value.stops) {
+        colors.push_back(OhosDrawingColor(stop.color));
+        positions.push_back(stop.offset);
+      }
+
+      const auto matrix = MakeMatrix(ResolveGradientTransform(bounds, value));
+      const auto count = static_cast<std::uint32_t>(colors.size());
+      OH_Drawing_ShaderEffect* shader;
+      if constexpr (std::is_same_v<Value, LinearGradient>) {
+        const OH_Drawing_Point2D start{value.start.x, value.start.y};
+        const OH_Drawing_Point2D end{value.end.x, value.end.y};
+        shader = OH_Drawing_ShaderEffectCreateLinearGradientWithLocalMatrix(
+            &start, &end, colors.data(), positions.data(), count, CLAMP, matrix.get());
+      } else {
+        const OH_Drawing_Point2D center{value.center.x, value.center.y};
+        shader = OH_Drawing_ShaderEffectCreateRadialGradientWithLocalMatrix(
+            &center, value.radius.width, colors.data(), positions.data(), count, CLAMP, matrix.get());
+      }
+      return {OhosDrawingColor(Color::White()), Own<OH_Drawing_ShaderEffectDestroy>(shader)};
+    }
+  }, brush.Get());
 }
 
 class CanvasState {
@@ -96,10 +151,14 @@ private:
   std::uint32_t depth_;
 };
 
-class ScenePainter {
+} // namespace
+
+class OhosRenderer::ScenePainter {
 public:
-  explicit ScenePainter(OH_Drawing_Canvas* canvas)
-      : canvas_(canvas), brush_(Own<OH_Drawing_BrushDestroy>(OH_Drawing_BrushCreate())),
+  ScenePainter(OhosRenderer& renderer, OH_Drawing_Canvas* canvas, std::size_t first = 0,
+               std::size_t end = std::numeric_limits<std::size_t>::max())
+      : renderer_(renderer), canvas_(canvas), first_(first), end_(end),
+        brush_(Own<OH_Drawing_BrushDestroy>(OH_Drawing_BrushCreate())),
         pen_(Own<OH_Drawing_PenDestroy>(OH_Drawing_PenCreate())) {
     OH_Drawing_BrushSetAntiAlias(brush_.get(), true);
   }
@@ -138,8 +197,20 @@ public:
 private:
   void Draw(const PaintSequence& sequence) {
     for (const auto& command : sequence.Commands()) {
+      if (std::holds_alternative<PlacePlatformViewCommand>(command)) {
+        continue;
+      }
+      const auto index = next_command_++;
       std::visit([&](const auto& value) {
-        if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, DrawTextCommand>) {
+        using Command = std::remove_cvref_t<decltype(value)>;
+        if constexpr (std::is_same_v<Command, PushClipCommand> || std::is_same_v<Command, PushPathClipCommand> ||
+                      std::is_same_v<Command, PopClipCommand> || std::is_same_v<Command, PushTransformCommand> ||
+                      std::is_same_v<Command, PopTransformCommand>) {
+          // A slice can begin inside a clip or transform established by an earlier command.
+          Draw(value);
+        } else if (index < first_ || index >= end_) {
+          return;
+        } else if constexpr (std::is_same_v<Command, DrawTextCommand>) {
           PaintOhosText(canvas_, value, InternalAccess::TextLayoutForPaint(sequence, command));
         } else {
           Draw(value);
@@ -152,9 +223,7 @@ private:
     if (transform.IsIdentity()) {
       return;
     }
-    auto matrix = Own<OH_Drawing_MatrixDestroy>(OH_Drawing_MatrixCreate());
-    OH_Drawing_MatrixSetMatrix(matrix.get(), transform.m11, transform.m21, transform.translate_x,
-                               transform.m12, transform.m22, transform.translate_y, 0.0F, 0.0F, 1.0F);
+    const auto matrix = MakeMatrix(transform);
     OH_Drawing_CanvasConcatMatrix(canvas_, matrix.get());
   }
 
@@ -178,21 +247,47 @@ private:
   }
 
   template <typename DrawShape>
-  void Fill(Color color, DrawShape draw) {
-    OH_Drawing_BrushSetColor(brush_.get(), OhosDrawingColor(color));
+  void Fill(const PaintSource& source, DrawShape draw, OH_Drawing_Filter* filter = nullptr) {
+    OH_Drawing_BrushSetColor(brush_.get(), source.color);
+    if (source.shader) {
+      OH_Drawing_BrushSetShaderEffect(brush_.get(), source.shader.get());
+    }
+    if (filter) {
+      OH_Drawing_BrushSetFilter(brush_.get(), filter);
+    }
     OH_Drawing_CanvasAttachBrush(canvas_, brush_.get());
     draw();
     OH_Drawing_CanvasDetachBrush(canvas_);
+    if (source.shader || filter) {
+      OH_Drawing_BrushReset(brush_.get());
+      OH_Drawing_BrushSetAntiAlias(brush_.get(), true);
+    }
   }
 
   template <typename DrawShape>
-  void Stroke(Color color, const StrokeStyle& style, DrawShape draw) {
+  void FillShadow(Color color, float sigma, DrawShape draw) {
+    const PaintSource source{OhosDrawingColor(color)};
+    if (sigma <= 0.0F) {
+      Fill(source, draw);
+      return;
+    }
+    const auto blur = Own<OH_Drawing_MaskFilterDestroy>(OH_Drawing_MaskFilterCreateBlur(NORMAL, sigma, true));
+    const auto filter = Own<OH_Drawing_FilterDestroy>(OH_Drawing_FilterCreate());
+    OH_Drawing_FilterSetMaskFilter(filter.get(), blur.get());
+    Fill(source, draw, filter.get());
+  }
+
+  template <typename DrawShape>
+  void Stroke(const PaintSource& source, const StrokeStyle& style, DrawShape draw) {
     if (style.width <= 0.0F) {
       return;
     }
     OH_Drawing_PenReset(pen_.get());
     OH_Drawing_PenSetAntiAlias(pen_.get(), true);
-    OH_Drawing_PenSetColor(pen_.get(), OhosDrawingColor(color));
+    OH_Drawing_PenSetColor(pen_.get(), source.color);
+    if (source.shader) {
+      OH_Drawing_PenSetShaderEffect(pen_.get(), source.shader.get());
+    }
     OH_Drawing_PenSetWidth(pen_.get(), style.width);
     OH_Drawing_PenSetCap(pen_.get(), style.cap == StrokeCap::Round ? LINE_ROUND_CAP :
                          style.cap == StrokeCap::Square ? LINE_SQUARE_CAP : LINE_FLAT_CAP);
@@ -221,15 +316,39 @@ private:
   }
 
   void Draw(const DrawRectCommand& command) {
-    Fill(SolidColor(command.brush), [&] { DrawRoundedRect(command.rect, command.corner_radius); });
+    Fill(ResolvePaintSource(command.brush, command.rect), [&] { DrawRoundedRect(command.rect, command.corner_radius); });
   }
   void Draw(const DrawTextRunsCommand& command) { PaintOhosTextRuns(canvas_, command); }
+
+  void Draw(const DrawImageCommand& command) {
+    const float scale = RasterImageScale(command.image);
+    const auto& src = command.source;
+    DrawImage(command.image, {src.x * scale, src.y * scale, src.width * scale, src.height * scale},
+              command.destination, command.sampling, command.opacity);
+  }
+
+  void DrawImage(const RasterImage& source, Rect source_pixels, Rect destination, ImageSampling sampling_mode,
+                 float opacity) {
+    const auto* image = renderer_.ImageFor(source);
+    if (!image) {
+      return;
+    }
+    const auto src = MakeRect(source_pixels);
+    const auto dst = MakeRect(destination);
+    const auto filter = sampling_mode == ImageSampling::Nearest ? FILTER_MODE_NEAREST : FILTER_MODE_LINEAR;
+    const auto sampling = Own<OH_Drawing_SamplingOptionsDestroy>(
+        OH_Drawing_SamplingOptionsCreate(filter, MIPMAP_MODE_NONE));
+    const PaintSource paint{OhosDrawingColor(Color::Rgb(255, 255, 255, opacity))};
+    Fill(paint, [&] {
+      OH_Drawing_CanvasDrawImageRectWithSrc(canvas_, image, src.get(), dst.get(), sampling.get(), STRICT_SRC_RECT_CONSTRAINT);
+    });
+  }
   void Draw(const DrawCircleCommand& command) {
     auto point = Own<OH_Drawing_PointDestroy>(OH_Drawing_PointCreate(command.center.x, command.center.y));
-    Fill(command.color, [&] { OH_Drawing_CanvasDrawCircle(canvas_, point.get(), command.radius); });
+    Fill({OhosDrawingColor(command.color)}, [&] { OH_Drawing_CanvasDrawCircle(canvas_, point.get(), command.radius); });
   }
   void Draw(const DrawLineCommand& command) {
-    Stroke(command.color, command.style, [&] {
+    Stroke({OhosDrawingColor(command.color)}, command.style, [&] {
       OH_Drawing_CanvasDrawLine(canvas_, command.start.x, command.start.y, command.end.x, command.end.y);
     });
   }
@@ -237,7 +356,7 @@ private:
     const float radius = command.radius;
     const auto bounds = MakeRect({command.center.x - radius, command.center.y - radius, 2.0F * radius, 2.0F * radius});
     constexpr float degrees = 180.0F / std::numbers::pi_v<float>;
-    Stroke(command.color, command.style, [&] {
+    Stroke({OhosDrawingColor(command.color)}, command.style, [&] {
       OH_Drawing_CanvasDrawArc(canvas_, bounds.get(), command.start_angle * degrees, command.sweep_angle * degrees);
     });
   }
@@ -245,13 +364,33 @@ private:
     const auto path = CreateBorderStrokePath(command.rect, CornerRadii{command.corner_radius}, command.style.width);
     Draw(StrokePathCommand{path, command.color, command.rect, command.style});
   }
+  void Draw(const DrawShadowCommand& command) {
+    const auto shadow = ResolveShadow(command);
+    if (shadow.IsEmpty() || command.color.alpha <= 0.0F) {
+      return;
+    }
+    FillShadow(command.color, shadow.standard_deviation, [&] { DrawRoundedRect(shadow.caster, shadow.corner_radius); });
+  }
   void Draw(const FillPathCommand& command) {
     const auto path = MakePath(command.path, command.fill_rule);
-    Fill(SolidColor(command.brush), [&] { OH_Drawing_CanvasDrawPath(canvas_, path.get()); });
+    Fill(ResolvePaintSource(command.brush, command.brush_bounds), [&] {
+      OH_Drawing_CanvasDrawPath(canvas_, path.get());
+    });
   }
   void Draw(const StrokePathCommand& command) {
     const auto path = MakePath(command.path);
-    Stroke(SolidColor(command.brush), command.style, [&] { OH_Drawing_CanvasDrawPath(canvas_, path.get()); });
+    Stroke(ResolvePaintSource(command.brush, command.brush_bounds), command.style, [&] {
+      OH_Drawing_CanvasDrawPath(canvas_, path.get());
+    });
+  }
+  void Draw(const DrawPathShadowCommand& command) {
+    if (command.path.IsEmpty() || command.color.alpha <= 0.0F) {
+      return;
+    }
+    const auto path = MakePath(command.path, command.fill_rule);
+    const CanvasState state(canvas_);
+    OH_Drawing_CanvasTranslate(canvas_, command.offset.x, command.offset.y);
+    FillShadow(command.color, command.blur_radius / 3.0F, [&] { OH_Drawing_CanvasDrawPath(canvas_, path.get()); });
   }
   void Draw(const PushClipCommand& command) { PushClip(command); }
   void Draw(const PushPathClipCommand& command) { PushClip(command); }
@@ -261,28 +400,110 @@ private:
     Transform(command.transform);
   }
   void Draw(const PopTransformCommand&) { OH_Drawing_CanvasRestore(canvas_); }
-  void Draw(const DrawImageCommand&) { throw std::logic_error("HuxerUI OHOS does not support raster images yet"); }
-  void Draw(const DrawExternalTextureCommand&) {
-    throw std::logic_error("HuxerUI OHOS does not support external textures yet");
+  void Draw(const DrawExternalTextureCommand& command) {
+    if (const auto* texture = dynamic_cast<const ohos::NativeBufferTexture*>(command.texture.get())) {
+      if (const auto frame = texture->AcquireFrame()) {
+        const auto intrinsic = texture->IntrinsicSize();
+        const float scale_x = frame->pixel_size.width / intrinsic.width;
+        const float scale_y = frame->pixel_size.height / intrinsic.height;
+        const auto& source = command.source;
+        const auto src = MakeRect({source.x * scale_x, source.y * scale_y,
+                                   source.width * scale_x, source.height * scale_y});
+        const auto dst = MakeRect(command.destination);
+        const auto filter = command.sampling == ImageSampling::Nearest ? FILTER_MODE_NEAREST : FILTER_MODE_LINEAR;
+        const auto sampling = Own<OH_Drawing_SamplingOptionsDestroy>(
+            OH_Drawing_SamplingOptionsCreate(filter, MIPMAP_MODE_NONE));
+        const auto pixelmap = Own<OH_Drawing_PixelMapDissolve>(
+            OH_Drawing_PixelMapGetFromOhPixelMapNative(frame->pixelmap.get()));
+        Fill({OhosDrawingColor(Color::Rgb(255, 255, 255, command.opacity))}, [&] {
+          OH_Drawing_CanvasDrawPixelMapRect(canvas_, pixelmap.get(), src.get(), dst.get(), sampling.get());
+        });
+      }
+      return;
+    }
+    const auto* texture = dynamic_cast<const ohos::PixelTexture*>(command.texture.get());
+    if (!texture) {
+      throw std::logic_error("HuxerUI expected a HarmonyOS external texture");
+    }
+    const auto frame = texture->AcquireFrame();
+    if (!frame) {
+      return;
+    }
+    const auto intrinsic = texture->IntrinsicSize();
+    const float scale_x = static_cast<float>(frame->PixelWidth()) / intrinsic.width;
+    const float scale_y = static_cast<float>(frame->PixelHeight()) / intrinsic.height;
+    const auto& src = command.source;
+    DrawImage(*frame, {src.x * scale_x, src.y * scale_y, src.width * scale_x, src.height * scale_y},
+              command.destination, command.sampling, command.opacity);
   }
-  void Draw(const DrawShadowCommand&) { throw std::logic_error("HuxerUI OHOS does not support shadows yet"); }
-  void Draw(const DrawPathShadowCommand&) { throw std::logic_error("HuxerUI OHOS does not support path shadows yet"); }
-  void Draw(const PlacePlatformViewCommand&) {
-    throw std::logic_error("HuxerUI OHOS does not support platform views yet");
-  }
+  void Draw(const PlacePlatformViewCommand&) {}
 
+  OhosRenderer& renderer_;
   OH_Drawing_Canvas* canvas_;
+  std::size_t first_;
+  std::size_t end_;
+  std::size_t next_command_ = 0;
   std::unique_ptr<OH_Drawing_Brush, decltype(&OH_Drawing_BrushDestroy)> brush_;
   std::unique_ptr<OH_Drawing_Pen, decltype(&OH_Drawing_PenDestroy)> pen_;
 };
 
-} // namespace
+OH_Drawing_Image* OhosRenderer::ImageFor(const RasterImage& source) {
+  const auto identity = RasterImageIdentity(source);
+  const auto cached = std::ranges::find(images_, identity, &CachedImage::identity);
+  if (cached != images_.end()) {
+    std::rotate(cached, cached + 1, images_.end());
+    return images_.back().image.get();
+  }
 
-void PaintOhosScene(OH_Drawing_Canvas* canvas, const RenderScene& scene, float scale) {
-  if (scene.root) {
+  DrawingImage image(nullptr, &OH_Drawing_ImageDestroy);
+  std::size_t byte_size = 0;
+  try {
+    const Bitmap bitmap = std::visit([](const auto& value) -> Bitmap {
+      if constexpr (std::is_same_v<std::remove_cvref_t<decltype(value)>, Bitmap>) {
+        return value;
+      } else {
+        return DecodeOhosBitmap(value);
+      }
+    }, source);
+    const auto drawing_bitmap = Own<OH_Drawing_BitmapDestroy>(OH_Drawing_BitmapCreate());
+    const OH_Drawing_BitmapFormat format{COLOR_FORMAT_RGBA_8888, ALPHA_FORMAT_UNPREMUL};
+    OH_Drawing_BitmapBuild(drawing_bitmap.get(), bitmap.PixelWidth(), bitmap.PixelHeight(), &format);
+    auto* pixels = OH_Drawing_BitmapGetPixels(drawing_bitmap.get());
+    if (!pixels) {
+      throw std::runtime_error("HuxerUI could not allocate OHOS drawing pixels");
+    }
+    std::memcpy(pixels, bitmap.Pixels().data(), bitmap.Pixels().size());
+    auto decoded = Own<OH_Drawing_ImageDestroy>(OH_Drawing_ImageCreate());
+    if (OH_Drawing_ImageBuildFromBitmap(decoded.get(), drawing_bitmap.get())) {
+      image = std::move(decoded);
+      byte_size = bitmap.Pixels().size();
+    }
+  } catch (const std::runtime_error&) {
+    // Keep a failed decode in the cache so an invalid asset does not interrupt every frame.
+  }
+
+  constexpr std::size_t image_cache_capacity = 64;
+  constexpr std::size_t image_cache_budget = 64U * 1024U * 1024U;
+  while (!images_.empty() && (images_.size() >= image_cache_capacity ||
+                            image_bytes_ > image_cache_budget - std::min(byte_size, image_cache_budget))) {
+    image_bytes_ -= images_.front().byte_size;
+    images_.erase(images_.begin());
+  }
+  images_.push_back({identity, byte_size, std::move(image)});
+  image_bytes_ += byte_size;
+  return images_.back().image.get();
+}
+
+void OhosRenderer::Paint(OH_Drawing_Canvas* canvas, const RenderScene& scene, float scale) {
+  PaintSlice(canvas, scene, scale, 0, std::numeric_limits<std::size_t>::max());
+}
+
+void OhosRenderer::PaintSlice(OH_Drawing_Canvas* canvas, const RenderScene& scene, float scale,
+                              std::size_t first_command, std::size_t command_count) {
+  if (scene.root && command_count != 0) {
     const CanvasState state(canvas);
     OH_Drawing_CanvasScale(canvas, scale, scale);
-    ScenePainter(canvas).Draw(*scene.root);
+    ScenePainter(*this, canvas, first_command, first_command + command_count).Draw(*scene.root);
   }
 }
 

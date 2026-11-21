@@ -90,4 +90,6 @@ Task<bool> SaveSquareThumbnail(ImageAsset image, File destination) {
 
 Call `ExternalTexture::SnapshotAsync()` on the owning UI thread to capture the current frame. Await the task to receive a scale-1 `Bitmap`, or an empty optional before the first frame. A finished producer can still supply its last frame.
 
+On HarmonyOS, include `<huxerui/ohos/external_texture.h>` and publish straight-alpha sRGB rows through `ohos::PixelTexture`. The texture copies the rows during publication and can receive frames from a producer thread. On API 22 or later, check `ohos::NativeBufferTexture::IsSupported()` to publish an immutable premultiplied sRGB RGBA8 buffer with the system's CPU read and write usage flags. Finish producer writes before publishing it. The texture retains the shared buffer as a system PixelMap, and the platform drawing backend controls pixel upload.
+
 See [Resource and image design](../design/resources.md) for package resolution, cache ownership, and renderer behavior.

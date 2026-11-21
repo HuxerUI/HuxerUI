@@ -1,10 +1,72 @@
+import { common } from '@kit.AbilityKit';
 import { NodeContent, UIContext } from '@kit.ArkUI';
 
+export interface HuxerUITextInputHost {
+  connect(token: string, inputType: number, enterKey: number): void;
+  disconnect(): void;
+  changeSelection(text: string, start: number, end: number): void;
+  updateCursor(left: number, top: number, width: number, height: number): void;
+  show(): void;
+  hide(): void;
+}
+
+export interface HuxerUIPickedFile {
+  fd: number;
+  name: string;
+  uri: string;
+  writable: boolean;
+  mimeType: string;
+}
+
+export interface HuxerUIFilePickerHost {
+  readonly canSelectDirectory: boolean;
+  openFiles(token: string, multiple: boolean, suffixes: string): void;
+  saveFile(token: string, source: string, name: string, suffixes: string): void;
+  openDirectory(token: string, writable: boolean): void;
+  accessFiles(token: string, operation: string, key: string, uris: string[]): void;
+}
+
+export interface HuxerUISystemServicesHost {
+  readonly canSchedule: boolean;
+  perform(token: string, operation: number, args: string[]): void;
+}
+
+export interface HuxerUINotificationActivation {
+  identifier: string;
+  payload: string;
+}
+
+export interface HuxerUIActivation {
+  notification?: HuxerUINotificationActivation;
+  url?: string;
+  files?: HuxerUIPickedFile[];
+}
+
+export interface HuxerUIHttpHost {
+  start(token: string, address: string, method: string, fields: string[][], body: ArrayBuffer,
+    streaming: boolean): void;
+  abort(token: string): void;
+}
+
 export interface HuxerUIApplicationModule {
-  start(): void;
+  start(context: common.UIAbilityContext, locale: string, scale: number, services: HuxerUISystemServicesHost,
+    http: HuxerUIHttpHost, activation: HuxerUIActivation | undefined, files: HuxerUIFilePickerHost): void;
   stop(): void;
   setActive(active: boolean): void;
-  attach(content: NodeContent, context: UIContext, scale: number): void;
+  setConfiguration(locale: string, scale: number): void;
+  attach(content: NodeContent, context: UIContext, scale: number, textInput: HuxerUITextInputHost,
+    filePicker: HuxerUIFilePickerHost): void;
   detach(): void;
   handleBack(): boolean;
+  scroll(x: number, y: number, deltaX: number, deltaY: number, touchpad: boolean, shift: boolean, control: boolean,
+    alt: boolean): boolean;
+  editText(token: string, command: number, first: number, second: number, text: string): void;
+  readTextContext(token: string, query: number, length: number): string | number | undefined;
+  completeOpenFiles(token: string, files: HuxerUIPickedFile[]): void;
+  completeSaveFile(token: string, saved: boolean): void;
+  completeFileAccess(token: string, files: HuxerUIPickedFile[], status: number, canPersist: boolean): void;
+  completeSystemService(token: string, result: number): void;
+  activate(activation: HuxerUIActivation): void;
+  httpEvent(token: string, type: number, value?: string | number | ArrayBuffer, status?: number,
+    headers?: string[][]): void;
 }

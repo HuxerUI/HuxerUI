@@ -386,6 +386,10 @@ Because notification servers are not required to emit interaction events, `can_a
 
 HuxerUI does not add X11, Wayland, desktop-environment, daemon, or autostart policy to shared Runtime code to strengthen these guarantees.
 
+### HarmonyOS
+
+Notification Kit handles immediate presentation. The system reminder agent retains one-shot schedules and their activation data independently of the application process. Scheduling requires the application to configure agent-powered reminders and declare `ohos.permission.PUBLISH_AGENT_REMINDER`. Preferences map stable identifiers to system notification IDs so replacement and cancellation also work after restart.
+
 ### Web
 
 The initial Web backend reports all local notification capabilities as unavailable.

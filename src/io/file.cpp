@@ -1501,6 +1501,9 @@ class LocalFileReferenceBackend final : public FileReferenceBackend,
 public:
   LocalFileReferenceBackend(File file, bool writable, FileReferenceCoordination coordination = {},
                             FileReferenceBookmark bookmark = {});
+#if defined(__OHOS__)
+  LocalFileReferenceBackend(File file, ReferenceDescriptor directory, bool writable, FileReferenceBookmark bookmark);
+#endif
   ~LocalFileReferenceBackend() override;
   [[nodiscard]] FileReference Reference(std::optional<std::string> content_type = {});
   [[nodiscard]] FileReferenceMetadata Metadata(std::string* entry_key = nullptr, int parent_descriptor = -1) const;
@@ -1553,6 +1556,9 @@ private:
   std::string relative_;
   std::string entry_key_;
   FileReferenceMetadata metadata_;
+#if defined(__OHOS__)
+  bool exposes_path_ = true;
+#endif
 #if defined(_WIN32)
   [[nodiscard]] ReferenceHandle OpenNative(ACCESS_MASK access = FILE_READ_ATTRIBUTES) const;
 #else
@@ -1579,6 +1585,9 @@ struct LocalFileReferenceBackend::Anchor {
       : descriptor(open(directory.Path().c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NOFOLLOW)) {
     CheckLocalIo(descriptor.Get() >= 0);
   }
+#if defined(__OHOS__)
+  explicit Anchor(ReferenceDescriptor directory) : descriptor(std::move(directory)) {}
+#endif
   ReferenceDescriptor descriptor;
 #endif
 };
@@ -1604,10 +1613,23 @@ LocalFileReferenceBackend::LocalFileReferenceBackend(
   metadata_ = Metadata(&entry_key_);
 }
 
+#if defined(__OHOS__)
+LocalFileReferenceBackend::LocalFileReferenceBackend(File file, ReferenceDescriptor directory, bool writable,
+                                                     FileReferenceBookmark bookmark)
+    : file_(std::move(file)), bookmark_(std::move(bookmark)), writable_(writable),
+      anchor_(std::make_shared<Anchor>(std::move(directory))), exposes_path_(false) {
+  metadata_ = Metadata(&entry_key_);
+  CheckReference(metadata_.type == FileType::Directory, IoErrorCode::NotDirectory);
+}
+#endif
+
 LocalFileReferenceBackend::LocalFileReferenceBackend(const LocalFileReferenceBackend& parent, std::string name,
                                                      int parent_descriptor)
     : file_(parent.file_.Child(name)), coordination_(parent.coordination_), writable_(parent.writable_),
       anchor_(parent.anchor_), relative_(parent.relative_.empty() ? name : parent.relative_ + "/" + name) {
+#if defined(__OHOS__)
+  exposes_path_ = parent.exposes_path_;
+#endif
   metadata_ = Metadata(&entry_key_, parent_descriptor);
 }
 
@@ -1616,6 +1638,11 @@ std::string LocalFileReferenceBackend::EntryKey() const {
   return entry_key_;
 }
 std::optional<File> LocalFileReferenceBackend::AsFile() const {
+#if defined(__OHOS__)
+  if (!exposes_path_) {
+    return std::nullopt;
+  }
+#endif
   return file_;
 }
 
@@ -2352,6 +2379,24 @@ FileReference MakeLocalFileReference(File file, bool writable, std::optional<std
   CheckReference(reference.has_value(), IoErrorCode::Io);
   return std::move(*reference);
 }
+
+#if defined(__OHOS__)
+FileReference MakeDescriptorDirectoryReference(File path, ReferenceDescriptor descriptor, bool writable,
+                                               FileReferenceBookmark bookmark) {
+  return std::make_shared<LocalFileReferenceBackend>(std::move(path), std::move(descriptor), writable,
+                                                     std::move(bookmark))->Reference();
+}
+
+OutputStream MakeDescriptorOutputStream(ReferenceDescriptor descriptor) {
+  return StreamAccess::MakeOutputStream(std::make_shared<ReferenceOutputStreamBackend>(
+      std::move(descriptor), [](const auto& operation) { operation(); }, false));
+}
+
+std::shared_ptr<AsyncOutputStreamBackend> MakeDescriptorAsyncOutputStream(ReferenceDescriptor descriptor) {
+  return std::make_shared<ReferenceOutputStreamBackend>(
+      std::move(descriptor), [](const auto& operation) { operation(); }, false);
+}
+#endif
 
 Task<IoResult<std::shared_ptr<FileReferenceBackend>>> MakeLocalDirectoryBackend(File directory) {
   using Result = IoResult<std::shared_ptr<FileReferenceBackend>>;

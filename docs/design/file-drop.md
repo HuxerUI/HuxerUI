@@ -54,6 +54,7 @@ Windows receives shell file lists through one OLE IDropTarget per host HWND, wit
 AppKit receives file URLs; UIKit receives asynchronous file representations and secures temporary-file ownership before provider callbacks return.
 Android API 24 and later can retain content URIs through a shared batch permission lease tied to the granting Activity. `HuxerUIActivity` supplies the hook. Embedded hosts use `HuxerUIView.setFileDropPermissionRequester` to return an `AutoCloseable` lease and clear the hook during teardown.
 GTK receives files through its native asynchronous drop controller and finishes each accepted native operation once data reception terminates.
+HarmonyOS captures file URI records during the ArkUI drop callback and keeps the drop pending while the application host opens the granted files. The shared receiver delivers the prepared read-only references asynchronously.
 Web captures browser file capabilities during the drop event's readable data-store lifetime and does not suppress unrelated native drops.
 Unsupported items and unavailable grants fail explicitly rather than producing partial or path-shaped substitute references.
 

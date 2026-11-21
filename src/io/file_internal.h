@@ -80,7 +80,7 @@ public:
   [[nodiscard]] static std::shared_ptr<FileReferenceBackend> Of(const FileReference& reference);
   // Optional path projection only; the returned File never takes ownership of this backend's grant.
   [[nodiscard]] virtual std::optional<File> AsFile() const;
-  // Only an independently selected Apple root has a bookmark producer. Its children retain live access.
+  // An independently selected root may produce a provider token. Its children retain live access.
   virtual IoResult<Bytes> MakeBookmark();
   // Provider-local entry key used for ancestor-cycle and destination-alias checks, never as a public path or a
   // persistent token. An empty key means traversal cannot establish the required relationship safely.
@@ -193,6 +193,13 @@ void ValidateFileTypeFilter(const std::vector<std::string>& extensions, const st
                                                    FileReferenceCoordination coordination = {},
                                                    FileReferenceBookmark bookmark = {});
 Task<IoResult<std::shared_ptr<FileReferenceBackend>>> MakeLocalDirectoryBackend(File directory);
+
+#if defined(__OHOS__)
+FileReference MakeDescriptorDirectoryReference(File path, ReferenceDescriptor descriptor, bool writable,
+                                               FileReferenceBookmark bookmark);
+OutputStream MakeDescriptorOutputStream(ReferenceDescriptor descriptor);
+std::shared_ptr<AsyncOutputStreamBackend> MakeDescriptorAsyncOutputStream(ReferenceDescriptor descriptor);
+#endif
 
 #if defined(__EMSCRIPTEN__)
 [[nodiscard]] bool IsWebPersistentFilePath(std::string_view path) noexcept;

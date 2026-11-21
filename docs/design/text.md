@@ -221,6 +221,7 @@ They do not introduce a second platform text ownership path.
 - Windows keeps bounded DirectWrite font metrics, paragraph layout, and exact-run layout caches.
 - macOS and iOS keep bounded CoreText font, CTFrame paragraph, and CTLine exact-run caches.
 - Android maps Font to cached Typeface values, keeps a bounded StaticLayout paragraph cache, and submits each exact-run batch through one JNI call for baseline-positioned Canvas replay.
+- HarmonyOS uses Native Drawing typography and native placeholders for inline objects. A paragraph that uses custom faces retains its own font collection and the registered face data.
 - Linux configures one Pango attributed layout for each measurement, geometry, or drawing operation.
 - Web retains Canvas-backed paragraph geometry with the deliberate shaping limitations below.
 

@@ -249,6 +249,10 @@ The experimental arm64 runner targets API 19. Keep local SDK paths, signing mate
 
 `ohos_adapter.cpp` owns the application and surface lifecycle. `ohos_renderer.cpp` replays PaintCommands, and `ohos_text_layout.cpp` owns Native Drawing typography and maps normalized line ranges and glyph advances to the source's UTF-16 grapheme boundaries. Use the system ICU bidi API when mapping the typography's logical advances into visual order.
 
+Keep input method callbacks and picker presentation in the ArkTS host. Translate editing requests into the shared UTF-16 session protocol on the application thread and suppress secure surrounding text. Retain system-selected file descriptors across picker dismissal and keep provider grants out of public path values.
+
+Keep HTTP and system-service calls in the ArkTS host and route results to the originating Runtime. PlatformView placement uses the shared render composition and interleaves ArkUI nodes with raster slices. Producer threads publish immutable software texture frames through the shared ExternalTexture scheduling contract.
+
 Add equivalent focused guidance when a new backend gains repository-owned implementation.
 
 ## Build and validation
