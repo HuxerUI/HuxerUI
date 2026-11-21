@@ -73,7 +73,8 @@ View BrandPanel(const ThemeSpec& theme) {
           .end = {1.0F, 1.0F},
           .stops = {{0.0F, theme.colors.primary}, {1.0F, deep_primary}},
       }),
-      CrossAlign(CrossAxisAlignment::Start)
+      CrossAlign(CrossAxisAlignment::Start),
+      WindowDragRegion{}
   );
 }
 
@@ -401,12 +402,15 @@ View InstallerContent() {
 
   return Row {
     BrandPanel(theme),
-    Column(std::move(content)).With(
-        Padding(EdgeInsets::Symmetric(36.0F, 32.0F)),
-        Spacing(24.0F),
-        CrossAlign(CrossAxisAlignment::Stretch),
-        Grow()
-    ),
+    Column {
+      WindowTitleBar{}.With(Background(theme.colors.surface)),
+      Column(std::move(content)).With(
+          Padding(EdgeInsets{.top = 8.0F, .right = 36.0F, .bottom = 32.0F, .left = 36.0F}),
+          Spacing(24.0F),
+          CrossAlign(CrossAxisAlignment::Stretch),
+          Grow()
+      ),
+    }.With(CrossAlign(CrossAxisAlignment::Stretch), Grow()),
   }.With(CrossAlign(CrossAxisAlignment::Stretch), Background(theme.colors.surface), Grow(), std::move(restart_dialog));
 }
 
@@ -421,6 +425,8 @@ const Application application{
             .title = "@PROJECT_NAME@",
             .initial_size = {780.0F, 500.0F},
             .minimum_size = Size{720.0F, 460.0F},
+            .chrome_mode = WindowChromeMode::Custom,
+            .title_bar_height = 40.0F,
         },
         .show_debug_overlay = false,
         .window_hooks = {InstallInstallerSession},
