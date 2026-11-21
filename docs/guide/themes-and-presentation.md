@@ -121,6 +121,20 @@ The active indication can paint a state layer, state border, content tint, focus
 Application code can provide a custom `Indication` or remove transient indication where that is semantically appropriate.
 Normal component appearance remains in its component style rather than being duplicated as an interaction state.
 
+Use `IndicationLayer::foreground` to change the foreground of clickable text or a vector icon as interaction state changes. For an action with several parts, put the indication on the clickable container and apply `InheritForeground{}` to the text and vector images that should follow it.
+
+```cpp
+return Row {
+  Image(back_icon).With(InheritForeground{}),
+  Text("Back").With(InheritForeground{}),
+}.With(
+    Foreground(normal_color),
+    Indication{.press = IndicationLayer{.foreground = pressed_color}}
+).OnClick(go_back);
+```
+
+The active layer is selected in press, hover, then visible-focus order. Its foreground switches with the interaction state. A missing override uses the ordinary foreground. `Foreground` can supply that color from any ancestor, including a non-interactive layout. Opted-in text or vector images with no ancestor color retain their own text style or image tint. A nested activation target uses its own indication. An explicit `Indication` replaces the default state layers and ripple, so an indication with only a press foreground gives color-only feedback.
+
 ## Animation
 
 Retained animation updates mounted presentation state without recomposing application state every frame.

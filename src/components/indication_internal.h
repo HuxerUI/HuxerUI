@@ -21,6 +21,7 @@ struct DefaultIndication {
 
 bool IsDefaultIndicationDescriptor(const ModifierDescriptor* descriptor) noexcept;
 bool IsExplicitIndicationDescriptor(const ModifierDescriptor* descriptor) noexcept;
+std::optional<Color> ResolveIndicationForeground(const Indication& indication, const InteractionState& state);
 
 struct IndicationRippleState {
   std::uint64_t press_id = 0;
@@ -38,6 +39,7 @@ public:
   void Update(Indication spec);
   void Reset();
   void SetInteraction(const InteractionState& state, const std::optional<InteractionEvent>& event, Rect frame);
+  std::optional<Color> Foreground() const;
   [[nodiscard]] MotionAdvanceResult Advance(const FrameInfo& frame);
   void Paint(PaintContext& context, Rect frame, CornerRadii corner_radii, IndicationPlacement placement,
              float opacity = 1.0F) const;

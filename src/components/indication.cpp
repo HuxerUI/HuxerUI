@@ -20,6 +20,32 @@ bool IsEmpty(const Indication& indication) noexcept {
          !indication.ripple.has_value();
 }
 
+bool HasForeground(const Indication& indication) {
+  return (indication.press && indication.press->foreground) || (indication.hover && indication.hover->foreground) ||
+         (indication.focus && indication.focus->foreground);
+}
+
+using IndicationState = std::optional<IndicationLayer> Indication::*;
+
+IndicationState ActiveIndicationState(const Indication& indication, const InteractionState& state) {
+  if (state.enabled) {
+    if (state.pressed && indication.press) {
+      return &Indication::press;
+    }
+    if (state.hovered && indication.hover) {
+      return &Indication::hover;
+    }
+    if (state.focus_visible && indication.focus) {
+      return &Indication::focus;
+    }
+  }
+  return nullptr;
+}
+
+const IndicationLayer* LayerFor(const Indication& indication, IndicationState state) {
+  return state && indication.*state ? &*(indication.*state) : nullptr;
+}
+
 bool NeedsResourceResolution(const Indication& indication) {
   const auto layer_needs_resolution = [](const std::optional<IndicationLayer>& layer) {
     return layer.has_value() && layer->fill.has_value() && detail::NeedsResourceResolution(*layer->fill);
@@ -59,6 +85,9 @@ Indication ResolveIndication(Indication indication, AppResources& resources, con
     if (layer->corner_radii.has_value()) {
       ValidateCornerRadii(*layer->corner_radii, "HuxerUI indication corner radii must be finite and non-negative");
     }
+    if (layer->foreground) {
+      ValidateColor(*layer->foreground, "HuxerUI indication foreground color must be finite");
+    }
     MotionController enter;
     enter.AnimateTo(1.0F, layer->enter);
     MotionController exit;
@@ -78,12 +107,17 @@ Indication ResolveIndication(Indication indication, AppResources& resources, con
 }
 
 void CompileIndicationModifier(
-    ViewSpec&, ModifierSpec& modifier, const std::shared_ptr<const Environment>& environment, AppResources& resources
+    ViewSpec& spec, ModifierSpec& modifier, const std::shared_ptr<const Environment>& environment,
+    AppResources& resources
 ) {
   Indication indication = *static_cast<const Indication*>(modifier.value.get());
   const Locale locale =
       NeedsResourceResolution(indication) ? ResolveResourceLocale(environment, resources) : Locale::Default();
-  modifier.value = std::make_shared<Indication>(ResolveIndication(std::move(indication), resources, locale));
+  auto resolved = std::make_shared<Indication>(ResolveIndication(std::move(indication), resources, locale));
+  if (HasForeground(*resolved)) {
+    spec.foreground_indication = resolved;
+  }
+  modifier.value = std::move(resolved);
 }
 
 void CompileDefaultIndicationModifier(
@@ -104,7 +138,11 @@ void CompileDefaultIndicationModifier(
   const Locale locale =
       NeedsResourceResolution(indication) ? ResolveResourceLocale(environment, resources) : Locale::Default();
   value.value = ResolveIndication(std::move(indication), resources, locale);
-  modifier.value = std::make_shared<DefaultIndication>(std::move(value));
+  auto resolved = std::make_shared<DefaultIndication>(std::move(value));
+  if (HasForeground(*resolved->value)) {
+    spec.foreground_indication = std::shared_ptr<const Indication>(resolved, &*resolved->value);
+  }
+  modifier.value = std::move(resolved);
 }
 
 NodeExtension::PaintInvalidation MergeInvalidation(NodeExtension::PaintInvalidation left,
@@ -138,6 +176,11 @@ void PaintLayer(PaintContext& context, Rect frame, CornerRadii corner_radii, con
 
 } // namespace
 
+std::optional<Color> ResolveIndicationForeground(const Indication& indication, const InteractionState& state) {
+  const auto* layer = LayerFor(indication, ActiveIndicationState(indication, state));
+  return layer ? layer->foreground : std::nullopt;
+}
+
 void IndicationController::Update(Indication spec) {
   spec_ = std::move(spec);
   if (IsEmpty(spec_)) {
@@ -155,21 +198,8 @@ void IndicationController::Reset() {
   ripples_.clear();
 }
 
-void IndicationController::RetargetLayer(MotionController& controller, bool visible,
-                                    const std::optional<IndicationLayer>& layer) {
-  if (!layer.has_value()) {
-    controller.Set(0.0F);
-    return;
-  }
-  const float target = visible ? 1.0F : 0.0F;
-  if (controller.Target() == target && (controller.IsRunning() || controller.Value() == target)) {
-    return;
-  }
-  controller.AnimateTo(target, visible ? layer->enter : layer->exit);
-}
-
 void IndicationController::SetInteraction(const InteractionState& state, const std::optional<InteractionEvent>& event,
-                                     Rect frame) {
+                                          Rect frame) {
   const bool released_before_press_frame = interaction_.pressed && !state.pressed && event.has_value() &&
                                            event->type == InteractionEvent::Type::Release && spec_.press.has_value() &&
                                            press_opacity_.Target() == 1.0F && press_opacity_.Value() == 0.0F &&
@@ -181,16 +211,14 @@ void IndicationController::SetInteraction(const InteractionState& state, const s
     return;
   }
 
-  const bool press_visible = state.pressed && spec_.press.has_value();
-  const bool hover_visible = !press_visible && state.hovered && spec_.hover.has_value();
-  const bool focus_visible = !press_visible && !hover_visible && state.focus_visible && spec_.focus.has_value();
+  const auto active = ActiveIndicationState(spec_, state);
   if (released_before_press_frame) {
     // Preserve feedback when Press and Release arrive before the first animation frame.
     press_opacity_.Set(1.0F);
   }
-  RetargetLayer(press_opacity_, press_visible, spec_.press);
-  RetargetLayer(hover_opacity_, hover_visible, spec_.hover);
-  RetargetLayer(focus_opacity_, focus_visible, spec_.focus);
+  RetargetLayer(press_opacity_, active == &Indication::press, spec_.press);
+  RetargetLayer(hover_opacity_, active == &Indication::hover, spec_.hover);
+  RetargetLayer(focus_opacity_, active == &Indication::focus, spec_.focus);
 
   if (!event.has_value() || !spec_.ripple.has_value()) {
     return;
@@ -211,6 +239,10 @@ void IndicationController::SetInteraction(const InteractionState& state, const s
     found->release_pending = true;
     found->released = true;
   }
+}
+
+std::optional<Color> IndicationController::Foreground() const {
+  return ResolveIndicationForeground(spec_, interaction_);
 }
 
 MotionAdvanceResult IndicationController::Advance(const FrameInfo& frame) {
@@ -243,7 +275,7 @@ MotionAdvanceResult IndicationController::Advance(const FrameInfo& frame) {
 }
 
 void IndicationController::Paint(PaintContext& context, Rect frame, CornerRadii corner_radii,
-                            IndicationPlacement placement, float opacity) const {
+                                 IndicationPlacement placement, float opacity) const {
   const auto paint_layer = [&](const std::optional<IndicationLayer>& layer, float layer_opacity) {
     if (layer.has_value() && layer->placement == placement) {
       PaintLayer(context, frame, corner_radii, *layer, layer_opacity * opacity);
@@ -291,6 +323,19 @@ NodeExtension::PaintInvalidation IndicationController::ActivePaintPhases() const
 bool IndicationController::HasVisuals() const noexcept {
   return focus_opacity_.Value() > 0.0F || hover_opacity_.Value() > 0.0F || press_opacity_.Value() > 0.0F ||
          focus_opacity_.IsRunning() || hover_opacity_.IsRunning() || press_opacity_.IsRunning() || !ripples_.empty();
+}
+
+void IndicationController::RetargetLayer(MotionController& controller, bool visible,
+                                         const std::optional<IndicationLayer>& layer) {
+  if (!layer || (layer->foreground && !layer->fill)) {
+    controller.Set(0.0F);
+    return;
+  }
+  const float target = visible ? 1.0F : 0.0F;
+  if (controller.Target() == target && (controller.IsRunning() || controller.Value() == target)) {
+    return;
+  }
+  controller.AnimateTo(target, visible ? layer->enter : layer->exit);
 }
 
 } // namespace huxerui::detail
@@ -363,7 +408,7 @@ public:
 
   void Update(ViewNode& node, const Indication& modifier) {
     std::optional<AnimationSpec> departing_exit;
-    if (const IndicationLayer* departing = LayerFor(surface_state_)) {
+    if (const IndicationLayer* departing = detail::LayerFor(spec_, surface_state_)) {
       departing_exit = departing->exit;
     }
     spec_ = modifier;
@@ -387,9 +432,12 @@ public:
   void OnInteraction(ViewNode& node, const InteractionState& state,
                      const std::optional<InteractionEvent>& event) override {
     const PaintInvalidation previous_phases = indication_.ActivePaintPhases();
+    const auto previous_foreground = indication_.Foreground();
     indication_.SetInteraction(state, event, ResolveIndicationFrame(node, spec_));
-    const PaintInvalidation surface_invalidation = RetargetSurface(node) ? PaintInvalidation::Both
-                                                                         : PaintInvalidation::None;
+    PaintInvalidation surface_invalidation = RetargetSurface(node) ? PaintInvalidation::Both : PaintInvalidation::None;
+    if (previous_foreground != indication_.Foreground()) {
+      surface_invalidation = detail::MergeInvalidation(surface_invalidation, PaintInvalidation::Content);
+    }
     InvalidatePaint(detail::MergeInvalidation(
         detail::MergeInvalidation(previous_phases, indication_.ActivePaintPhases()), surface_invalidation));
   }
@@ -446,49 +494,12 @@ public:
   }
 
 private:
-  enum class SurfaceState {
-    Normal,
-    Focus,
-    Hover,
-    Press,
-  };
-
   struct SurfaceStyle {
     std::optional<Border> border;
     CornerRadii corner_radii;
 
     bool operator==(const SurfaceStyle&) const = default;
   };
-
-  std::pair<SurfaceState, const IndicationLayer*> ActiveSurface(const InteractionState& interaction) const {
-    if (!interaction.enabled) {
-      return {SurfaceState::Normal, nullptr};
-    }
-    if (interaction.pressed && spec_.press.has_value()) {
-      return {SurfaceState::Press, &*spec_.press};
-    }
-    if (interaction.hovered && spec_.hover.has_value()) {
-      return {SurfaceState::Hover, &*spec_.hover};
-    }
-    if (interaction.focus_visible && spec_.focus.has_value()) {
-      return {SurfaceState::Focus, &*spec_.focus};
-    }
-    return {SurfaceState::Normal, nullptr};
-  }
-
-  const IndicationLayer* LayerFor(SurfaceState state) const {
-    switch (state) {
-    case SurfaceState::Focus:
-      return spec_.focus ? &*spec_.focus : nullptr;
-    case SurfaceState::Hover:
-      return spec_.hover ? &*spec_.hover : nullptr;
-    case SurfaceState::Press:
-      return spec_.press ? &*spec_.press : nullptr;
-    case SurfaceState::Normal:
-      return nullptr;
-    }
-    return nullptr;
-  }
 
   SurfaceStyle PresentedSurface() const {
     const float progress = std::clamp(surface_progress_.Value(), 0.0F, 1.0F);
@@ -504,7 +515,8 @@ private:
         mounted.applies_disabled_appearance && mounted.properties.disabled_border.has_value()
             ? mounted.properties.disabled_border
             : mounted.properties.border;
-    const auto [next_state, active] = ActiveSurface(node.Interaction());
+    const auto next_state = detail::ActiveIndicationState(spec_, node.Interaction());
+    const auto* active = detail::LayerFor(spec_, next_state);
     const SurfaceStyle next{
         active != nullptr && active->border.has_value() ? active->border : base_border,
         active != nullptr && active->corner_radii.has_value() ? *active->corner_radii
@@ -529,7 +541,7 @@ private:
         animation = active->enter;
       } else if (departing_exit.has_value()) {
         animation = std::move(*departing_exit);
-      } else if (const IndicationLayer* departing = LayerFor(surface_state_)) {
+      } else if (const IndicationLayer* departing = detail::LayerFor(spec_, surface_state_)) {
         animation = departing->exit;
       }
     }
@@ -560,7 +572,7 @@ private:
   SurfaceStyle surface_source_;
   SurfaceStyle surface_target_;
   MotionController surface_progress_{1.0F};
-  SurfaceState surface_state_ = SurfaceState::Normal;
+  detail::IndicationState surface_state_ = nullptr;
   bool surface_initialized_ = false;
 };
 

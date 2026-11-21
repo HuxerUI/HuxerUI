@@ -814,6 +814,7 @@ void ApplyViewDeclaration(MountedNode& mounted, ViewSpec& compiled, std::shared_
   mounted.resolved_border = compiled.properties.border;
   mounted.resolved_corner_radii = compiled.properties.corner_radii;
   mounted.properties = std::move(compiled.properties);
+  mounted.foreground_indication = std::move(compiled.foreground_indication);
   mounted.component_semantics = std::move(compiled.component_semantics);
   mounted.author_semantics = std::move(compiled.author_semantics);
   mounted.scope_factory = std::move(compiled.scope_factory);

@@ -1903,6 +1903,38 @@ View SurfaceIndicationApp() {
       );
 }
 
+constexpr Color normal_action_foreground = Color::Rgb(20, 40, 80);
+constexpr Color pressed_action_foreground = Color::Rgb(120, 40, 60);
+
+View TextForegroundIndicationApp() {
+  return Text("Back")
+      .With(Frame{100.0F, 40.0F}, Foreground(normal_action_foreground),
+            Indication{.press = IndicationLayer{.foreground = pressed_action_foreground}})
+      .OnClick([] {});
+}
+
+View RowForegroundIndicationApp() {
+  const auto icon = VectorAsset::Create({16.0F, 16.0F}, [](VectorBuilder& builder) {
+    builder.FillPath(Path{}.MoveTo({0.0F, 8.0F}).LineTo({12.0F, 0.0F}).LineTo({12.0F, 16.0F}).Close(),
+                     Color::Black());
+  });
+  return Column {
+    Row {
+      Image(icon).With(InheritForeground{}),
+      Column {
+        Text("Back").With(InheritForeground{}),
+      },
+      Row {
+        Text("Independent").With(InheritForeground{}),
+      }.OnClick([] {}),
+      Text("Own color").With(Foreground(Color::Black())),
+    }.With(
+        Frame{300.0F, 40.0F},
+        Indication{.press = IndicationLayer{.foreground = pressed_action_foreground}}
+    ).OnClick([] {}),
+  }.With(Foreground(normal_action_foreground));
+}
+
 View FocusTestTheme(View content) {
   ThemeSpec spec = huxerui::FlatLightThemeSpec();
   spec.motion.reduced_motion = true;
@@ -2096,6 +2128,49 @@ TEST_CASE("TestPressedInteractionFallsBackToAvailableHoverLayer") {
 
   runtime.HandlePointerEvent(PointerEvent{PointerEventType::Down, 103, {20.0F, 20.0F}});
   REQUIRE(FindRectWithColor(runtime.BuildFrame(), hover) != nullptr);
+}
+
+TEST_CASE("TestTextIndicationForegroundFollowsPressAndCancel") {
+  TestPlatform platform;
+  UiWindow runtime{TextForegroundIndicationApp, platform};
+  runtime.SetWindowMetrics({.viewport = {100.0F, 40.0F}});
+  const auto check_color = [&](Color expected) {
+    const auto* text = FindText(runtime.BuildFrame(), "Back");
+    REQUIRE(text != nullptr);
+    CHECK(text->style.foreground == expected);
+  };
+  check_color(normal_action_foreground);
+  runtime.HandlePointerEvent({PointerEventType::Down, 1, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+  check_color(pressed_action_foreground);
+  runtime.HandlePointerEvent({PointerEventType::Cancel, 1, {20.0F, 20.0F}, PointerDeviceKind::Touch});
+  check_color(normal_action_foreground);
+}
+
+TEST_CASE("TestRowIndicationForegroundRecolorsOptedInTextAndIconTogether") {
+  TestPlatform platform;
+  UiWindow runtime{RowForegroundIndicationApp, platform};
+  runtime.SetWindowMetrics({.viewport = {300.0F, 40.0F}});
+  const auto check_colors = [&](Color expected) {
+    const auto& scene = runtime.BuildFrame();
+    const auto* text = FindText(scene, "Back");
+    const auto* independent = FindText(scene, "Independent");
+    const auto* own_color = FindText(scene, "Own color");
+    REQUIRE(text != nullptr);
+    REQUIRE(independent != nullptr);
+    REQUIRE(own_color != nullptr);
+    CHECK(text->style.foreground == expected);
+    CHECK(independent->style.foreground == normal_action_foreground);
+    CHECK(own_color->style.foreground == Color::Black());
+    CHECK(std::ranges::any_of(scene.Commands(), [expected](const PaintCommand& command) {
+      const auto* fill = std::get_if<FillPathCommand>(&command);
+      return fill && BrushIsColor(fill->brush, expected);
+    }));
+  };
+  check_colors(normal_action_foreground);
+  runtime.HandlePointerEvent({PointerEventType::Down, 1, {5.0F, 5.0F}, PointerDeviceKind::Touch});
+  check_colors(pressed_action_foreground);
+  runtime.HandlePointerEvent({PointerEventType::Up, 1, {5.0F, 5.0F}, PointerDeviceKind::Touch});
+  check_colors(normal_action_foreground);
 }
 
 TEST_CASE("TestIndicationReplacesResolvedBorderAndCornerRadii") {

@@ -216,6 +216,7 @@ export namespace huxerui {
     using huxerui::IndicationGeometry;
     using huxerui::IndicationLayer;
     using huxerui::IndicationPlacement;
+    using huxerui::InheritForeground;
     using huxerui::InputStream;
     using huxerui::InteractionEvent;
     using huxerui::InteractionScheme;

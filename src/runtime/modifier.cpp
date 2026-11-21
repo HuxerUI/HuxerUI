@@ -485,6 +485,11 @@ void ApplyShadow(detail::ViewSpec& spec, const Shadow& modifier) {
 
 void ApplyForeground(detail::ViewSpec& spec, const Foreground& modifier) {
   spec.properties.text_style.foreground = modifier.color;
+  spec.properties.foreground = modifier.color;
+}
+
+void ApplyInheritForeground(detail::ViewSpec& spec, const InheritForeground&) {
+  spec.properties.inherit_foreground = true;
 }
 
 void ApplyFontSize(detail::ViewSpec& spec, const FontSize& modifier) {
@@ -637,6 +642,10 @@ const detail::ModifierDescriptor& Shadow::Descriptor() {
 
 const detail::ModifierDescriptor& Foreground::Descriptor() {
   return ApplyOnlyModifierDescriptor<Foreground, ApplyForeground>();
+}
+
+const detail::ModifierDescriptor& InheritForeground::Descriptor() {
+  return ApplyOnlyModifierDescriptor<InheritForeground, ApplyInheritForeground>();
 }
 
 const detail::ModifierDescriptor& FontSize::Descriptor() {

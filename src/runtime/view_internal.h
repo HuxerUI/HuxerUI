@@ -183,6 +183,8 @@ struct ViewProperties {
   std::optional<Border> disabled_border;
   std::optional<Shadow> shadow;
   TextStyle text_style;
+  std::optional<Color> foreground;
+  bool inherit_foreground = false;
   TextLayoutOptions text_layout_options;
   std::optional<std::size_t> text_line_limit;
   TextOverflow text_overflow = TextOverflow::Clip;
@@ -342,6 +344,7 @@ struct ViewSpec {
   std::vector<ModifierSpec> modifiers;
   // Component Theme resolution supplies this value to a retained DefaultIndication declaration.
   std::optional<Indication> default_indication;
+  std::shared_ptr<const Indication> foreground_indication;
   // Environment nodes retain only their local declaration values; UiWindow attaches the inherited parent at mount.
   std::optional<Environment> local_environment;
   std::optional<bool> chip_selection;

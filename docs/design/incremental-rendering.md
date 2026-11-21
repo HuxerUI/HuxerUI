@@ -30,6 +30,7 @@ Ordinary mounted nodes also retain their input Constraints, measured size, place
 Reconciliation compares built-in layout inputs by value and propagates changed child layout toward the root.
 An unchanged subtree reuses its measurement when its Constraints are equal, and an unchanged placement does not revisit its descendants.
 Clean PaintSequences are retained across frames; declarative paint input changes, size and focus changes, and explicit NodeExtension invalidation rerecord only the affected sequence.
+Presentation and scene traversal propagate explicit foreground colors and the active indication foreground to opted-in content. Activation boundaries isolate the interaction override. Changing the resolved color dirties content recording without affecting measurement, and freshly recorded transition snapshots use the same resolved colors.
 RenderNodes retain local opacity, and platform renderers composite each node's content, children, and foreground as one group while replaying source-color PaintSequences.
 Each PaintSequence has a recording revision, and Runtime compares a lightweight snapshot of the committed scene to derive frame damage without retaining duplicate commands.
 `TextField` prepares geometry-dependent scroll state before paint, so paint and platform text-input queries only read committed geometry.

@@ -14,6 +14,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "components/indication_internal.h"
 #include "graphics/external_texture_internal.h"
 #include "graphics/paint_internal.h"
 #include "profiling_internal.h"
@@ -242,7 +243,8 @@ void PaintImage(const ImageProperties& properties, PaintContext& context, Rect c
 }
 
 void PaintImage(const MountedNode& node, PaintContext& context) {
-  PaintImage(node.image_properties, context, node.ContentBounds(), node.image_properties.tint);
+  PaintImage(node.image_properties, context, node.ContentBounds(),
+             node.resolved_foreground ? node.resolved_foreground : node.image_properties.tint);
 }
 
 void PaintLabelContent(const MountedNode& node, PaintContext& context, const TextStyle& text_style) {
@@ -594,7 +596,39 @@ void SortChildPaintOrder(MountedNode& node) {
   }
 }
 
-void ResolvePresentationTreeImpl(MountedNode& node, const Transform2D& inherited_transform, float inherited_opacity) {
+struct ForegroundContext {
+  std::optional<Color> normal;
+  std::optional<Color> indication;
+};
+
+ForegroundContext ResolveForeground(MountedNode& node, ForegroundContext inherited) {
+  const auto local = node.foreground_indication
+                         ? ResolveIndicationForeground(*node.foreground_indication, node.interaction)
+                         : std::nullopt;
+  // An independent activation target starts its own feedback while keeping the ordinary inherited color.
+  if (node.foreground_indication || (inherited.indication &&
+      (!node.interaction.enabled || node.activation || HasEventBinding<ViewEvents::Click>(node.event_bindings)))) {
+    inherited.indication = local;
+  }
+  auto color = local;
+  if (node.properties.inherit_foreground && !color) {
+    color = inherited.indication ? inherited.indication : inherited.normal;
+  }
+  if (color && node.kind != NodeKind::Text && (node.kind != NodeKind::Image || !node.image_properties.IsVector())) {
+    color.reset();
+  }
+  if (node.resolved_foreground != color) {
+    node.resolved_foreground = color;
+    node.content_paint_dirty = true;
+  }
+  if (node.properties.foreground) {
+    inherited.normal = node.properties.foreground;
+  }
+  return inherited;
+}
+
+void ResolvePresentationTreeImpl(MountedNode& node, const Transform2D& inherited_transform, float inherited_opacity,
+                                 ForegroundContext inherited_foreground) {
   SortChildPaintOrder(node);
   const Transform2D node_transform =
       ComposeTransform(TranslationTransform(node.layout_offset), node.presentation.local_transform);
@@ -621,8 +655,10 @@ void ResolvePresentationTreeImpl(MountedNode& node, const Transform2D& inherited
   node.presentation.resolved_opacity = inherited_opacity * render_opacity;
   const Transform2D children_transform =
       ComposeTransform(node.presentation.resolved_transform, ResolveChildrenTransform(node));
+  // Shared transitions can record subtrees before the final scene walk.
+  const ForegroundContext foreground = ResolveForeground(node, inherited_foreground);
   for (auto& child : node.children) {
-    ResolvePresentationTreeImpl(*child, children_transform, node.presentation.resolved_opacity);
+    ResolvePresentationTreeImpl(*child, children_transform, node.presentation.resolved_opacity, foreground);
   }
 }
 
@@ -732,6 +768,9 @@ void RecordNodePaint(MountedNode& node) {
         text_style.foreground = *node.properties.disabled_foreground;
       }
     }
+    if (node.resolved_foreground) {
+      text_style.foreground = *node.resolved_foreground;
+    }
     if (node.properties.shadow.has_value() && node.properties.shadow->color.alpha > 0.0F) {
       const Shadow& shadow = *node.properties.shadow;
       content.DrawShadow(bounds, shadow.color, shadow.offset, shadow.blur_radius, shadow.spread,
@@ -799,7 +838,8 @@ void RecordNodePaint(MountedNode& node) {
 
 } // namespace
 
-void PaintNodeWithinClip(huxerui::ViewNode& mounted_node, const Rect& clip, const RenderNode* extra_child) {
+void PaintNodeWithinClip(huxerui::ViewNode& mounted_node, const Rect& clip, const RenderNode* extra_child,
+                         ForegroundContext inherited_foreground) {
   auto& node = static_cast<detail::MountedNode&>(mounted_node);
   HUXERUI_PROFILE_COMPONENT(node);
   RenderNode& render_node = node.render_node;
@@ -818,6 +858,7 @@ void PaintNodeWithinClip(huxerui::ViewNode& mounted_node, const Rect& clip, cons
     child_clip = fragment_source_bounds;
   }
 
+  const ForegroundContext foreground = ResolveForeground(node, inherited_foreground);
   RecordNodePaint(node);
   bool changed = false;
 
@@ -833,7 +874,7 @@ void PaintNodeWithinClip(huxerui::ViewNode& mounted_node, const Rect& clip, cons
   for (std::size_t index = 0; index < node.children.size(); ++index) {
     MountedNode& child = ChildInPaintOrder(node, index);
     if (child.participates_in_layout) {
-      PaintNodeWithinClip(child, child_clip, nullptr);
+      PaintNodeWithinClip(child, child_clip, nullptr, foreground);
     } else {
       HideRenderTree(child);
     }
@@ -990,11 +1031,11 @@ bool RenderSceneHasPlatformViews(const RenderNode* root) {
 }
 
 void ResolvePresentationTree(MountedNode& node) {
-  ResolvePresentationTreeImpl(node, Transform2D{}, 1.0F);
+  ResolvePresentationTreeImpl(node, Transform2D{}, 1.0F, {});
 }
 
 void UpdateRenderScene(MountedNode& node, Rect clip, const RenderNode* overlay) {
-  PaintNodeWithinClip(node, clip, overlay);
+  PaintNodeWithinClip(node, clip, overlay, {});
 }
 
 DamageRegion ComputeDamageRegion(

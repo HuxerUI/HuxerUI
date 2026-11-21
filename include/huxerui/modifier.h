@@ -677,7 +677,7 @@ struct Shadow {
   bool operator==(const Shadow&) const = default;
 };
 
-/// Sets the foreground color used by text content on the modified View.
+/// Sets the foreground color of text on this View and supplies a color to descendants using InheritForeground.
 ///
 /// @code
 /// Text("Ready").With(Foreground(Color::Rgb(30, 120, 70)));
@@ -690,6 +690,17 @@ struct Foreground {
   Color color;
 
   bool operator==(const Foreground&) const = default;
+};
+
+/// Uses the nearest available ancestor foreground for text or a vector Image.
+///
+/// The ancestor's active indication color takes precedence within its interaction boundary. Otherwise the nearest
+/// ancestor Foreground is used. If neither supplies a color, the View uses its own text color or image tint.
+struct InheritForeground {
+  /// Returns the modifier descriptor used by View::With().
+  static const detail::ModifierDescriptor& Descriptor();
+
+  bool operator==(const InheritForeground&) const = default;
 };
 
 /// Sets the text font size on the modified View.
