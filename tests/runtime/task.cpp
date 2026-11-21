@@ -26,6 +26,7 @@ static_assert(std::move_constructible<Task<int>>);
 static_assert(!std::copy_constructible<Task<int>>);
 static_assert(std::copy_constructible<TaskScope>);
 static_assert(std::copy_constructible<TaskHandle>);
+static_assert(std::copy_constructible<WorkerExecutor>);
 static_assert(std::copy_constructible<WorkerSequence>);
 static_assert(std::copy_constructible<CallbackCompletion<int>>);
 static_assert(std::copy_constructible<CallbackCompletion<void>>);
@@ -623,6 +624,110 @@ TEST_CASE("HuxerUIAwaitableRestoresTaskExecutionToTheOwningUIThread") {
 
 #if !defined(__EMSCRIPTEN__)
 
+TEST_CASE("WorkerExecutorUsesTheRequestedPoolAndSkipsCanceledQueuedWork") {
+  captured_task_scope = {};
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  UiWindow runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  const auto executor = WorkerExecutor::ThreadPool(2);
+  const auto gate = std::make_shared<WorkerGate>();
+  const auto release = [](WorkerGate* value) { value->Release(); };
+  const std::unique_ptr<WorkerGate, decltype(release)> release_gate(gate.get(), release);
+  int finished = 0;
+  for (int index = 0; index < 2; ++index) {
+    captured_task_scope.Launch([&]() -> Task<void> {
+      co_await executor.Run([gate] { gate->EnterAndWait(); });
+      ++finished;
+    });
+  }
+  queue.Drain();
+  REQUIRE(gate->WaitForStarted(2));
+  const auto skipped = std::make_shared<std::atomic<bool>>(true);
+  const auto queued = captured_task_scope.Launch([&]() -> Task<void> {
+    co_await executor.Run([skipped] { *skipped = false; });
+  });
+  bool default_finished = false;
+  captured_task_scope.Launch([&]() -> Task<void> {
+    co_await WorkerExecutor::Default().Run([] {});
+    default_finished = true;
+  });
+  queue.Drain();
+  DrainUntil(queue, [&] { return default_finished; });
+  REQUIRE(*skipped);
+  queued.Cancel();
+  gate->Release();
+  DrainUntil(queue, [&] { return finished == 2; });
+  REQUIRE(*skipped);
+}
+
+TEST_CASE("AWorkerSequenceUsesItsExecutorAndAdvancesAfterRejectedWork") {
+  captured_task_scope = {};
+  ThreadSafeTaskQueue queue;
+  ThreadSafeTaskQueue external_queue;
+  TestPlatform platform(queue.Dispatcher());
+  UiWindow runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  const auto submit = external_queue.Dispatcher();
+  int submissions = 0;
+  const WorkerSequence sequence{WorkerExecutor::FromSubmitter([&](std::function<void()> job) {
+    if (++submissions == 2) {
+      return false;
+    }
+    submit(std::move(job));
+    return true;
+  })};
+  std::vector<int> executed;
+  int finished = 0;
+  bool rejected = false;
+  const auto ui_thread = std::this_thread::get_id();
+  bool resumed_on_ui = false;
+  for (int index = 0; index < 3; ++index) {
+    captured_task_scope.Launch([&, index]() -> Task<void> {
+      try {
+        co_await sequence.Run([&, index](std::stop_token) { executed.push_back(index); });
+      } catch (const std::runtime_error&) {
+        rejected = true;
+      }
+      resumed_on_ui = std::this_thread::get_id() == ui_thread;
+      ++finished;
+    });
+  }
+  REQUIRE(submissions == 0);
+  queue.Drain();
+  REQUIRE(submissions == 1);
+  std::thread worker([&] { external_queue.Drain(); });
+  worker.join();
+  DrainUntil(queue, [&] { return finished == 3; });
+  REQUIRE(rejected);
+  REQUIRE(resumed_on_ui);
+  REQUIRE(executed == std::vector<int>{0, 2});
+}
+
+TEST_CASE("WorkerExecutorRejectsWorkDispatchedToTheApplicationThread") {
+  captured_task_scope = {};
+  ThreadSafeTaskQueue queue;
+  TestPlatform platform(queue.Dispatcher());
+  UiWindow runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  const auto executor = WorkerExecutor::FromSubmitter([](std::function<void()> job) {
+    job();
+    return true;
+  });
+  bool invoked = false;
+  bool rejected = false;
+  captured_task_scope.Launch([&]() -> Task<void> {
+    try {
+      co_await executor.Run([&] { invoked = true; });
+    } catch (const std::runtime_error&) {
+      rejected = true;
+    }
+  });
+  queue.Drain();
+  REQUIRE(rejected);
+  REQUIRE_FALSE(invoked);
+}
+
 TEST_CASE("RunWorkerOwnsItsInvocationAndRestoresResultsAndExceptionsToTheUIThread") {
   captured_task_scope = {};
   ThreadSafeTaskQueue queue;
@@ -896,11 +1001,20 @@ TEST_CASE("RuntimeDestructionDiscardsARunningWorkerResult") {
   TestPlatform platform(queue.Dispatcher());
   WorkerGate gate;
   bool resumed = false;
+  std::optional<WorkerExecutor> executor;
+  SECTION("default executor") {}
+  SECTION("owned executor retained by a running job") {
+    executor = WorkerExecutor::ThreadPool(1);
+  }
   {
     UiWindow runtime(TaskScopeApp, platform);
     runtime.BuildFrame();
-    captured_task_scope.Launch([&]() -> Task<void> {
-      co_await RunWorker([&gate] { gate.EnterAndWait(); });
+    captured_task_scope.Launch([&, executor = std::move(executor)]() -> Task<void> {
+      if (executor) {
+        co_await executor->Run([&gate] { gate.EnterAndWait(); });
+      } else {
+        co_await RunWorker([&gate] { gate.EnterAndWait(); });
+      }
       resumed = true;
     });
     queue.Drain();
@@ -987,7 +1101,37 @@ TEST_CASE("WorkerSequenceReportsUnavailableWebWorkerExecution") {
   REQUIRE_FALSE(invoked);
 }
 
+TEST_CASE("CustomWorkerExecutorsReportUnavailableWebWorkerExecution") {
+  captured_task_scope = {};
+  TestPlatform platform;
+  UiWindow runtime(TaskScopeApp, platform);
+  runtime.BuildFrame();
+  bool submitted = false;
+  int unavailable = 0;
+  const auto external = WorkerExecutor::FromSubmitter([&](std::function<void()>) {
+    submitted = true;
+    return false;
+  });
+  for (const auto& executor : {WorkerExecutor::ThreadPool(2), external}) {
+    captured_task_scope.Launch([&, executor]() -> Task<void> {
+      try {
+        co_await executor.Run([] {});
+      } catch (const std::runtime_error&) {
+        ++unavailable;
+      }
+    });
+  }
+  platform.RunPlatformModuleTasks();
+  REQUIRE(unavailable == 2);
+  REQUIRE_FALSE(submitted);
+}
+
 #endif
+
+TEST_CASE("WorkerExecutorRejectsInvalidConfiguration") {
+  REQUIRE_THROWS_AS(WorkerExecutor::ThreadPool(0), std::invalid_argument);
+  REQUIRE_THROWS_AS(WorkerExecutor::FromSubmitter({}), std::invalid_argument);
+}
 
 TEST_CASE("TaskScopePostDefersOwnedCallbacksAndPreservesOrder") {
   captured_task_scope = {};

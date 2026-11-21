@@ -3,6 +3,7 @@
 #include <chrono>
 #include <concepts>
 #include <coroutine>
+#include <cstddef>
 #include <exception>
 #include <functional>
 #include <memory>
@@ -10,6 +11,7 @@
 #include <optional>
 #include <stop_token>
 #include <stdexcept>
+#include <thread>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -29,6 +31,7 @@ namespace detail {
 class RecomposeScope;
 class TaskExecution;
 class TaskScopeImpl;
+class WorkerExecutorState;
 class WorkerOperation;
 class WorkerSequenceState;
 struct TaskWaitState;
@@ -73,6 +76,9 @@ private:
 
 void NotifyTaskCompleted(const std::weak_ptr<TaskExecution>& execution) noexcept;
 void EnqueueWorkerOperation(std::function<void()> operation, const char* api_name = "RunWorker()");
+void SubmitWorkerExecutorOperation(const std::shared_ptr<WorkerExecutorState>& executor,
+                                   std::function<void()> operation, const char* api_name);
+const std::shared_ptr<WorkerExecutorState>& WorkerSequenceExecutor(const WorkerSequenceState& sequence) noexcept;
 void SubmitWorkerSequenceOperation(
     const std::shared_ptr<WorkerSequenceState>& sequence,
     const std::shared_ptr<WorkerOperation>& operation
@@ -623,7 +629,7 @@ class WorkerOperation {
 public:
   virtual ~WorkerOperation() = default;
 
-  virtual void Start() noexcept = 0;
+  virtual bool Start() noexcept = 0;
 };
 
 template <class Function, class... Arguments> class WorkerInvocation final {
@@ -651,8 +657,10 @@ template <class Operation, class Result>
 class WorkerJob final : public WorkerOperation,
                                    public std::enable_shared_from_this<WorkerJob<Operation, Result>> {
 public:
-  WorkerJob(Operation operation, std::shared_ptr<WorkerSequenceState> sequence)
-      : operation_(std::move(operation)), sequence_(std::move(sequence)) {}
+  WorkerJob(Operation operation, std::shared_ptr<WorkerExecutorState> executor,
+            std::shared_ptr<WorkerSequenceState> sequence)
+      : operation_(std::move(operation)), executor_(std::move(executor)), sequence_(std::move(sequence)),
+        ui_thread_(std::this_thread::get_id()) {}
 
   void Suspend(TaskContinuation continuation) {
     {
@@ -706,11 +714,13 @@ public:
     }
   }
 
-  void Start() noexcept override {
+  bool Start() noexcept override {
     try {
       Schedule();
+      return true;
     } catch (...) {
       CompleteWithException(std::current_exception());
+      return false;
     }
   }
 
@@ -734,7 +744,9 @@ private:
       phase_ = Phase::Scheduled;
       self = this->shared_from_this();
     }
-    EnqueueWorkerOperation([self] { self->Run(); }, sequence_ ? "WorkerSequence::Run()" : "RunWorker()");
+    const auto& executor = sequence_ ? WorkerSequenceExecutor(*sequence_) : executor_;
+    const char* api_name = sequence_ ? "WorkerSequence::Run()" : executor_ ? "WorkerExecutor::Run()" : "RunWorker()";
+    SubmitWorkerExecutorOperation(executor, [self] { self->Run(); }, api_name);
   }
 
   void Run() noexcept {
@@ -749,6 +761,9 @@ private:
     }
 
     try {
+      if (std::this_thread::get_id() == ui_thread_) {
+        throw std::runtime_error("HuxerUI worker operation was dispatched to the application thread");
+      }
       if constexpr (std::is_void_v<Result>) {
         operation->Invoke(stop_source_.get_token());
         operation_.reset();
@@ -762,6 +777,7 @@ private:
       operation_.reset();
       CompleteWithException(std::current_exception());
     }
+    RetireSequence();
   }
 
   template <class Value> void CompleteWithResult(Value&& result) noexcept {
@@ -776,7 +792,6 @@ private:
         phase_ = Phase::Finished;
       }
       continuation.Resume();
-      RetireSequence();
     } catch (...) {
       CompleteWithException(std::current_exception());
     }
@@ -797,7 +812,6 @@ private:
     }
     operation_.reset();
     continuation.Resume();
-    RetireSequence();
   }
 
   void RetireSequence() noexcept {
@@ -808,7 +822,9 @@ private:
 
   std::mutex mutex_;
   std::optional<Operation> operation_;
+  std::shared_ptr<WorkerExecutorState> executor_;
   std::shared_ptr<WorkerSequenceState> sequence_;
+  const std::thread::id ui_thread_;
   TaskContinuation continuation_;
   std::optional<StoredResult> result_;
   std::exception_ptr exception_;
@@ -819,11 +835,10 @@ private:
 
 template <class Operation, class Result> class WorkerAwaiter final {
 public:
-  explicit WorkerAwaiter(Operation operation)
-      : job_(std::make_shared<WorkerJob<Operation, Result>>(std::move(operation), nullptr)) {}
-
-  WorkerAwaiter(std::shared_ptr<WorkerSequenceState> sequence, Operation operation)
-      : job_(std::make_shared<WorkerJob<Operation, Result>>(std::move(operation), std::move(sequence))) {}
+  WorkerAwaiter(Operation operation, std::shared_ptr<WorkerExecutorState> executor,
+                std::shared_ptr<WorkerSequenceState> sequence)
+      : job_(std::make_shared<WorkerJob<Operation, Result>>(
+            std::move(operation), std::move(executor), std::move(sequence))) {}
 
   WorkerAwaiter(const WorkerAwaiter&) = delete;
   WorkerAwaiter& operator=(const WorkerAwaiter&) = delete;
@@ -848,12 +863,16 @@ private:
   std::shared_ptr<WorkerJob<Operation, Result>> job_;
 };
 
-template <class Result, class Operation> Task<Result> RunWorkerTask(Operation operation) {
+template <class Result, class Operation>
+Task<Result> RunWorkerTask(Operation operation, std::shared_ptr<WorkerExecutorState> executor,
+                           std::shared_ptr<WorkerSequenceState> sequence = {}) {
   if constexpr (std::is_void_v<Result>) {
-    co_await TaskAwaiter<WorkerAwaiter<Operation, Result>>(std::move(operation));
+    co_await TaskAwaiter<WorkerAwaiter<Operation, Result>>(
+        std::move(operation), std::move(executor), std::move(sequence));
     co_return;
   } else {
-    co_return co_await TaskAwaiter<WorkerAwaiter<Operation, Result>>(std::move(operation));
+    co_return co_await TaskAwaiter<WorkerAwaiter<Operation, Result>>(
+        std::move(operation), std::move(executor), std::move(sequence));
   }
 }
 
@@ -880,19 +899,77 @@ private:
   std::tuple<Arguments...> arguments_;
 };
 
-template <class Result, class Operation>
-Task<Result> RunWorkerSequenceTask(std::shared_ptr<WorkerSequenceState> sequence, Operation operation) {
-  if constexpr (std::is_void_v<Result>) {
-    co_await TaskAwaiter<WorkerAwaiter<Operation, Result>>(std::move(sequence), std::move(operation));
-    co_return;
-  } else {
-    co_return co_await TaskAwaiter<WorkerAwaiter<Operation, Result>>(std::move(sequence), std::move(operation));
-  }
+template <class Function, class... Arguments>
+concept WorkerCallable = std::constructible_from<std::decay_t<Function>, Function&&> &&
+                         std::move_constructible<std::decay_t<Function>> &&
+                         (std::constructible_from<std::decay_t<Arguments>, Arguments&&> && ...) &&
+                         (std::move_constructible<std::decay_t<Arguments>> && ...) &&
+                         std::invocable<std::decay_t<Function>, std::decay_t<Arguments>...>;
+
+template <class Function, class... Arguments>
+auto MakeWorkerTask(std::shared_ptr<WorkerExecutorState> executor, Function&& function, Arguments&&... arguments) {
+  using Operation = WorkerInvocation<std::decay_t<Function>, std::decay_t<Arguments>...>;
+  using Result = typename Operation::Result;
+  static_assert(
+      std::is_void_v<Result> || (std::is_object_v<Result> && std::same_as<Result, std::remove_cv_t<Result>>),
+      "HuxerUI worker result must be void or a non-cv, non-reference object type");
+  static_assert(std::is_void_v<Result> || std::move_constructible<Result>,
+                "HuxerUI worker result must be move constructible");
+  static_assert(!IsTask<Result>::value, "HuxerUI worker callable must not return a Task");
+  return RunWorkerTask<Result>(Operation(
+      std::decay_t<Function>(std::forward<Function>(function)),
+      std::tuple<std::decay_t<Arguments>...>(std::forward<Arguments>(arguments)...)
+  ), std::move(executor));
 }
 
 } // namespace detail
 
-/// Serializes blocking operations for one application-owned resource on HuxerUI's shared worker pool.
+/// A shared handle that selects where synchronous worker callables run.
+///
+/// Tasks and sequences retain their executor. HuxerUI continues coroutines on their original application thread
+/// and cancels them with their owning TaskScope. Keep a pool with the service or resource that uses it.
+class WorkerExecutor {
+public:
+  /// A thread-safe, nonblocking submission callback that may be called from the application thread or a worker.
+  /// Returning true transfers the callback for one asynchronous invocation. Return false or throw to reject it
+  /// without retaining or invoking it. The external executor must drain accepted jobs before shutdown.
+  using Submitter = std::function<bool(std::function<void()>)>;
+
+  /// Acquires HuxerUI's process-wide worker executor, also used by RunWorker().
+  static WorkerExecutor Default();
+
+  /// Creates a FIFO pool that starts exactly the requested number of workers on its first submission.
+  /// @throws std::invalid_argument If the requested count is zero.
+  /// Startup errors are delivered to the awaiting Task. Releasing the last owner closes the pool and lets accepted
+  /// jobs drain asynchronously.
+  static WorkerExecutor ThreadPool(std::size_t thread_count);
+
+  /// Wraps a submission callback. The caller controls the external pool's lifetime and shutdown.
+  /// @throws std::invalid_argument If the submission callback is empty.
+  static WorkerExecutor FromSubmitter(Submitter submitter);
+
+  /// Creates a lazy Task owning the callable and decayed arguments for execution off the application thread.
+  /// Its result or exception is delivered on the awaiting Task's application thread.
+  /// Cancellation skips queued work and discards the result of work already running. Web builds without worker
+  /// execution report an unavailable error from the await. A moved-from executor throws std::logic_error.
+  template <class Function, class... Arguments>
+    requires detail::WorkerCallable<Function, Arguments...>
+  auto Run(Function&& function, Arguments&&... arguments) const {
+    if (!state_) {
+      throw std::logic_error("HuxerUI WorkerExecutor is empty");
+    }
+    return detail::MakeWorkerTask(state_, std::forward<Function>(function), std::forward<Arguments>(arguments)...);
+  }
+
+private:
+  explicit WorkerExecutor(std::shared_ptr<detail::WorkerExecutorState> state) noexcept : state_(std::move(state)) {}
+
+  std::shared_ptr<detail::WorkerExecutorState> state_;
+
+  friend class WorkerSequence;
+};
+
+/// Serializes blocking operations for one application-owned resource on a shared or selected executor.
 ///
 /// Copies share one ordering identity. Operations begin in the order their lazy Tasks are awaited, with at most one
 /// callable from that sequence running at a time. Independent WorkerSequence instances may run concurrently, and no
@@ -921,8 +998,12 @@ Task<Result> RunWorkerSequenceTask(std::shared_ptr<WorkerSequenceState> sequence
 /// @endcode
 class WorkerSequence {
 public:
-  /// Creates an independent ordering identity.
+  /// Creates an independent ordering identity on HuxerUI's default worker pool.
   WorkerSequence();
+
+  /// Creates an independent ordering identity whose operations use the supplied executor.
+  /// @throws std::invalid_argument If the executor was moved from.
+  explicit WorkerSequence(WorkerExecutor executor);
 
   /// Creates a lazy worker Task that joins this sequence when awaited.
   ///
@@ -950,13 +1031,10 @@ public:
     if (!state_) {
       throw std::logic_error("HuxerUI WorkerSequence is empty");
     }
-    return detail::RunWorkerSequenceTask<Result>(
-        state_,
-        Operation(
-            std::decay_t<Function>(std::forward<Function>(function)),
-            std::tuple<std::decay_t<Arguments>...>(std::forward<Arguments>(arguments)...)
-        )
-    );
+    return detail::RunWorkerTask<Result>(Operation(
+        std::decay_t<Function>(std::forward<Function>(function)),
+        std::tuple<std::decay_t<Arguments>...>(std::forward<Arguments>(arguments)...)
+    ), {}, state_);
   }
 
 private:
@@ -1116,25 +1194,9 @@ Task<void> Delay(std::chrono::duration<double> duration);
 /// });
 /// @endcode
 template <class Function, class... Arguments>
-  requires std::constructible_from<std::decay_t<Function>, Function&&> &&
-           std::move_constructible<std::decay_t<Function>> &&
-           (std::constructible_from<std::decay_t<Arguments>, Arguments&&> && ...) &&
-           (std::move_constructible<std::decay_t<Arguments>> && ...) &&
-           std::invocable<std::decay_t<Function>, std::decay_t<Arguments>...>
+  requires detail::WorkerCallable<Function, Arguments...>
 auto RunWorker(Function&& function, Arguments&&... arguments) {
-  using Operation = detail::WorkerInvocation<std::decay_t<Function>, std::decay_t<Arguments>...>;
-  using Result = typename Operation::Result;
-  static_assert(
-      std::is_void_v<Result> || (std::is_object_v<Result> && std::same_as<Result, std::remove_cv_t<Result>>),
-      "HuxerUI RunWorker() result must be void or a non-cv, non-reference object type"
-  );
-  static_assert(std::is_void_v<Result> || std::move_constructible<Result>,
-                "HuxerUI RunWorker() result must be move constructible");
-  static_assert(!detail::IsTask<Result>::value, "HuxerUI RunWorker() callable must not return a Task");
-  return detail::RunWorkerTask<Result>(Operation(
-      std::decay_t<Function>(std::forward<Function>(function)),
-      std::tuple<std::decay_t<Arguments>...>(std::forward<Arguments>(arguments)...)
-  ));
+  return detail::MakeWorkerTask(nullptr, std::forward<Function>(function), std::forward<Arguments>(arguments)...);
 }
 
 } // namespace huxerui

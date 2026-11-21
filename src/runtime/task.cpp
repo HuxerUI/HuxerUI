@@ -9,6 +9,7 @@
 #include <deque>
 #include <functional>
 #include <iterator>
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -32,7 +33,7 @@ namespace huxerui::detail {
 namespace {
 
 std::size_t ResolveWorkerCount() noexcept {
-  const unsigned int reported = std::thread::hardware_concurrency();
+  static const unsigned int reported = std::thread::hardware_concurrency();
   if (reported == 0) {
     return 2;
   }
@@ -40,33 +41,20 @@ std::size_t ResolveWorkerCount() noexcept {
   return available < 4 ? available : 4;
 }
 
-class WorkerExecutor final {
+class WorkerQueue final {
 public:
-  WorkerExecutor() : worker_count_(ResolveWorkerCount()) {
-    workers_.reserve(worker_count_);
-    for (std::size_t index = 0; index < worker_count_; ++index) {
-      workers_.emplace_back([this] { Run(); });
-    }
-  }
-
-  ~WorkerExecutor() {
+  void Close() noexcept {
     {
       std::scoped_lock lock(mutex_);
-      stopping_ = true;
+      closed_ = true;
     }
     condition_.notify_all();
-    for (std::thread& worker : workers_) {
-      worker.join();
-    }
   }
-
-  WorkerExecutor(const WorkerExecutor&) = delete;
-  WorkerExecutor& operator=(const WorkerExecutor&) = delete;
 
   void Submit(std::function<void()> operation) {
     {
       std::scoped_lock lock(mutex_);
-      if (stopping_) {
+      if (closed_) {
         throw std::logic_error("HuxerUI worker executor is closed");
       }
       operations_.push_back(std::move(operation));
@@ -74,23 +62,13 @@ public:
     condition_.notify_one();
   }
 
-  [[nodiscard]] std::size_t WorkerCount() const noexcept {
-    return worker_count_;
-  }
-
-  static WorkerExecutor& Instance() {
-    static WorkerExecutor executor;
-    return executor;
-  }
-
-private:
   void Run() {
     for (;;) {
       std::function<void()> operation;
       {
         std::unique_lock lock(mutex_);
-        condition_.wait(lock, [this] { return stopping_ || !operations_.empty(); });
-        if (stopping_ && operations_.empty()) {
+        condition_.wait(lock, [this] { return closed_ || !operations_.empty(); });
+        if (operations_.empty()) {
           return;
         }
         operation = std::move(operations_.front());
@@ -100,20 +78,178 @@ private:
     }
   }
 
+private:
   std::mutex mutex_;
   std::condition_variable condition_;
   std::deque<std::function<void()>> operations_;
+  bool closed_ = false;
+};
+
+void JoinWorkerThreads(std::vector<std::thread>& threads) noexcept {
+  for (auto& thread : threads) {
+    thread.join();
+  }
+}
+
+class SharedWorkerPool final {
+public:
+  SharedWorkerPool() {
+    const std::size_t worker_count = ResolveWorkerCount();
+    workers_.reserve(worker_count);
+    try {
+      for (std::size_t index = 0; index < worker_count; ++index) {
+        workers_.emplace_back([this] { queue.Run(); });
+      }
+    } catch (...) {
+      queue.Close();
+      JoinWorkerThreads(workers_);
+      throw;
+    }
+  }
+
+  ~SharedWorkerPool() {
+    queue.Close();
+    JoinWorkerThreads(workers_);
+  }
+
+  WorkerQueue queue;
+
+private:
   std::vector<std::thread> workers_;
-  std::size_t worker_count_;
-  bool stopping_ = false;
+};
+
+WorkerQueue& SharedWorkerQueue() {
+  static SharedWorkerPool pool;
+  return pool.queue;
+}
+
+// Owns native thread handles until their loops finish. Pool owners can retire on the UI thread or on a worker.
+class WorkerPoolReaper final {
+public:
+  WorkerPoolReaper() : reaper_([this] { Reap(); }) {}
+
+  ~WorkerPoolReaper() {
+    {
+      std::scoped_lock lock(mutex_);
+      closing_ = true;
+      for (auto& pool : pools_) {
+        pool.queue->Close();
+      }
+    }
+    condition_.notify_one();
+    reaper_.join();
+  }
+
+  void Start(std::shared_ptr<WorkerQueue> queue, std::size_t count) {
+    std::scoped_lock lock(mutex_);
+    if (closing_) {
+      throw std::logic_error("HuxerUI worker pools are shutting down");
+    }
+    auto& pool = pools_.emplace_back(std::move(queue));
+    try {
+      pool.threads.reserve(count);
+      for (std::size_t index = 0; index < count; ++index) {
+        pool.threads.emplace_back([this, &pool] {
+          pool.queue->Run();
+          {
+            std::scoped_lock lock(mutex_);
+            --pool.active;
+          }
+          condition_.notify_one();
+        });
+        ++pool.active;
+      }
+    } catch (...) {
+      pool.queue->Close();
+      if (pool.threads.empty()) {
+        pools_.pop_back();
+      }
+      throw;
+    }
+  }
+
+  static WorkerPoolReaper& Instance() {
+    static WorkerPoolReaper reaper;
+    return reaper;
+  }
+
+private:
+  struct Pool {
+    std::shared_ptr<WorkerQueue> queue;
+    std::vector<std::thread> threads = {};
+    std::size_t active = 0;
+  };
+
+  void Reap() noexcept {
+    for (;;) {
+      std::vector<std::thread> threads;
+      {
+        std::unique_lock lock(mutex_);
+        auto ready = pools_.end();
+        condition_.wait(lock, [&] {
+          ready = std::find_if(pools_.begin(), pools_.end(), [](const Pool& pool) { return pool.active == 0; });
+          return ready != pools_.end() || (closing_ && pools_.empty());
+        });
+        if (ready == pools_.end()) {
+          return;
+        }
+        threads = std::move(ready->threads);
+        pools_.erase(ready);
+      }
+      JoinWorkerThreads(threads);
+    }
+  }
+
+  std::mutex mutex_;
+  std::condition_variable condition_;
+  std::list<Pool> pools_;
+  bool closing_ = false;
+  std::thread reaper_;
+};
+
+class OwnedWorkerPool final {
+public:
+  explicit OwnedWorkerPool(std::size_t count) : count_(count) {}
+
+  ~OwnedWorkerPool() { queue_->Close(); }
+
+  void Submit(std::function<void()> operation) {
+    std::call_once(start_, [this] {
+      try {
+        WorkerPoolReaper::Instance().Start(queue_, count_);
+      } catch (...) {
+        startup_error_ = std::current_exception();
+      }
+    });
+    if (startup_error_) {
+      std::rethrow_exception(startup_error_);
+    }
+    queue_->Submit(std::move(operation));
+  }
+
+private:
+  std::shared_ptr<WorkerQueue> queue_ = std::make_shared<WorkerQueue>();
+  std::size_t count_;
+  std::once_flag start_;
+  std::exception_ptr startup_error_;
 };
 
 } // namespace
 
 #endif
 
+class WorkerExecutorState final {
+public:
+  explicit WorkerExecutorState(WorkerExecutor::Submitter submitter) : submit(std::move(submitter)) {}
+
+  const WorkerExecutor::Submitter submit;
+};
+
 class WorkerSequenceState final {
 public:
+  explicit WorkerSequenceState(std::shared_ptr<WorkerExecutorState> executor = {}) : executor(std::move(executor)) {}
+
+  const std::shared_ptr<WorkerExecutorState> executor;
   std::mutex mutex;
   std::weak_ptr<WorkerOperation> active;
   std::deque<std::weak_ptr<WorkerOperation>> queued;
@@ -509,8 +645,27 @@ void EnqueueWorkerOperation(std::function<void()> operation, const char* api_nam
                            " is unavailable because this Web build has no worker execution capability");
 #else
   HUXERUI_UNUSED(api_name);
-  WorkerExecutor::Instance().Submit(std::move(operation));
+  SharedWorkerQueue().Submit(std::move(operation));
 #endif
+}
+
+void SubmitWorkerExecutorOperation(const std::shared_ptr<WorkerExecutorState>& executor,
+                                   std::function<void()> operation, const char* api_name) {
+#if !defined(__EMSCRIPTEN__)
+  if (executor) {
+    if (!executor->submit(std::move(operation))) {
+      throw std::runtime_error("HuxerUI worker executor rejected the operation");
+    }
+    return;
+  }
+#else
+  HUXERUI_UNUSED(executor);
+#endif
+  EnqueueWorkerOperation(std::move(operation), api_name);
+}
+
+const std::shared_ptr<WorkerExecutorState>& WorkerSequenceExecutor(const WorkerSequenceState& sequence) noexcept {
+  return sequence.executor;
 }
 
 void SubmitWorkerSequenceOperation(
@@ -527,8 +682,8 @@ void SubmitWorkerSequenceOperation(
       start = true;
     }
   }
-  if (start) {
-    operation->Start();
+  if (start && !operation->Start()) {
+    RetireWorkerSequenceOperation(sequence, operation);
   }
 }
 
@@ -536,30 +691,30 @@ void RetireWorkerSequenceOperation(
     const std::shared_ptr<WorkerSequenceState>& sequence,
     const std::shared_ptr<WorkerOperation>& operation
 ) noexcept {
-  std::shared_ptr<WorkerOperation> next;
-  {
-    std::scoped_lock lock(sequence->mutex);
-    if (sequence->active.lock() == operation) {
+  auto retired = operation;
+  for (;;) {
+    std::shared_ptr<WorkerOperation> next;
+    {
+      std::scoped_lock lock(sequence->mutex);
+      if (sequence->active.lock() != retired) {
+        std::erase_if(sequence->queued, [&](const auto& queued) {
+          const auto current = queued.lock();
+          return !current || current == retired;
+        });
+        return;
+      }
       sequence->active.reset();
       while (!sequence->queued.empty() && !next) {
         next = sequence->queued.front().lock();
         sequence->queued.pop_front();
       }
-      if (next) {
-        sequence->active = next;
-      }
-    } else {
-      sequence->queued.erase(
-          std::remove_if(sequence->queued.begin(), sequence->queued.end(), [&](const auto& queued) {
-            const std::shared_ptr<WorkerOperation> current = queued.lock();
-            return !current || current == operation;
-          }),
-          sequence->queued.end()
-      );
+      sequence->active = next;
     }
-  }
-  if (next) {
-    next->Start();
+    // A rejected submission can release a whole sequence of queued operations without recursive promotion.
+    if (!next || next->Start()) {
+      return;
+    }
+    retired = std::move(next);
   }
 }
 
@@ -567,7 +722,7 @@ std::size_t WorkerConcurrency() noexcept {
 #if defined(__EMSCRIPTEN__)
   return 0;
 #else
-  return WorkerExecutor::Instance().WorkerCount();
+  return ResolveWorkerCount();
 #endif
 }
 
@@ -641,7 +796,44 @@ TaskHandle LaunchSystemTask(const std::shared_ptr<TaskScopeImpl>& scope, Task<vo
 
 namespace huxerui {
 
+WorkerExecutor WorkerExecutor::Default() {
+  static const auto state = std::make_shared<detail::WorkerExecutorState>([](std::function<void()> operation) {
+    detail::EnqueueWorkerOperation(std::move(operation));
+    return true;
+  });
+  return WorkerExecutor(state);
+}
+
+WorkerExecutor WorkerExecutor::ThreadPool(std::size_t thread_count) {
+  if (thread_count == 0) {
+    throw std::invalid_argument("HuxerUI worker thread count must be positive");
+  }
+#if defined(__EMSCRIPTEN__)
+  return Default();
+#else
+  auto pool = std::make_shared<detail::OwnedWorkerPool>(thread_count);
+  return FromSubmitter([pool = std::move(pool)](std::function<void()> operation) {
+    pool->Submit(std::move(operation));
+    return true;
+  });
+#endif
+}
+
+WorkerExecutor WorkerExecutor::FromSubmitter(Submitter submitter) {
+  if (!submitter) {
+    throw std::invalid_argument("HuxerUI worker submitter must not be empty");
+  }
+  return WorkerExecutor(std::make_shared<detail::WorkerExecutorState>(std::move(submitter)));
+}
+
 WorkerSequence::WorkerSequence() : state_(std::make_shared<detail::WorkerSequenceState>()) {}
+
+WorkerSequence::WorkerSequence(WorkerExecutor executor) {
+  if (!executor.state_) {
+    throw std::invalid_argument("HuxerUI WorkerSequence requires a valid worker executor");
+  }
+  state_ = std::make_shared<detail::WorkerSequenceState>(std::move(executor.state_));
+}
 
 void TaskHandle::Cancel() const noexcept {
   if (auto execution = execution_.lock()) {

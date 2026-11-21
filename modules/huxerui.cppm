@@ -637,5 +637,6 @@ export namespace huxerui {
     using huxerui::WindowOptions;
     using huxerui::WindowTitleBar;
     using huxerui::WindowTitleBarMetrics;
+    using huxerui::WorkerExecutor;
     using huxerui::WorkerSequence;
 }  // namespace huxerui

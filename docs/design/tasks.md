@@ -12,11 +12,12 @@ The public model consists of:
 - `UseTaskScope()`, a composition function that returns the TaskScope owned by the current `RecomposeScope`.
 - `Delay()`, a lazy UI-affine minimum-duration suspension.
 - `RunWorker()`, a lazy Task that executes owned synchronous work on the shared worker pool.
+- `WorkerExecutor`, a copyable handle for a shared pool, a pool with a caller-selected worker count, or an external submitter.
 - `AwaitCallback<T>()` and `CallbackCompletion<T>`, a callback bridge into the same Task lifecycle.
 - `WorkerSequence`, a copyable ordering identity for cooperative, strictly serialized worker operations.
 - `TaskScope::Post()`, a lifecycle-bound handoff from an external thread to the scope's UI thread.
 
-The model does not add `UseTask()`, `UseAsync()`, a generic `AsyncResult<T>`, Task-aware Lifecycle overloads, Task-aware event handlers, public executors, or general thread-switching primitives.
+Task scopes own task lifetimes, and worker executors select where synchronous callables run.
 State remains synchronous and does not dispatch writes between threads.
 
 ## Public API
@@ -44,9 +45,22 @@ public:
 template <class T, class Start>
 Task<T> AwaitCallback(Start&& start);
 
+class WorkerExecutor {
+public:
+  using Submitter = std::function<bool(std::function<void()>)>;
+
+  static WorkerExecutor Default();
+  static WorkerExecutor ThreadPool(std::size_t thread_count);
+  static WorkerExecutor FromSubmitter(Submitter submitter);
+
+  template <class Function, class... Arguments>
+  auto Run(Function&& function, Arguments&&... arguments) const;
+};
+
 class WorkerSequence {
 public:
   WorkerSequence();
+  explicit WorkerSequence(WorkerExecutor executor);
 
   template <class Function, class... Arguments>
     requires std::invocable<std::decay_t<Function>, std::stop_token, std::decay_t<Arguments>...>
@@ -134,13 +148,14 @@ A third-party awaitable that resumes its coroutine directly does not gain this g
 
 ## Worker execution
 
-RunWorker is a global function because the awaiting TaskExecution remains the only owner of cancellation and UI-thread restoration.
-It returns a lazy Task and submits no work until that Task is awaited from a running HuxerUI Task.
-The callable and arguments are invoked once on one process-wide worker executor shared by every Runtime and TaskScope.
+`RunWorker()` and `WorkerExecutor::Run()` return lazy Tasks that own the callable, its arguments, and the selected executor until the work finishes or is canceled.
+Both submit when awaited from a running HuxerUI Task. `RunWorker()` uses the process-wide executor available through `WorkerExecutor::Default()`.
 
 The native executor uses a FIFO queue and a bounded number of C++ worker threads.
 Its implementation leaves one reported logical processor available where possible, never creates more than four workers, and falls back to two workers when the processor count is unknown.
-The queue is not bounded because blocking the UI thread or rejecting otherwise valid Tasks would require another public overload and failure policy.
+`WorkerExecutor::ThreadPool(n)` creates an independent FIFO queue and starts exactly `n` workers on its first submission. A zero count throws `std::invalid_argument`. If startup fails, the awaiting Task receives the error and any threads already started are retired. A pool owner closes its queue when it is released and lets accepted jobs drain. Native thread handles are joined after their loops exit by an internal reaper, which starts only when a custom native pool is first used.
+
+`WorkerExecutor::FromSubmitter()` adapts a thread-safe callback that may be called from the application thread or a worker. It returns true to accept a job for one asynchronous invocation. Returning false or throwing rejects the job and delivers an exception to the awaiting Task. An accepted job remains the external scheduler's responsibility, including during its shutdown. If the scheduler calls the job on its awaiting Task's application thread, the Task receives an error before the worker callable runs.
 
 RunWorker resumes through the awaiting TaskExecution and UiThreadDispatcher.
 A value or `void` completion continues on the owning UI thread, while a worker exception is rethrown from the `co_await` expression on that thread.
@@ -151,7 +166,7 @@ Cancellation skips a queued callable and releases its owned inputs without searc
 A callable that already started may finish, but its value or exception is discarded and retired application code is not resumed.
 A queued or running `WorkerJob` holds TaskExecution weakly and never retains Runtime, TaskScope, or mounted UI state.
 
-WorkerSequence uses the same process-wide executor without reserving or pinning a worker thread.
+`WorkerSequence()` uses the default executor. `WorkerSequence(executor)` retains the supplied executor and submits all of its operations to it without reserving or pinning a worker thread.
 At most one callable belonging to a sequence is active; its completion or terminal cleanup promotes the next queued operation in submission order.
 The current completion is posted to its owning UI dispatcher before the next callable starts, but operations awaiting through different UI dispatchers do not gain a cross-dispatcher continuation-order guarantee.
 
@@ -378,7 +393,7 @@ Linux attaches dispatcher sources at `G_PRIORITY_DEFAULT`, allowing ordinary UI 
 Delay uses `Runtime::TimerNow()` and `Runtime::ScheduleTimerAt()`; frame scheduling remains a separate UiWindow operation.
 
 Native desktop and mobile builds use the shared C++ worker executor.
-Web does not silently run RunWorker on its main event loop; without a genuine Worker or pthread execution boundary, awaiting RunWorker throws an explicit unavailable-capability `std::runtime_error`.
+On Web builds without a worker execution boundary, awaiting `RunWorker()`, `WorkerExecutor::Run()`, or `WorkerSequence::Run()` throws a worker-unavailable `std::runtime_error` before submitting any work.
 TaskScope::Post remains available on Web through the existing UI dispatcher.
 
 RunWorker is process-local work and does not request, extend, or guarantee platform background execution.

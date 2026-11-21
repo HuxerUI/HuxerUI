@@ -181,7 +181,8 @@ Its tasks are canceled when that scope is replaced or unmounted, and continuatio
 Keeping an inactive page mounted also keeps its composition scope and tasks alive; pause nonessential polling using application-owned visibility state or refresh on demand.
 `RunWorker()` owns a synchronous callable and its arguments, executes them on HuxerUI's bounded native worker pool, and resumes the awaiting Task on that Runtime thread.
 Worker code must not access State, composition, Views, or UI-affine platform objects.
-`WorkerSequence::Run()` uses the same pool but starts only one operation for that sequence at a time; copied sequence handles share ordering, and each callable receives a `std::stop_token` for cooperative cancellation.
+For a separate pool, keep a `WorkerExecutor::ThreadPool(n)` handle with the service that needs it and await `executor.Run(function, arguments...)` from a Task. `WorkerExecutor::FromSubmitter()` adapts an existing background scheduler. Results and exceptions still return to the awaiting Task's application thread.
+`WorkerSequence::Run()` starts one operation at a time on the default pool or on the executor supplied to its constructor. Copied sequence handles share ordering, and each callable receives a `std::stop_token` for cooperative cancellation.
 `AwaitCallback<T>(start)` adapts one callback operation to a lazy `Task<T>` without using a worker thread.
 It immediately owns the starter, which receives a copyable `CallbackCompletion<T>` and returns a `std::function<void()>` cancellation action (empty if unavailable).
 The starter runs once on the owning Task's thread; `Complete(value)` and `Fail(exception_ptr)` may be called from any thread, and only the first submission takes effect.
