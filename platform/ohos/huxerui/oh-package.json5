@@ -1,0 +1,7 @@
+{
+  "name": "@huxerui/huxerui",
+  "version": "0.5.0",
+  "description": "ArkTS host for HuxerUI applications",
+  "main": "Index.ets",
+  "license": "MIT"
+}

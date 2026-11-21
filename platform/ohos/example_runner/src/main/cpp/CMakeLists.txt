@@ -1,0 +1,30 @@
+cmake_minimum_required(VERSION 3.20)
+project(huxerui_ohos_example_runner LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+if (NOT HUXERUI_ROOT_DIR)
+    get_filename_component(HUXERUI_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../.." ABSOLUTE)
+endif ()
+
+set(HUXERUI_EXAMPLE "counter" CACHE STRING "Example displayed by the HarmonyOS example runner")
+if (NOT HUXERUI_EXAMPLE MATCHES "^[a-z0-9_]+$")
+    message(FATAL_ERROR "HUXERUI_EXAMPLE must be a snake-case example directory name")
+endif ()
+set(HUXERUI_EXAMPLE_DIR "${HUXERUI_ROOT_DIR}/examples/${HUXERUI_EXAMPLE}")
+if (NOT EXISTS "${HUXERUI_EXAMPLE_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "HuxerUI HarmonyOS example does not exist: ${HUXERUI_EXAMPLE}")
+endif ()
+
+set(HUXERUI_PROJECT_DIR "${HUXERUI_ROOT_DIR}")
+set(HUXERUI_BUILD_SHARED OFF)
+set(HUXERUI_BUILD_STATIC ON)
+set(HUXERUI_BUILD_TESTS OFF)
+set(HUXERUI_BUILD_EXAMPLES OFF)
+add_subdirectory("${HUXERUI_ROOT_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/huxerui" EXCLUDE_FROM_ALL)
+include("${HUXERUI_ROOT_DIR}/cmake/HuxerUIExamples.cmake")
+
+add_subdirectory("${HUXERUI_EXAMPLE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/example")
+set_target_properties(example_${HUXERUI_EXAMPLE} PROPERTIES OUTPUT_NAME huxerui_example_runner)

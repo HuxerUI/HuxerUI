@@ -1,0 +1,5 @@
+{
+  "name": "libhuxerui_example_runner.so",
+  "version": "0.1.0",
+  "types": "./index.d.ts"
+}

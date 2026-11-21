@@ -15,7 +15,7 @@ Each backend uses platform lifecycle, input, text, accessibility, file, network,
 | iOS | Core Graphics and Core Text | Yes | UIKit accessibility | Yes | Yes | Application permissions | User Notifications | No |
 
 Capabilities not listed as implemented are not implied by the shared API.
-OHOS does not currently have a repository-owned backend.
+The HarmonyOS API 19 backend is experimental. The [HarmonyOS example runner](../../platform/ohos/README.md) builds and runs repository examples that use the current backend capabilities.
 See [Application Permissions](../design/permissions.md#supported-capabilities) for supported queries, requests, and settings targets on each operating system.
 
 The shared local-notification API is available on every listed platform.

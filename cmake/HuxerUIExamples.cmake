@@ -4,7 +4,7 @@ include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIApp.cmake")
 
 function(huxerui_add_example target_name bundle_name bundle_identifier)
     set(HUXERUI_EXAMPLE_SOURCES main.cpp)
-    if (NOT IOS AND NOT ANDROID AND NOT EMSCRIPTEN)
+    if (NOT IOS AND NOT ANDROID AND NOT EMSCRIPTEN AND NOT CMAKE_SYSTEM_NAME STREQUAL "OHOS")
         list(APPEND HUXERUI_EXAMPLE_SOURCES
                 "${HUXERUI_PROJECT_DIR}/examples/main.cpp"
         )

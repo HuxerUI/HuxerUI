@@ -200,6 +200,13 @@ function(huxerui_add_app target_name)
         )
     elseif (ANDROID)
         add_library(${target_name} SHARED ${HUXERUI_APP_SOURCES})
+    elseif (CMAKE_SYSTEM_NAME STREQUAL "OHOS")
+        add_library(${target_name} SHARED ${HUXERUI_APP_SOURCES}
+                "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../platform/ohos/huxerui/src/main/cpp/ohos_app_module.cpp"
+        )
+        target_compile_definitions(${target_name} PRIVATE
+                "HUXERUI_OHOS_APP_MODULE_NAME=\"$<TARGET_FILE_BASE_NAME:${target_name}>\""
+        )
     else ()
         add_executable(${target_name} ${HUXERUI_APP_SOURCES})
     endif ()

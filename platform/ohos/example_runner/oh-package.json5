@@ -1,0 +1,8 @@
+{
+  "name": "example_runner",
+  "version": "1.0.0",
+  "dependencies": {
+    "@huxerui/huxerui": "file:../huxerui",
+    "libhuxerui_example_runner.so": "file:./src/main/cpp/types/libhuxerui_example_runner"
+  }
+}
