@@ -92,4 +92,6 @@ Call `ExternalTexture::SnapshotAsync()` on the owning UI thread to capture the c
 
 On HarmonyOS, include `<huxerui/ohos/external_texture.h>` and publish straight-alpha sRGB rows through `ohos::PixelTexture`. The texture copies the rows during publication and can receive frames from a producer thread. On API 22 or later, check `ohos::NativeBufferTexture::IsSupported()` to publish an immutable premultiplied sRGB RGBA8 buffer with the system's CPU read and write usage flags. Finish producer writes before publishing it. The texture retains the shared buffer as a system PixelMap, and the platform drawing backend controls pixel upload.
 
+Use `ohos::GlTexture` to publish an existing premultiplied sRGB RGBA8 `GL_TEXTURE_2D` from a current OpenGL ES 3 context. Check `GlTexture::IsSupportedCurrent()` for the EGL buffer import path introduced in API 23. `PublishCurrent()` waits for its GPU copy on the calling thread. After success, the producer may immediately reuse or delete the source texture. If the producer renders directly into an `OH_NativeBuffer`, publish the completed buffer using `NativeBufferTexture::Publish()` and keep those pixels immutable.
+
 See [Resource and image design](../design/resources.md) for package resolution, cache ownership, and renderer behavior.

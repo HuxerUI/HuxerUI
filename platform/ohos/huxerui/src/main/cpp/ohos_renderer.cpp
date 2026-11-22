@@ -401,11 +401,14 @@ private:
   }
   void Draw(const PopTransformCommand&) { OH_Drawing_CanvasRestore(canvas_); }
   void Draw(const DrawExternalTextureCommand& command) {
-    if (const auto* texture = dynamic_cast<const ohos::NativeBufferTexture*>(command.texture.get())) {
-      if (const auto frame = texture->AcquireFrame()) {
-        const auto intrinsic = texture->IntrinsicSize();
-        const float scale_x = frame->pixel_size.width / intrinsic.width;
-        const float scale_y = frame->pixel_size.height / intrinsic.height;
+    const auto* buffer_texture = dynamic_cast<const ohos::NativeBufferTexture*>(command.texture.get());
+    const auto* gl_texture = dynamic_cast<const ohos::GlTexture*>(command.texture.get());
+    if (buffer_texture || gl_texture) {
+      const auto frame = buffer_texture ? buffer_texture->AcquireFrame() : gl_texture->AcquireFrame();
+      if (frame) {
+        const auto intrinsic = command.texture->IntrinsicSize();
+        const float scale_x = static_cast<float>(frame->PixelWidth()) / intrinsic.width;
+        const float scale_y = static_cast<float>(frame->PixelHeight()) / intrinsic.height;
         const auto& source = command.source;
         const auto src = MakeRect({source.x * scale_x, source.y * scale_y,
                                    source.width * scale_x, source.height * scale_y});
@@ -414,7 +417,7 @@ private:
         const auto sampling = Own<OH_Drawing_SamplingOptionsDestroy>(
             OH_Drawing_SamplingOptionsCreate(filter, MIPMAP_MODE_NONE));
         const auto pixelmap = Own<OH_Drawing_PixelMapDissolve>(
-            OH_Drawing_PixelMapGetFromOhPixelMapNative(frame->pixelmap.get()));
+            OH_Drawing_PixelMapGetFromOhPixelMapNative(frame->pixelmap_.get()));
         Fill({OhosDrawingColor(Color::Rgb(255, 255, 255, command.opacity))}, [&] {
           OH_Drawing_CanvasDrawPixelMapRect(canvas_, pixelmap.get(), src.get(), dst.get(), sampling.get());
         });

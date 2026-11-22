@@ -526,7 +526,7 @@ The same texture may be displayed by several UiWindows; unmounting one removes o
 
 Frame acquisition and synchronization remain platform-specific because a safe common return type cannot represent `CVPixelBuffer`, `IOSurface`, `AHardwareBuffer`, `SurfaceTexture`, DXGI resources, DMA-BUF, `VideoFrame`, and future native handles.
 The shared command retains the texture identity and immutable drawing data, while the renderer casts to its matching platform texture and takes the latest frame at draw time.
-The concrete GPU, Core Video, and WebCodecs textures expose the same `AcquireFrame()` used by the renderer to external consumers.
+Concrete textures with a public `AcquireFrame()` expose the same completed frame representation used by their renderer.
 The mailbox hands out independently retained frames, or independent `VideoFrame` clones on Web, so replacing or finishing the source does not invalidate a frame already acquired.
 For thread-safe mailboxes, publication and acquisition exchange ownership under the frame lock and GPU work runs outside that lock.
 A consumer retains the frame or its imported resource through GPU use and writes processing results to its own output.
@@ -545,6 +545,7 @@ The Android renderer encounters that ordinary `DrawExternalTextureCommand` durin
 This platform-private child does not become a PlatformView, public View, accessibility node, or shared RenderComposition layer.
 Frames containing GPU texture children move the base Canvas slice from `onDraw()` into `dispatchDraw()` so all Canvas, GPU texture, and PlatformView content retains command order.
 Direct `AHardwareBuffer` import remains future work.
+HarmonyOS `GlTexture::PublishCurrent()` blits from the producer's current OpenGL ES context into a new `OH_NativeBuffer` and waits there for GPU completion before publishing. `GlTexture` and `NativeBufferTexture` publish the same `GlFrame` for Native Drawing replay and external acquisition. Producers can render directly into a buffer and publish it through `NativeBufferTexture`; published buffers remain immutable even after a new publication or `Finish()`. `GlFrame::ImportCurrent()` creates an EGLImage from the retained buffer on the consumer's display and binds it to a read-only texture in the current context. Texture coordinate zero is the logical top edge, and the frame remains retained through GPU use.
 The Linux `PixelTexture` implementation copies borrowed straight-alpha RGBA8888 or BGRA8888 rows into premultiplied storage and wraps each acquired frame in a `GdkMemoryTexture` for GTK Snapshot composition.
 `linux::GlTexture::PublishCurrent()` validates level-zero `GL_RGBA8` storage in the current producer `GdkGLContext`, then completes a GPU copy into a new immutable texture managed through a private HuxerUI context in the same GL share group.
 HuxerUI constructs the `GdkGLTexture` with its completion fence and retains the same GL resource owner in GDK and the acquired `GdkFrame`, so either can keep the copied texture alive.
