@@ -4,12 +4,17 @@ import android.app.Activity;
 import android.app.Instrumentation;
 import android.os.Bundle;
 import android.os.Build;
+import android.graphics.Insets;
 import android.graphics.Paint;
 import android.graphics.Typeface;
 import android.text.Layout;
 import android.text.TextPaint;
+import android.view.WindowInsets;
+import android.view.WindowInsetsAnimation;
 
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.util.Collections;
 
 /** Android-runtime regression checks; host checks require the matching native HuxerUI library. */
 public final class HuxerUIRuntimeTest extends Instrumentation {
@@ -35,6 +40,7 @@ public final class HuxerUIRuntimeTest extends Instrumentation {
         Bundle result = new Bundle();
         try {
             verifyHostFocusHighlight();
+            verifyImeInsetsAnimation();
             verifyGeometry();
             int notificationAssertions = HuxerUILocalNotificationTest.verify(getTargetContext());
             int systemTaskAssertions = HuxerUISystemTasksTest.verify(this);
@@ -71,6 +77,73 @@ public final class HuxerUIRuntimeTest extends Instrumentation {
         });
         if (failure[0] != null) {
             throw new AssertionError("HuxerUI host focus regression failed", failure[0]);
+        }
+    }
+
+    private void verifyImeInsetsAnimation() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return;
+        final Throwable[] failure = new Throwable[1];
+        runOnMainSync(() -> {
+            try {
+                HuxerUIView host = new HuxerUIView(getTargetContext());
+                Field bottom = HuxerUIView.class.getDeclaredField("imeInsetBottom");
+                bottom.setAccessible(true);
+                Method viewportBottom = HuxerUIView.class.getDeclaredMethod("viewportBottomSafeInset");
+                viewportBottom.setAccessible(true);
+                int type = WindowInsets.Type.ime();
+                int navigation = WindowInsets.Type.navigationBars();
+                WindowInsets hidden = new WindowInsets.Builder()
+                        .setInsets(navigation, Insets.of(0, 0, 0, 48)).build();
+                WindowInsets shown = new WindowInsets.Builder(hidden)
+                        .setInsets(type, Insets.of(0, 0, 0, 300)).build();
+                WindowInsets entering = new WindowInsets.Builder(hidden)
+                        .setInsets(type, Insets.of(0, 0, 0, 12))
+                        .setInsets(navigation, Insets.of(0, 0, 0, 54)).build();
+                WindowInsets midway = new WindowInsets.Builder(hidden)
+                        .setInsets(type, Insets.of(0, 0, 0, 120)).build();
+                WindowInsetsAnimation show = new WindowInsetsAnimation(type, null, 200);
+                WindowInsetsAnimation hide = new WindowInsetsAnimation(type, null, 200);
+
+                host.dispatchApplyWindowInsets(hidden);
+                check((int) viewportBottom.invoke(host) == 48, "The viewport must reserve the three-button bar");
+                host.dispatchWindowInsetsAnimationPrepare(show);
+                host.dispatchApplyWindowInsets(shown);
+                check(bottom.getInt(host) == 0, "The destination must not shrink the host before the IME moves");
+                host.dispatchWindowInsetsAnimationProgress(entering, Collections.singletonList(show));
+                check(bottom.getInt(host) == 12, "The keyboard initially covers only 12 pixels");
+                check((int) viewportBottom.invoke(host) == 42,
+                        "Only the part of the current navigation bar above the IME stays in the safe area");
+                host.dispatchWindowInsetsAnimationProgress(midway, Collections.singletonList(show));
+                check(bottom.getInt(host) == 120, "The current IME inset must follow animation progress");
+                check((int) viewportBottom.invoke(host) == 0, "Overlapping bottom insets must not be reserved twice");
+                host.dispatchWindowInsetsAnimationEnd(show);
+                check(bottom.getInt(host) == 300,
+                        "Completing the animation must apply the final IME inset, got " + bottom.getInt(host)
+                                + ", target " + shown.getInsets(type).bottom);
+
+                host.dispatchWindowInsetsAnimationPrepare(hide);
+                host.dispatchApplyWindowInsets(hidden);
+                check(bottom.getInt(host) == 0, "The host can expand behind the dismissing keyboard");
+                host.dispatchWindowInsetsAnimationProgress(midway, Collections.singletonList(hide));
+                check(bottom.getInt(host) == 0, "Dismissal must not shrink the expanded host again");
+                host.dispatchWindowInsetsAnimationPrepare(show);
+                host.dispatchApplyWindowInsets(shown);
+                host.dispatchWindowInsetsAnimationProgress(midway, Collections.singletonList(show));
+                host.dispatchWindowInsetsAnimationEnd(hide);
+                check(bottom.getInt(host) == 120, "Retiring a superseded animation must preserve the current inset");
+                host.dispatchWindowInsetsAnimationEnd(show);
+                host.dispatchApplyWindowInsets(hidden);
+                check(bottom.getInt(host) == 0, "Insets dispatched without animation must still apply immediately");
+                check((int) viewportBottom.invoke(host) == 48, "Dismissing the keyboard restores the navigation bar");
+                host.dispatchApplyWindowInsets(shown);
+                check(bottom.getInt(host) == 300 && (int) viewportBottom.invoke(host) == 0,
+                        "A keyboard that opens without animation must apply its final geometry immediately");
+            } catch (Throwable error) {
+                failure[0] = error;
+            }
+        });
+        if (failure[0] != null) {
+            throw new AssertionError("HuxerUI IME inset animation regression failed", failure[0]);
         }
     }
 

@@ -42,6 +42,7 @@ import android.view.ViewGroup;
 import android.view.ViewParent;
 import android.view.ViewTreeObserver;
 import android.view.WindowInsets;
+import android.view.WindowInsetsAnimation;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.accessibility.AccessibilityNodeProvider;
 import android.view.inputmethod.EditorInfo;
@@ -57,6 +58,7 @@ import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -215,6 +217,9 @@ public final class HuxerUIView extends ViewGroup {
     private long keyboardRequestGeneration;
     private HuxerUIShadowRenderer shadowRenderer;
     private int imeInsetBottom;
+    private int imeTargetInsetBottom;
+    private int targetSafeInsetBottom;
+    private final ImeInsetsAnimation imeInsetsAnimation;
     private int safeInsetLeft;
     private int safeInsetTop;
     private int safeInsetRight;
@@ -268,6 +273,12 @@ public final class HuxerUIView extends ViewGroup {
         }
         setClickable(true);
         setWillNotDraw(false);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            imeInsetsAnimation = new ImeInsetsAnimation(this);
+            setWindowInsetsAnimationCallback(imeInsetsAnimation);
+        } else {
+            imeInsetsAnimation = null;
+        }
         if (Build.VERSION.SDK_INT >= 29) {
             setForceDarkAllowed(false);
         }
@@ -571,6 +582,12 @@ public final class HuxerUIView extends ViewGroup {
 
     @Override
     protected void onDetachedFromWindow() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            imeInsetsAnimation.animation = null;
+            imeTargetInsetBottom = 0;
+            targetSafeInsetBottom = 0;
+        }
+        imeInsetBottom = 0;
         endFileDropHover();
         fileDropStarted = false;
         ViewTreeObserver observer = getViewTreeObserver();
@@ -656,13 +673,20 @@ public final class HuxerUIView extends ViewGroup {
     @Override
     public WindowInsets onApplyWindowInsets(WindowInsets insets) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // The destination arrives before the keyboard moves. Growing behind a retiring IME is safe,
+            // while shrinking must stay within the currently covered area.
+            imeTargetInsetBottom = insets.getInsets(WindowInsets.Type.ime()).bottom;
+            imeInsetBottom = imeInsetsAnimation.animation == null
+                    ? imeTargetInsetBottom : Math.min(imeInsetBottom, imeTargetInsetBottom);
             android.graphics.Insets systemBars = insets.getInsets(WindowInsets.Type.systemBars());
             android.graphics.Insets displayCutout = insets.getInsets(WindowInsets.Type.displayCutout());
             safeInsetLeft = Math.max(systemBars.left, displayCutout.left);
             safeInsetTop = Math.max(systemBars.top, displayCutout.top);
             safeInsetRight = Math.max(systemBars.right, displayCutout.right);
-            safeInsetBottom = Math.max(systemBars.bottom, displayCutout.bottom);
-            imeInsetBottom = insets.getInsets(WindowInsets.Type.ime()).bottom;
+            targetSafeInsetBottom = Math.max(systemBars.bottom, displayCutout.bottom);
+            if (imeInsetsAnimation.animation == null) {
+                safeInsetBottom = targetSafeInsetBottom;
+            }
         } else {
             safeInsetLeft = insets.getStableInsetLeft();
             safeInsetTop = insets.getStableInsetTop();
@@ -678,6 +702,50 @@ public final class HuxerUIView extends ViewGroup {
         }
         resizeRuntime(getWidth(), getHeight());
         return super.onApplyWindowInsets(insets);
+    }
+
+    private static final class ImeInsetsAnimation extends WindowInsetsAnimation.Callback {
+        private final HuxerUIView host;
+        private WindowInsetsAnimation animation;
+
+        ImeInsetsAnimation(HuxerUIView host) {
+            super(DISPATCH_MODE_CONTINUE_ON_SUBTREE);
+            this.host = host;
+        }
+
+        @Override
+        public void onPrepare(WindowInsetsAnimation animation) {
+            if ((animation.getTypeMask() & WindowInsets.Type.ime()) != 0) {
+                this.animation = animation;
+            }
+        }
+
+        @Override
+        public WindowInsets onProgress(WindowInsets insets, List<WindowInsetsAnimation> runningAnimations) {
+            if (animation != null && runningAnimations.contains(animation)) {
+                int imeBottom = Math.min(insets.getInsets(WindowInsets.Type.ime()).bottom, host.imeTargetInsetBottom);
+                int systemBottom =
+                        insets.getInsets(WindowInsets.Type.systemBars() | WindowInsets.Type.displayCutout()).bottom;
+                updateBottom(imeBottom, systemBottom);
+            }
+            return insets;
+        }
+
+        @Override
+        public void onEnd(WindowInsetsAnimation animation) {
+            if (this.animation == animation) {
+                this.animation = null;
+                updateBottom(host.imeTargetInsetBottom, host.targetSafeInsetBottom);
+            }
+        }
+
+        private void updateBottom(int imeBottom, int systemBottom) {
+            if (host.imeInsetBottom != imeBottom || host.safeInsetBottom != systemBottom) {
+                host.imeInsetBottom = imeBottom;
+                host.safeInsetBottom = systemBottom;
+                host.resizeRuntime(host.getWidth(), host.getHeight());
+            }
+        }
     }
 
     @Override
@@ -1047,9 +1115,16 @@ public final class HuxerUIView extends ViewGroup {
             return;
         }
         int usableHeight = Math.max(0, height - imeInsetBottom);
-        int bottomInset = imeInsetBottom > 0 ? 0 : safeInsetBottom;
         nativeResize(nativeHandle, width / density, usableHeight / density, safeInsetLeft / density,
-                safeInsetTop / density, safeInsetRight / density, bottomInset / density);
+                safeInsetTop / density, safeInsetRight / density, viewportBottomSafeInset() / density);
+    }
+
+    private int viewportBottomSafeInset() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            // Both insets are measured from the physical edge. Only reserve system space still inside the viewport.
+            return Math.max(0, safeInsetBottom - imeInsetBottom);
+        }
+        return imeInsetBottom > 0 ? 0 : safeInsetBottom;
     }
 
     private void setSystemBarsContentBrightness(int statusBar, int navigationBar) {
