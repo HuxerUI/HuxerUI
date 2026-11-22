@@ -16,6 +16,7 @@ Each backend uses platform lifecycle, input, text, accessibility, file, network,
 
 Capabilities not listed as implemented are not implied by the shared API.
 The HarmonyOS API 19 backend is experimental. The [HarmonyOS example runner](../../platform/ohos/README.md) builds and runs repository examples that use the current backend capabilities.
+
 See [Application Permissions](../design/permissions.md#supported-capabilities) for supported queries, requests, and settings targets on each operating system.
 
 The shared local-notification API is available on every listed platform.
@@ -379,6 +380,17 @@ FileReference payloads retain the shared grant and expose its path-backed `NSURL
 Native libraries include `<huxerui/ios/external_texture.h>` for the iOS forms of `PixelBufferTexture` and `MetalTexture`.
 They have the same ownership, format, origin, alpha, synchronization, and Image rendering contract as their macOS counterparts; the C++ types remain in `huxerui::ios` rather than a shared Apple namespace.
 Objective-C and Swift import the concrete objects as `HUXPixelBufferTexture`/`PixelBufferTexture` and `HUXMetalTexture`/`MetalTexture`.
+
+## HarmonyOS platform extensions
+
+Return a `HuxerUIPlatformExtensions` object from `HuxerUIAbility.getPlatformExtensions()` in your ArkTS application. Its `module`, `windowModule`, and `view` methods resolve names from C++ registrations in an application hook. Import the ArkTS interfaces from `@huxerui/huxerui` and include `<huxerui/ohos/platform_registry.h>` on the C++ side.
+
+- `ohos::ArkTsPlatformModuleFactory<Module, Options>` supplies a `UIAbilityContext` even before a window attaches. `ohos::ArkTsWindowPlatformModuleFactory<Module, Options>` supplies the originating `Window` and `UIContext`. Both open through `OpenPlatformModule`, and a detached window retires its own modules.
+- `ohos::ArkTsPlatformViewFactory<Properties, Controller>` supplies the originating `UIContext`. Return new detached `ComponentContent` with an ArkUI root that fits the assigned bounds. Implement `update` for controlled properties and `invoke` when exposing Controller methods. Release the content in `dispose` after HuxerUI detaches it. Typed C++ event handlers may return a value synchronously after mounting.
+
+ArkTS receives immutable `HuxerUIPlatformPayload` values with exact accessors, signed 64-bit `bigint` integers, and retained texture, file, and buffer references. Object fields are `HuxerUIPlatformPayloadField` name-value pairs. Use `fileFromUri` only with a URI the application can access. Buffer reference passing and slicing retain the same storage, and `readInto` and `copyBytes` explicitly copy into ArkTS-owned arrays. A method completes or fails through its result object and may return a cancellation function. The framework dispatches completions on the application thread and drops late results.
+
+Use the [HarmonyOS example runner](../../platform/ohos/README.md) to run `platform_module` for a window-scoped ArkTS timer or `platform_view` for an editable `ComponentContent` view. Direct ArkUI C++ node factories remain available through `ohos::PlatformViewFactory`.
 
 ## Reading ExternalTexture frames
 

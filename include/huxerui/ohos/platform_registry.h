@@ -5,6 +5,8 @@
 #include <concepts>
 #include <functional>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <utility>
 
 #include <huxerui/platform_registry.h>
@@ -46,7 +48,49 @@ struct ArkUiViewFactory {
   std::function<void(const std::shared_ptr<void>&)> dispose;
   std::function<void(const std::shared_ptr<void>&, const PlatformValue&)> connect;
   std::function<void(const std::shared_ptr<void>&, const PlatformValue&)> disconnect;
+  std::function<void(const std::shared_ptr<void>&)> commit;
 };
+
+PlatformChannel OpenArkTsModule(Runtime& runtime, const std::string& name, PlatformPayload options);
+PlatformChannel OpenArkTsModule(UiWindow& window, const std::string& name, PlatformPayload options);
+
+huxerui::detail::PlatformViewFactoryRegistration PrepareArkTsView(UiWindow& window, const std::string& name,
+    std::function<PlatformPayload(const PlatformValue&)> encode,
+    std::function<void(const PlatformValue&, PlatformChannel)> connect,
+    std::function<void(const PlatformValue&)> disconnect);
+
+template <class Module, class Options, class Host> struct ArkTsModuleFactory {
+  /// Name resolved by the originating ability's ArkTS extension object.
+  std::string factory_name;
+  /// Constructs the library's typed facade from the opened channel on the application thread.
+  std::function<Module(PlatformChannel)> create;
+
+  Module operator()(Host& host) requires std::same_as<Options, void> { return Open(host, {}); }
+
+  template <class Value = Options>
+    requires (!std::same_as<Options, void> && std::same_as<Value, Options>)
+  Module operator()(Host& host, const Value& options) {
+    return Open(host, huxerui::detail::EncodePlatformValue(options));
+  }
+
+private:
+  Module Open(Host& host, PlatformPayload options) {
+    if (!create) throw std::invalid_argument("HuxerUI ArkTS module factory requires a C++ facade constructor");
+    auto channel = OpenArkTsModule(host, factory_name, std::move(options));
+    try {
+      return create(channel);
+    } catch (...) {
+      channel.Close();
+      throw;
+    }
+  }
+};
+
+template <class Properties>
+std::function<PlatformPayload(const PlatformValue&)> ArkTsViewEncoder() {
+  if constexpr (std::same_as<Properties, void>) return {};
+  else return [](const PlatformValue& value) { return huxerui::detail::EncodePlatformValue(value.Get<Properties>()); };
+}
 
 template <class Properties, class Instance, class Controller>
 huxerui::detail::PlatformViewFactoryRegistration
@@ -96,6 +140,52 @@ ErasePlatformViewFactory(ohos::PlatformViewFactory<Properties, Instance, Control
 }
 
 } // namespace detail
+
+/// Opens an ArkTS PlatformModule from the originating ability, including when no window is attached.
+/// @tparam Module Exact C++ facade constructed from the channel for each opening.
+/// @tparam Options Optional construction type encoded through PlatformPayload, or void for Null.
+template <class Module, class Options = void>
+using ArkTsPlatformModuleFactory = detail::ArkTsModuleFactory<Module, Options, Runtime>;
+
+/// Opens an ArkTS PlatformModule with the original Window and UIContext of the calling attachment.
+/// Requests and events are scoped to that attachment. Options and the C++ facade follow ArkTsPlatformModuleFactory.
+template <class Module, class Options = void>
+using ArkTsWindowPlatformModuleFactory = detail::ArkTsModuleFactory<Module, Options, UiWindow>;
+
+/// Registers an ArkTS factory by the name resolved by the ability's platform extensions.
+/// Callbacks run on the ArkUI application thread. Events emitted during creation are delivered after the view commits.
+/// @tparam Properties Controlled declarative value encoded with PlatformPayload, or void for a propertyless View.
+/// @tparam Controller Typed command endpoint connected to the mounted instance, or void.
+template <class Properties, class Controller = void> struct ArkTsPlatformViewFactory {
+  /// Name used by the ability's ArkTS view resolver.
+  std::string factory_name;
+  /// Binds the caller's Controller to the committed View's method channel.
+  std::function<void(const Controller&, PlatformChannel)> connect;
+  /// Clears the caller's Controller on replacement or removal. HuxerUI closes the retired instance's channel.
+  std::function<void(const Controller&)> disconnect;
+
+private:
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& window) && {
+    if (!connect || !disconnect) throw std::invalid_argument("HuxerUI ArkTS view controller requires both callbacks");
+    return detail::PrepareArkTsView(window, factory_name, detail::ArkTsViewEncoder<Properties>(),
+        [callback = std::move(connect)](const PlatformValue& value, PlatformChannel channel) {
+          callback(value.Get<Controller>(), std::move(channel));
+        }, [callback = std::move(disconnect)](const PlatformValue& value) { callback(value.Get<Controller>()); });
+  }
+  friend class huxerui::detail::PlatformRegistry;
+};
+
+/// Registers an ArkTS view factory without a C++ controller.
+template <class Properties> struct ArkTsPlatformViewFactory<Properties, void> {
+  /// Name used by the ability's ArkTS view resolver.
+  std::string factory_name;
+
+private:
+  huxerui::detail::PlatformViewFactoryRegistration Erase(UiWindow& window) && {
+    return detail::PrepareArkTsView(window, factory_name, detail::ArkTsViewEncoder<Properties>(), {}, {});
+  }
+  friend class huxerui::detail::PlatformRegistry;
+};
 
 /// ArkUI PlatformView factory without declarative Properties or a Controller.
 template <class Instance> struct PlatformViewFactory<void, Instance, void> {

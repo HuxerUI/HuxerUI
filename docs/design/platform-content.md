@@ -323,8 +323,9 @@ Platform factories receive the concrete owner appropriate to the registration:
 | Web | The factory returns a detached `HTMLElement` | Browser host |
 | Android | Owning `Context` | Originating `HuxerUIView` for a window factory |
 | iOS | Owning `UIViewController` | Owning `UIViewController` |
+| HarmonyOS | Originating ArkUI `UIContext` | Originating ArkUI `UIContext` and `Window` |
 
-The Java class adapter resolves stable names through the host ClassLoader and retains the View factory for the mounting UiWindow. Application Module factories resolve lazily and receive the application Context. Keep rules protect classes referenced by runtime name. The Apple adapters accept actual Objective-C or Swift factories and maintain independent UIKit and AppKit lifetimes. Their `HuxerUIPlatform` Clang modules expose the corresponding platform types. Web receives actual JavaScript factory objects before mount. Direct C++ factories remain available alongside the common adapters.
+The Java class adapter resolves stable names through the host ClassLoader and retains the View factory for the mounting UiWindow. Application Module factories resolve lazily and receive the application Context. Keep rules protect classes referenced by runtime name. The Apple adapters accept actual Objective-C or Swift factories and maintain independent UIKit and AppKit lifetimes. Their `HuxerUIPlatform` Clang modules expose the corresponding platform types. Web receives actual JavaScript factory objects before mount. HarmonyOS resolves ArkTS factories through the original ability, passes application modules its `UIAbilityContext`, and retains each returned `ComponentContent` until its node is detached. Direct C++ factories remain available alongside the common adapters.
 
 View creation, update, placement, and disposal run on the owning UI thread. The platform View root is stable and initially unparented. The adapter owns attachment, and updates apply complete Properties values idempotently. Creation-time notifications supported by a language bridge are withheld until the instance commits. A candidate cannot answer a synchronous mounted event, and a failed candidate delivers no notifications.
 
@@ -415,6 +416,7 @@ Platform adapters preserve the same contract through platform-specific compositi
 | Web | HuxerUI Canvas slices and DOM PlatformViews are ordered siblings in one isolated CSS stacking context. The Web host coordinates DOM event targeting with UiWindow hit testing. |
 | Android | The host is a ViewGroup that alternates HuxerUI slice replay with ordinary child drawing in committed order. A `TextureView` participates as a regular child, while any `SurfaceView` subtree is rejected because its system composition cannot preserve this Canvas order. |
 | iOS | Transparent HuxerUI slice views or layers and UIViews are retained as ordered siblings under one host UIView. CoreGraphics replay targets only damaged slices. |
+| HarmonyOS | The XComponent draws the base slice. Clipped ArkUI children and custom drawing nodes retain the order of the remaining placements and slices. ArkUI navigates inside each hosted focus scope and returns Tab navigation to UiWindow when the scope loses focus. |
 
 These strategies are conformance requirements, not application-selectable composition modes.
 A factory whose platform object cannot preserve exact ordering on the current platform fails with a diagnostic identifying the PlatformView registration name or unavailable adapter capability at the layer that detects it.

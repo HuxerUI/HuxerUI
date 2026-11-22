@@ -1,6 +1,7 @@
 #include <ace/xcomponent/native_interface_xcomponent.h>
 #include <arkui/drag_and_drop.h>
 #include <arkui/native_interface.h>
+#include <arkui/native_interface_focus.h>
 #include <arkui/native_key_event.h>
 #include <arkui/native_node.h>
 #include <arkui/native_node_napi.h>
@@ -44,6 +45,7 @@
 #include "ohos_clipboard.h"
 #include "ohos_file_picker.h"
 #include "ohos_http.h"
+#include "ohos_platform_registry.h"
 #include "ohos_platform_view.h"
 #include "ohos_renderer.h"
 #include "ohos_system_services.h"
@@ -222,9 +224,10 @@ class OhosRuntime final : public Runtime {
 public:
   OhosRuntime(napi_env env, UiThreadDispatcher dispatch, AppDirectories directories, napi_value manager,
               ResourceConfiguration configuration, napi_value system_services, napi_value http_host,
-              ApplicationActivation activation, napi_value file_host)
+              ApplicationActivation activation, napi_value file_host, napi_value context, napi_value extensions)
       : Runtime(dispatch), directories_(std::move(directories)),
         resources_(env, manager, std::move(configuration)),
+        arkts_host_(env, context, file_host, extensions),
         file_access_(std::make_shared<OhosFileAccess>(env, file_host)), clipboard_(file_access_),
         system_services_(std::make_shared<OhosSystemServices>(env, system_services)),
         http_(std::make_shared<OhosHttpTransport>(env, http_host, std::move(dispatch))) {
@@ -233,6 +236,7 @@ public:
 
   ~OhosRuntime() override {
     Retire();
+    arkts_host_.Close();
     file_access_->Disconnect();
     http_->Disconnect();
     system_services_->Disconnect();
@@ -247,6 +251,8 @@ public:
   OhosHttpTransport& Http() noexcept { return *http_; }
 
   OhosFileAccess& FileAccess() noexcept { return *file_access_; }
+
+  ArkTsPlatformHost& ArkTsHost() noexcept { return arkts_host_; }
 
   bool IsActive() const noexcept { return active_; }
 
@@ -281,6 +287,7 @@ private:
 
   AppDirectories directories_;
   OhosResources resources_;
+  ArkTsPlatformHost arkts_host_;
   std::shared_ptr<OhosFileAccess> file_access_;
   OhosClipboard clipboard_;
   std::shared_ptr<OhosSystemServices> system_services_;
@@ -310,9 +317,11 @@ std::uintptr_t next_frame_token = 0;
 class OhosUiWindow final : public UiWindow {
 public:
   OhosUiWindow(OhosRuntime& application, ArkUI_NodeContentHandle content, UiContext context, float scale,
-               ThemeBrightness brightness, napi_env env, napi_value text_input_host, napi_value picker_host)
+               ThemeBrightness brightness, napi_env env, napi_value text_input_host, napi_value picker_host,
+               napi_value ui_context, napi_value window)
       : content_(content), context_(std::move(context)), scale_(scale), system_brightness_(brightness),
-        active_(application.IsActive()), env_(env), node_api_(GetNodeApi()),
+        active_(application.IsActive()), env_(env), arkts_host_(env, ui_context, picker_host, nullptr, window),
+        node_api_(GetNodeApi()),
         root_(node_api_->createNode(ARKUI_NODE_STACK), node_api_->disposeNode),
         node_(node_api_->createNode(ARKUI_NODE_XCOMPONENT), node_api_->disposeNode),
         holder_(node_ ? OH_ArkUI_SurfaceHolder_Create(node_.get()) : nullptr, &OH_ArkUI_SurfaceHolder_Dispose),
@@ -331,6 +340,11 @@ public:
                 node_api_->setAttribute(node_.get(), NODE_WIDTH_PERCENT, &size) == 0 &&
                 node_api_->setAttribute(node_.get(), NODE_HEIGHT_PERCENT, &size) == 0,
             "HuxerUI could not size the OHOS surface node");
+    // ArkUI promotes focused nodes without an explicit z-index above their siblings.
+    const ArkUI_NumberValue base_order{.i32 = 0};
+    const ArkUI_AttributeItem z_index{.value = &base_order, .size = 1, .string = nullptr, .object = nullptr};
+    Require(node_api_->setAttribute(node_.get(), NODE_Z_INDEX, &z_index) == 0,
+            "HuxerUI could not set the OHOS surface stacking order");
     Require(OH_ArkUI_XComponent_SetAutoInitialize(node_.get(), false) == 0,
             "HuxerUI could not configure OHOS surface initialization");
     const auto& app = CurrentApplication();
@@ -346,6 +360,7 @@ public:
       napi_delete_reference(env_, status_bar_callback_);
     }
     platform_views_.Clear();
+    arkts_host_.Close();
     file_picker_->ReleaseHost();
     if (receiver_added_) {
       for (std::size_t index = 0; index < input_events_registered_; ++index) {
@@ -410,6 +425,8 @@ public:
     surface_added_ = true;
     Require(OH_ArkUI_NodeContent_AddNode(content_, root_.get()) == 0, "HuxerUI could not attach the OHOS surface");
     node_added_ = true;
+    // Let the HuxerUI surface consume keys before ArkUI falls back to moving physical focus.
+    OH_ArkUI_FocusSetKeyProcessingMode(context_.get(), ARKUI_KEY_PROCESSING_MODE_FOCUS_ANCESTOR_EVENT);
     Require(OH_ArkUI_XComponent_Initialize(node_.get()) == 0, "HuxerUI could not initialize the OHOS surface");
   }
 
@@ -497,6 +514,10 @@ public:
   OhosTextInput* TextInput() noexcept override { return &text_input_; }
 
   OhosFilePicker& FilePicker() noexcept { return *file_picker_; }
+
+  ArkTsPlatformHost& ArkTsHost() noexcept { return arkts_host_; }
+
+  ArkTsPlatformHost& ApplicationArkTsHost() { return static_cast<OhosRuntime&>(ApplicationRuntime()).ArkTsHost(); }
 
   bool Scroll(Point position, Point delta, bool touchpad, KeyModifiers modifiers) {
     if (!active_ || !surface_ || (delta.x == 0.0F && delta.y == 0.0F)) {
@@ -879,6 +900,7 @@ private:
   bool active_;
   napi_env env_;
   napi_ref status_bar_callback_ = nullptr;
+  ArkTsPlatformHost arkts_host_;
   ArkUI_NativeNodeAPI_1* node_api_;
   SurfaceNode root_;
   SurfaceNode node_;
@@ -999,7 +1021,7 @@ std::optional<ApplicationActivation> ReadActivation(napi_env env, napi_value val
 
 napi_value Start(napi_env env, napi_callback_info info) {
   Require(!runtime, "HuxerUI OHOS application is already running");
-  napi_value args[7];
+  napi_value args[8];
   std::size_t count = std::size(args);
   Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args),
           "HuxerUI OHOS start expects the application context, locale, scale, and service hosts");
@@ -1013,7 +1035,7 @@ napi_value Start(napi_env env, napi_callback_info info) {
   auto activation = ReadActivation(env, args[5]).value_or(LaunchActivation{});
   runtime = std::make_unique<OhosRuntime>(env, CreateDispatcher(env), std::move(directories),
       ReadProperty(env, context, "resourceManager"), ReadConfiguration(env, args[1], args[2]),
-      args[3], args[4], std::move(activation), args[6]);
+      args[3], args[4], std::move(activation), args[6], context, args[7]);
   return nullptr;
 }
 
@@ -1050,7 +1072,7 @@ napi_value SetConfiguration(napi_env env, napi_callback_info info) {
 
 napi_value Attach(napi_env env, napi_callback_info info) {
   Require(runtime && !attachment, "HuxerUI OHOS needs a running application and a new UI attachment");
-  napi_value args[7];
+  napi_value args[8];
   std::size_t count = std::size(args);
   ArkUI_NodeContentHandle content = nullptr;
   Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args) &&
@@ -1063,7 +1085,7 @@ napi_value Attach(napi_env env, napi_callback_info info) {
   // The NDK allocates an opaque context that the caller releases with C++ delete.
   UiContext context(handle, [](ArkUI_ContextHandle value) { ::operator delete(value); });
   auto window = std::make_unique<OhosUiWindow>(*runtime, content, std::move(context), scale,
-      ReadSystemBrightness(env, args[5]), env, args[3], args[4]);
+      ReadSystemBrightness(env, args[5]), env, args[3], args[4], args[1], args[7]);
   window->Attach(args[6]);
   attachment = std::move(window);
   return nullptr;
@@ -1167,6 +1189,14 @@ napi_value HttpEvent(napi_env, napi_callback_info info) {
 
 } // namespace
 
+ArkTsPlatformHost& GetArkTsPlatformHost(Runtime& owner) { return static_cast<OhosRuntime&>(owner).ArkTsHost(); }
+
+ArkTsPlatformHost& GetArkTsPlatformHost(UiWindow& owner) { return static_cast<OhosUiWindow&>(owner).ArkTsHost(); }
+
+ArkTsPlatformHost& GetApplicationArkTsPlatformHost(UiWindow& owner) {
+  return static_cast<OhosUiWindow&>(owner).ApplicationArkTsHost();
+}
+
 int RunPlatformApplication(const Application&) {
   throw std::logic_error("HuxerUI applications on OHOS must start through UIAbility");
 }
@@ -1194,10 +1224,13 @@ napi_value InitializeOhosModule(napi_env env, napi_value exports) {
   };
   if (napi_define_properties(env, exports, std::size(properties), properties) != napi_ok ||
       napi_add_env_cleanup_hook(env, [](void*) {
+        // Environment teardown may only release references. The ability's normal teardown can still call ArkTS.
         if (attachment) {
+          attachment->ArkTsHost().DisableCallbacks();
           attachment->TextInput()->ReleaseHost();
         }
         if (runtime) {
+          runtime->ArkTsHost().DisableCallbacks();
           runtime->Http().ReleaseHost();
         }
         Stop();

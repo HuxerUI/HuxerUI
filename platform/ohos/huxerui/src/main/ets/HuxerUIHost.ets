@@ -4,6 +4,7 @@ import { i18n } from '@kit.LocalizationKit';
 import { HuxerUIActivation, HuxerUIApplicationModule } from './HuxerUIApplicationModule';
 import { HuxerUIFilePicker, withGrantedFiles } from './HuxerUIFilePicker';
 import { HuxerUIHttp } from './HuxerUIHttp';
+import { HuxerUIPlatformExtensions } from './HuxerUIPlatform';
 import { HuxerUISystemServices, notificationActivation } from './HuxerUISystemServices';
 import { HuxerUITextInput } from './HuxerUITextInput';
 
@@ -83,6 +84,9 @@ export abstract class HuxerUIAbility extends UIAbility {
   /** Returns the default export of the application's HuxerUI shared library, such as `libmy_app.so`. */
   protected abstract getApplicationModule(): HuxerUIApplicationModule;
 
+  /** Supplies ArkTS factory objects for the C++ application's registered platform modules and views. */
+  protected getPlatformExtensions(): HuxerUIPlatformExtensions | undefined { return undefined; }
+
   onCreate(want?: Want): void {
     const module = this.getApplicationModule();
     const services = new HuxerUISystemServices(module, this.context);
@@ -90,7 +94,7 @@ export abstract class HuxerUIAbility extends UIAbility {
     systemDark = this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
     withActivation(want, activation => {
       module.start(this.context, i18n.System.getSystemLocale(), displayScale(), services, new HuxerUIHttp(module),
-        activation, files);
+        activation, files, this.getPlatformExtensions());
     });
     applicationModule = module;
     filePicker = files;
@@ -227,7 +231,7 @@ export struct HuxerUISurface {
       context.setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
       const textInput = new HuxerUITextInput(applicationModule, mainWindow.getWindowProperties().id);
       applicationModule.attach(this.surface, context, context.vp2px(1), textInput, filePicker, systemDark,
-        light => setStatusBarBrightness(mainWindow, light));
+        light => setStatusBarBrightness(mainWindow, light), mainWindow);
       this.attachedWindow = mainWindow;
       mainWindow.on('avoidAreaChange', this.updateInsets);
       mainWindow.on('windowSizeChange', this.updateInsets);

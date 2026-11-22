@@ -6,6 +6,7 @@ set(HUXERUI_PLATFORM_SOURCE_FILES
         "${HUXERUI_OHOS_CPP_DIR}/ohos_external_texture.cpp"
         "${HUXERUI_OHOS_CPP_DIR}/ohos_file_picker.cpp"
         "${HUXERUI_OHOS_CPP_DIR}/ohos_http.cpp"
+        "${HUXERUI_OHOS_CPP_DIR}/ohos_platform_registry.cpp"
         "${HUXERUI_OHOS_CPP_DIR}/ohos_platform_view.cpp"
         "${HUXERUI_OHOS_CPP_DIR}/ohos_renderer.cpp"
         "${HUXERUI_OHOS_CPP_DIR}/ohos_system_services.cpp"

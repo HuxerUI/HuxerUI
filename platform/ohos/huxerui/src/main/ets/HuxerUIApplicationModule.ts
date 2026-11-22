@@ -1,5 +1,5 @@
 import { common } from '@kit.AbilityKit';
-import { NodeContent, UIContext } from '@kit.ArkUI';
+import { NodeContent, UIContext, window } from '@kit.ArkUI';
 
 export interface HuxerUITextInputHost {
   connect(token: string, inputType: number, enterKey: number): void;
@@ -50,12 +50,14 @@ export interface HuxerUIHttpHost {
 
 export interface HuxerUIApplicationModule {
   start(context: common.UIAbilityContext, locale: string, scale: number, services: HuxerUISystemServicesHost,
-    http: HuxerUIHttpHost, activation: HuxerUIActivation | undefined, files: HuxerUIFilePickerHost): void;
+    http: HuxerUIHttpHost, activation: HuxerUIActivation | undefined, files: HuxerUIFilePickerHost,
+    extensions: Object | undefined): void;
   stop(): void;
   setActive(active: boolean): void;
   setConfiguration(locale: string, scale: number, systemDark: boolean): void;
   attach(content: NodeContent, context: UIContext, scale: number, textInput: HuxerUITextInputHost,
-    filePicker: HuxerUIFilePickerHost, systemDark: boolean, setStatusBarBrightness: (light: boolean) => void): void;
+    filePicker: HuxerUIFilePickerHost, systemDark: boolean, setStatusBarBrightness: (light: boolean) => void,
+    owner: window.Window): void;
   detach(): void;
   setSystemInsets(top: number, right: number, bottom: number, left: number, windowHeight: number): void;
   handleBack(): boolean;

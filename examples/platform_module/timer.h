@@ -39,6 +39,7 @@ protected:
 };
 
 std::shared_ptr<TimerService> UseTimer();
+std::shared_ptr<TimerService> MakeChannelTimer(PlatformChannel channel);
 void InstallTimer(ApplicationContext& root);
 
 } // namespace huxerui::example

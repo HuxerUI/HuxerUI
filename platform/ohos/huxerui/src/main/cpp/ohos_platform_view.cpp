@@ -1,12 +1,14 @@
 #include "ohos_platform_view.h"
 
 #include <arkui/native_interface_focus.h>
+#include <arkui/native_key_event.h>
 #include <arkui/ui_input_event.h>
 #include <hilog/log.h>
 
 #include <array>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
@@ -63,6 +65,7 @@ struct EventRoute {
   const std::thread::id application_thread = std::this_thread::get_id();
   std::uint64_t identity;
   bool active = false;
+  std::optional<bool> tab_reverse{};
 };
 
 PlatformEventEmitter EventEmitter(const std::shared_ptr<EventRoute>& route) {
@@ -112,9 +115,10 @@ struct HostedView {
       Check(api.addNodeEventReceiver(container.get(), OnContainerEvent));
       Check(api.registerNodeEvent(container.get(), NODE_ON_TOUCH_INTERCEPT, NODE_ON_TOUCH_INTERCEPT, this));
       Check(api.registerNodeEvent(container.get(), NODE_TOUCH_EVENT, NODE_TOUCH_EVENT, this));
-      Check(api.addNodeEventReceiver(view, OnFocusEvent));
+      Check(api.addNodeEventReceiver(view, OnViewEvent));
       Check(api.registerNodeEvent(view, NODE_ON_FOCUS, NODE_ON_FOCUS, this));
       Check(api.registerNodeEvent(view, NODE_ON_BLUR, NODE_ON_BLUR, this));
+      Check(api.registerNodeEvent(view, NODE_ON_KEY_EVENT, NODE_ON_KEY_EVENT, this));
       Check(api.addChild(root, container.get()));
       container_added = true;
       properties_revision = command.PropertiesRevision();
@@ -163,7 +167,11 @@ struct HostedView {
       Place(api, view, {world_bounds.x - visible.x, world_bounds.y - visible.y,
                         world_bounds.width, world_bounds.height});
     }
-    route->active = shown;
+  }
+
+  void Commit() {
+    route->active = true;
+    if (factory->commit) factory->commit(instance);
   }
 
   static void OnContainerEvent(ArkUI_NodeEvent* event) noexcept {
@@ -173,7 +181,7 @@ struct HostedView {
     }
     auto* hosted = static_cast<HostedView*>(OH_ArkUI_NodeEvent_GetUserData(event));
     const auto* input = OH_ArkUI_NodeEvent_GetInputEvent(event);
-    if (!hosted || !hosted->route->active || !input) {
+    if (!hosted || !hosted->route->active || !hosted->visible_now || !input) {
       return;
     }
     try {
@@ -192,21 +200,36 @@ struct HostedView {
     }
   }
 
-  static void OnFocusEvent(ArkUI_NodeEvent* event) noexcept {
+  static void OnViewEvent(ArkUI_NodeEvent* event) noexcept {
     const auto type = OH_ArkUI_NodeEvent_GetEventType(event);
-    if (type != NODE_ON_FOCUS && type != NODE_ON_BLUR) {
+    if (type != NODE_ON_FOCUS && type != NODE_ON_BLUR && type != NODE_ON_KEY_EVENT) {
       return;
     }
     auto* hosted = static_cast<HostedView*>(OH_ArkUI_NodeEvent_GetUserData(event));
-    if (!hosted || !hosted->route->active) {
+    if (!hosted || !hosted->route->active || !hosted->visible_now) {
       return;
     }
     try {
       auto& route = *hosted->route;
-      if (type == NODE_ON_FOCUS) {
+      if (type == NODE_ON_KEY_EVENT) {
+        route.tab_reverse.reset();
+        const auto* input = OH_ArkUI_NodeEvent_GetInputEvent(event);
+        if (!input || OH_ArkUI_KeyEvent_GetType(input) != ARKUI_KEY_EVENT_DOWN ||
+            OH_ArkUI_KeyEvent_GetKeyCode(input) != ARKUI_KEYCODE_TAB) {
+          return;
+        }
+        std::uint64_t modifiers = 0;
+        OH_ArkUI_UIInputEvent_GetModifierKeyStates(input, &modifiers);
+        if ((modifiers & (ARKUI_MODIFIER_KEY_CTRL | ARKUI_MODIFIER_KEY_ALT)) != 0) return;
+        // ArkUI first navigates its own descendants. Only a blur of the whole scope hands Tab to HuxerUI.
+        route.tab_reverse = (modifiers & ARKUI_MODIFIER_KEY_SHIFT) != 0;
+      } else if (type == NODE_ON_FOCUS) {
         InternalAccess::SynchronizePlatformViewFocus(route.window, route.identity, false);
       } else if (InternalAccess::FocusedPlatformView(route.window) == route.identity) {
-        InternalAccess::SynchronizePlatformViewFocus(route.window, std::nullopt, false);
+        const auto reverse = std::exchange(route.tab_reverse, std::nullopt);
+        if (!reverse || !InternalAccess::MoveFocusFromPlatformView(route.window, route.identity, *reverse)) {
+          InternalAccess::SynchronizePlatformViewFocus(route.window, std::nullopt, false);
+        }
       }
     } catch (const std::exception& error) {
       Report(error);
@@ -234,7 +257,8 @@ struct HostedView {
     api.removeNodeEventReceiver(container.get(), OnContainerEvent);
     api.unregisterNodeEvent(view, NODE_ON_FOCUS);
     api.unregisterNodeEvent(view, NODE_ON_BLUR);
-    api.removeNodeEventReceiver(view, OnFocusEvent);
+    api.unregisterNodeEvent(view, NODE_ON_KEY_EVENT);
+    api.removeNodeEventReceiver(view, OnViewEvent);
     if (view_added) {
       api.removeChild(container.get(), view);
     }
@@ -379,6 +403,9 @@ void OhosPlatformViews::Commit(const RenderFrame& frame, float scale) {
   }
   std::erase_if(state.hosted, [&views](const auto& entry) { return !views.contains(entry.first); });
   std::erase_if(state.slices, [&slices](const auto& entry) { return !slices.contains(entry.first); });
+  for (const auto& [identity, hosted] : state.hosted) {
+    hosted->Commit();
+  }
   const auto focus = InternalAccess::FocusedPlatformView(state.window);
   if (focus) {
     const auto found = state.hosted.find(*focus);

@@ -68,6 +68,16 @@ export class HuxerUIFilePicker implements HuxerUIFilePickerHost {
     this.context = context;
   }
 
+  retainPlatformFile<T>(uri: string, writable: boolean, retain: (files: HuxerUIPickedFile[]) => T): T | undefined {
+    let result: T | undefined;
+    withGrantedFiles([uri], writable, (files) => {
+      if (files !== undefined) {
+        result = retain(files);
+      }
+    });
+    return result;
+  }
+
   async openFiles(token: string, multiple: boolean, suffixes: string): Promise<void> {
     const options = new picker.DocumentSelectOptions();
     options.maxSelectNumber = multiple ? 500 : 1;

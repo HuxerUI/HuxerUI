@@ -41,6 +41,8 @@ elseif (EMSCRIPTEN)
     set_property(TARGET example_platform_module APPEND PROPERTY
             LINK_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/web_timer.js"
     )
+elseif (CMAKE_SYSTEM_NAME STREQUAL "OHOS")
+    target_sources(example_platform_module PRIVATE ohos_timer.cpp)
 elseif (UNIX AND NOT APPLE)
     target_sources(example_platform_module PRIVATE
             color_stream.cpp

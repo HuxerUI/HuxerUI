@@ -1,6 +1,7 @@
 #include "timer.h"
 
-#if defined(_WIN32) || defined(__ANDROID__) || defined(__APPLE__) || defined(__EMSCRIPTEN__) || defined(__linux__)
+#if defined(_WIN32) || defined(__ANDROID__) || defined(__APPLE__) || defined(__EMSCRIPTEN__) || \
+    (defined(__linux__) && !defined(__OHOS__))
 #include "color_stream.h"
 #define HUXERUI_EXAMPLE_COLOR_STREAM 1
 #endif
