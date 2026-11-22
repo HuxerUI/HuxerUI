@@ -363,11 +363,12 @@ The platform foreground call remains deduplicated.
 ## IME and text input
 
 IME occlusion is not part of `safe_area`.
-Android IME Insets, the iOS keyboard frame, and future OHOS keyboard AvoidArea continue through the current logical viewport-resize path.
+Android IME Insets, the iOS keyboard frame, and future OHOS keyboard AvoidArea continue through the logical viewport-resize path.
+On Android API 30 and later, the host grows immediately behind a dismissing keyboard. When the viewport needs to shrink, the host limits occlusion to the current IME animation inset, then applies the latest destination inset when the animation ends. This keeps content drawn beneath the area that the keyboard has yet to cover.
 
 The platform computes the effective safe area after applying keyboard occlusion.
-When the keyboard covers the bottom system area, the submitted bottom inset is zero.
-When it hides, the platform restores the native navigation or home-indicator inset.
+On Android API 30 and later, the keyboard and system bar insets share the same window edge. After the IME reduces the viewport, the bottom safe area reserves any part of the navigation bar or cutout that remains inside it. This applies to both gesture and three-button navigation. The host reads the current bottom system inset from IME animation frames and the destination from the final dispatch.
+When the keyboard fully covers the bottom system area, the submitted bottom inset is zero. When it hides, the platform restores the native navigation or home-indicator inset.
 
 BringTextInputIntoView, selection handles, the selection menu, and platform caret geometry use the final logical viewport and host-view coordinate transforms exactly as they do today.
 They do not add platform-specific SafeArea branches.
