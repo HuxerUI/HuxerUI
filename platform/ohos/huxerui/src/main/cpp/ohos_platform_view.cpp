@@ -303,11 +303,12 @@ struct HostedView {
 };
 
 struct DrawingSlice {
-  DrawingSlice(ArkUI_NativeNodeAPI_1& api, ArkUI_NodeHandle root, OhosRenderer& renderer)
+  DrawingSlice(ArkUI_NativeNodeAPI_1& api, ArkUI_NodeHandle root, OhosRenderer& renderer, std::int32_t order)
       : api(api), root(root), renderer(renderer), node(CreateNode(api, ARKUI_NODE_CUSTOM)) {
     Set(api, node.get(), NODE_WIDTH_PERCENT, {.f32 = 1.0F});
     Set(api, node.get(), NODE_HEIGHT_PERCENT, {.f32 = 1.0F});
     Set(api, node.get(), NODE_HIT_TEST_BEHAVIOR, {.i32 = ARKUI_HIT_TEST_MODE_NONE});
+    Set(api, node.get(), NODE_Z_INDEX, {.i32 = order});
     Check(api.addNodeCustomEventReceiver(node.get(), OnDraw));
     Check(api.registerNodeCustomEvent(node.get(), ARKUI_NODE_CUSTOM_EVENT_ON_DRAW, 0, this));
     Check(api.addChild(root, node.get()));
@@ -319,14 +320,28 @@ struct DrawingSlice {
     api.removeChild(root, node.get());
   }
 
+  void Commit(const RenderScene& next_scene, std::optional<RenderSlice> next_slice, float next_scale, bool damaged) {
+    const bool repaint = damaged || slice != next_slice || scale != next_scale;
+    scene = next_scene;
+    slice = next_slice;
+    scale = next_scale;
+    if (repaint) {
+      api.markDirty(node.get(), NODE_NEED_RENDER);
+    }
+  }
+
   static void OnDraw(ArkUI_NodeCustomEvent* event) noexcept {
     auto* layer = static_cast<DrawingSlice*>(OH_ArkUI_NodeCustomEvent_GetUserData(event));
     auto* context = OH_ArkUI_NodeCustomEvent_GetDrawContextInDraw(event);
     auto* canvas = context ? static_cast<OH_Drawing_Canvas*>(OH_ArkUI_DrawContext_GetCanvas(context)) : nullptr;
     if (layer && canvas) {
       try {
-        layer->renderer.PaintSlice(canvas, layer->scene, layer->scale, layer->slice.first_command,
-                                   layer->slice.command_count);
+        if (layer->slice) {
+          layer->renderer.PaintSlice(canvas, layer->scene, layer->scale, layer->slice->first_command,
+                                     layer->slice->command_count);
+        } else {
+          layer->renderer.Paint(canvas, layer->scene, layer->scale);
+        }
       } catch (const std::exception& error) {
         Report(error);
       }
@@ -338,7 +353,7 @@ struct DrawingSlice {
   OhosRenderer& renderer;
   Node node;
   RenderScene scene;
-  RenderSlice slice;
+  std::optional<RenderSlice> slice;
   float scale = 1.0F;
 };
 
@@ -351,33 +366,33 @@ struct OhosPlatformViews::Impl {
   PlatformRegistry& registry;
   OhosRenderer& renderer;
   ForwardTouch forward_touch;
-  RenderScene scene;
-  float scale = 1.0F;
-  bool composed = false;
-  std::optional<RenderSlice> base_slice;
+  std::unique_ptr<DrawingSlice> base;
   std::map<std::uint64_t, std::unique_ptr<HostedView>> hosted;
   std::map<std::int32_t, std::unique_ptr<DrawingSlice>> slices;
 };
 
 OhosPlatformViews::OhosPlatformViews(ArkUI_NativeNodeAPI_1& api, ArkUI_NodeHandle root, UiWindow& window,
                                      PlatformRegistry& registry, OhosRenderer& renderer, ForwardTouch forward_touch)
-    : impl_(new Impl{api, root, window, registry, renderer, std::move(forward_touch), {}, 1.0F, false, {}, {}, {}}) {}
+    : impl_(new Impl{api, root, window, registry, renderer, std::move(forward_touch), {}, {}, {}}) {}
 
 OhosPlatformViews::~OhosPlatformViews() = default;
 
 void OhosPlatformViews::Commit(const RenderFrame& frame, const SemanticFrame* semantics, float scale) {
   auto& state = *impl_;
-  state.scene = frame.scene;
-  state.scale = scale;
-  state.composed = RenderSceneHasPlatformViews(frame.scene.root);
-  state.base_slice.reset();
-  if (!state.composed) {
+  const bool damaged = frame.damage.full || !frame.damage.rects.empty();
+  if (!state.base) {
+    // The XComponent below the drawing nodes owns input and accessibility.
+    state.base = std::make_unique<DrawingSlice>(state.api, state.root, state.renderer, 1);
+    Set(state.api, state.base->node.get(), NODE_BACKGROUND_COLOR, {.u32 = 0xFFF7F8FA});
+  }
+  if (!RenderSceneHasPlatformViews(frame.scene.root)) {
+    state.base->Commit(frame.scene, std::nullopt, scale, damaged);
     state.slices.clear();
     state.hosted.clear();
     return;
   }
-  // The base slice stays on the XComponent. Later slices use separate ArkUI nodes to draw above embedded views.
   const auto composition = BuildRenderComposition(frame.scene);
+  RenderSlice base_slice{};
   std::set<std::uint64_t> views;
   std::set<std::int32_t> slices;
   std::int32_t z_index = 0;
@@ -392,25 +407,20 @@ void OhosPlatformViews::Commit(const RenderFrame& frame, const SemanticFrame* se
       } else {
         hosted->Update(command);
       }
-      hosted->Position(*placement, order + 1);
+      hosted->Position(*placement, order + 2);
       views.insert(command.Identity());
     } else if (const auto& slice = std::get<RenderSlice>(layer); order == 0) {
-      state.base_slice = slice;
+      base_slice = slice;
     } else {
       auto& drawing = state.slices[order];
       if (!drawing) {
-        drawing = std::make_unique<DrawingSlice>(state.api, state.root, state.renderer);
-        Set(state.api, drawing->node.get(), NODE_Z_INDEX, {.i32 = order + 1});
+        drawing = std::make_unique<DrawingSlice>(state.api, state.root, state.renderer, order + 2);
       }
-      drawing->scene = frame.scene;
-      drawing->scale = scale;
-      drawing->slice = slice;
-      if (frame.damage.full || !frame.damage.rects.empty()) {
-        state.api.markDirty(drawing->node.get(), NODE_NEED_RENDER);
-      }
+      drawing->Commit(frame.scene, slice, scale, damaged);
       slices.insert(order);
     }
   }
+  state.base->Commit(frame.scene, base_slice, scale, damaged);
   std::erase_if(state.hosted, [&views](const auto& entry) { return !views.contains(entry.first); });
   std::erase_if(state.slices, [&slices](const auto& entry) { return !slices.contains(entry.first); });
   for (const auto& [identity, hosted] : state.hosted) {
@@ -429,18 +439,8 @@ void OhosPlatformViews::Commit(const RenderFrame& frame, const SemanticFrame* se
   }
 }
 
-void OhosPlatformViews::DrawBase(OH_Drawing_Canvas* canvas) const {
-  const auto& state = *impl_;
-  if (!state.composed) {
-    state.renderer.Paint(canvas, state.scene, state.scale);
-  } else if (state.base_slice) {
-    state.renderer.PaintSlice(canvas, state.scene, state.scale, state.base_slice->first_command,
-                              state.base_slice->command_count);
-  }
-}
-
 void OhosPlatformViews::Clear() noexcept {
-  impl_->scene = {};
+  impl_->base.reset();
   impl_->slices.clear();
   impl_->hosted.clear();
 }

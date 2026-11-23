@@ -8,9 +8,6 @@
 #include <arkui/ui_input_event.h>
 #include <hilog/log.h>
 #include <napi/native_api.h>
-#include <native_drawing/drawing_canvas.h>
-#include <native_drawing/drawing_gpu_context.h>
-#include <native_drawing/drawing_surface.h>
 #include <native_window/external_window.h>
 #include <rawfile/raw_file_manager.h>
 
@@ -296,8 +293,6 @@ private:
   bool active_ = false;
 };
 
-using DrawingContext = std::unique_ptr<OH_Drawing_GpuContext, decltype(&OH_Drawing_GpuContextDestroy)>;
-using DrawingSurface = std::unique_ptr<OH_Drawing_Surface, decltype(&OH_Drawing_SurfaceDestroy)>;
 using UiContext = std::unique_ptr<std::remove_pointer_t<ArkUI_ContextHandle>, void (*)(ArkUI_ContextHandle)>;
 using SurfaceNode = std::unique_ptr<std::remove_pointer_t<ArkUI_NodeHandle>, void (*)(ArkUI_NodeHandle)>;
 using SurfaceHolder = std::unique_ptr<OH_ArkUI_SurfaceHolder, decltype(&OH_ArkUI_SurfaceHolder_Dispose)>;
@@ -314,6 +309,7 @@ class OhosUiWindow;
 std::unique_ptr<OhosRuntime> runtime;
 std::unique_ptr<OhosUiWindow> attachment;
 std::uintptr_t next_frame_token = 0;
+bool in_frame_callback = false;
 
 class OhosUiWindow final : public UiWindow {
 public:
@@ -448,7 +444,7 @@ public:
   void SetConfiguration(ResourceConfiguration configuration, ThemeBrightness brightness) {
     if (scale_ != configuration.display_scale) {
       scale_ = configuration.display_scale;
-      if (surface_) {
+      if (HasViewport()) {
         UpdateViewport();
       }
     }
@@ -462,13 +458,13 @@ public:
   void SetSystemInsets(EdgeInsets insets, float window_height) {
     system_insets_px_ = insets;
     window_height_px_ = window_height;
-    if (surface_) {
+    if (HasViewport()) {
       UpdateViewport();
     }
   }
 
   void RequestFrameAt(double deadline) override {
-    if (!active_ || !surface_ || frame_token_) {
+    if (!active_ || !HasViewport() || frame_token_) {
       return;
     }
     const double delay = deadline - Now();
@@ -493,9 +489,24 @@ public:
     if (OH_ArkUI_PostFrameCallback(context_.get(), reinterpret_cast<void*>(frame_token_), OnFrame) != 0) {
       frame_token_ = 0;
       LogError("HuxerUI could not request an OHOS frame");
-    } else {
-      // Posting observes the next ArkUI frame. An asynchronous update also needs to request one.
+      return;
+    }
+    // Posting observes the next ArkUI frame without requesting one.
+    if (!in_frame_callback) {
       node_api_->markDirty(node_.get(), NODE_NEED_RENDER);
+      return;
+    }
+
+    // ArkUI clears the current render dirty flag after running its frame callbacks.
+    try {
+      DispatchToUiThread([token = frame_token_] {
+        if (attachment && attachment->frame_token_ == token) {
+          attachment->node_api_->markDirty(attachment->node_.get(), NODE_NEED_RENDER);
+        }
+      });
+    } catch (...) {
+      frame_token_ = 0;
+      throw;
     }
   }
 
@@ -524,7 +535,7 @@ public:
   ArkTsPlatformHost& ApplicationArkTsHost() { return static_cast<OhosRuntime&>(ApplicationRuntime()).ArkTsHost(); }
 
   bool Scroll(Point position, Point delta, bool touchpad, KeyModifiers modifiers) {
-    if (!active_ || !surface_ || (delta.x == 0.0F && delta.y == 0.0F)) {
+    if (!active_ || !HasViewport() || (delta.x == 0.0F && delta.y == 0.0F)) {
       return false;
     }
     modifiers.meta = pressed_keys_.contains(ARKUI_KEYCODE_META_LEFT) || pressed_keys_.contains(ARKUI_KEYCODE_META_RIGHT);
@@ -584,7 +595,7 @@ private:
 
   static void OnNodeEvent(ArkUI_NodeEvent* event) noexcept {
     auto* window = static_cast<OhosUiWindow*>(OH_ArkUI_NodeEvent_GetUserData(event));
-    if (!window || !window->active_ || !window->surface_) {
+    if (!window || !window->active_ || !window->HasViewport()) {
       return;
     }
     try {
@@ -665,11 +676,13 @@ private:
       return;
     }
     attachment->frame_token_ = 0;
+    const bool was_in_frame_callback = std::exchange(in_frame_callback, true);
     try {
       attachment->PaintFrame();
     } catch (const std::exception& error) {
       LogError(error.what());
     }
+    in_frame_callback = was_in_frame_callback;
   }
 
   void CancelFrame() noexcept {
@@ -681,9 +694,9 @@ private:
 
   void ReleaseSurface() noexcept {
     CancelFrame();
-    surface_.reset();
-    drawing_.reset();
     platform_window_ = nullptr;
+    pixel_width_ = 0;
+    pixel_height_ = 0;
     CancelInput();
   }
 
@@ -719,24 +732,17 @@ private:
         height > std::numeric_limits<std::int32_t>::max()) {
       return;
     }
-    if (surface_ && pixel_width_ == width && pixel_height_ == height) {
+    if (pixel_width_ == width && pixel_height_ == height) {
       return;
     }
     CancelFrame();
-    surface_.reset();
-    if (!drawing_) {
-      drawing_.reset(OH_Drawing_GpuContextCreate());
-    }
-    Require(static_cast<bool>(drawing_), "HuxerUI failed to create the OHOS drawing context");
-    const OH_Drawing_Image_Info info{static_cast<std::int32_t>(width), static_cast<std::int32_t>(height),
-                                     COLOR_FORMAT_RGBA_8888, ALPHA_FORMAT_PREMUL};
-    surface_.reset(OH_Drawing_SurfaceCreateOnScreen(drawing_.get(), info, platform_window_));
-    Require(static_cast<bool>(surface_), "HuxerUI failed to create the OHOS drawing surface");
     pixel_width_ = width;
     pixel_height_ = height;
     UpdateViewport();
     RequestFrameAt(Now());
   }
+
+  bool HasViewport() const noexcept { return pixel_width_ != 0; }
 
   void UpdateViewport() {
     const auto height = static_cast<float>(pixel_height_);
@@ -877,7 +883,7 @@ private:
   }
 
   void PaintFrame() {
-    if (!active_ || !surface_) {
+    if (!active_ || !HasViewport()) {
       return;
     }
     const FrameCommit& frame = BuildFrameOrErrorPage(LogError);
@@ -887,11 +893,6 @@ private:
       platform_views_.Clear();
       throw;
     }
-    auto* canvas = OH_Drawing_SurfaceGetCanvas(surface_.get());
-    Require(canvas != nullptr, "HuxerUI failed to prepare the OHOS drawing canvas");
-    OH_Drawing_CanvasClear(canvas, 0xFFF7F8FA);
-    platform_views_.DrawBase(canvas);
-    Require(OH_Drawing_SurfaceFlush(surface_.get()) == OH_DRAWING_SUCCESS, "HuxerUI failed to present the OHOS frame");
     accessibility_.Commit(frame.semantic_frame, scale_);
     if (frame.next_frame_deadline) {
       RequestFrameAt(*frame.next_frame_deadline);
@@ -921,8 +922,6 @@ private:
   std::size_t drop_events_registered_ = 0;
   std::uint64_t file_drag_session_ = 0;
   OHNativeWindow* platform_window_ = nullptr;
-  DrawingContext drawing_{nullptr, &OH_Drawing_GpuContextDestroy};
-  DrawingSurface surface_{nullptr, &OH_Drawing_SurfaceDestroy};
   OhosRenderer renderer_;
   OhosPlatformViews platform_views_;
   OhosTextInput text_input_;

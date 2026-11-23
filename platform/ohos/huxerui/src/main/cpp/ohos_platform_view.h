@@ -7,8 +7,6 @@
 
 #include <huxerui/render_scene.h>
 
-struct OH_Drawing_Canvas;
-
 namespace huxerui {
 class UiWindow;
 struct SemanticFrame;
@@ -28,7 +26,6 @@ public:
 
   // Uses visible semantic anchors to decide which embedded views are accessible. A null snapshot uses ArkUI defaults.
   void Commit(const RenderFrame& frame, const SemanticFrame* semantics, float scale);
-  void DrawBase(OH_Drawing_Canvas* canvas) const;
   void Clear() noexcept;
 
 private:
