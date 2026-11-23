@@ -1,7 +1,7 @@
 import { abilityAccessCtrl, bundleManager, common, Permissions, Want, wantAgent } from '@kit.AbilityKit';
 import { preferences } from '@kit.ArkData';
 import { reminderAgentManager } from '@kit.BackgroundTasksKit';
-import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { HuxerUIApplicationModule, HuxerUINotificationActivation, HuxerUISystemServicesHost } from './HuxerUIApplicationModule';
 
@@ -243,7 +243,7 @@ export class HuxerUISystemServices implements HuxerUISystemServicesHost {
           }
         }
       };
-      if (pending !== undefined && deviceInfo.sdkApiVersion >= 20) {
+      if (pending !== undefined) {
         try {
           await reminderAgentManager.updateReminder(pending, request);
           return NotificationStatus.Accepted;
@@ -252,8 +252,6 @@ export class HuxerUISystemServices implements HuxerUISystemServicesHost {
             return reminderFailure(error as BusinessError);
           }
         }
-      } else if (pending !== undefined) {
-        await this.cancelPendingReminder(pending);
       }
       await reminderAgentManager.publishReminder(request);
       return NotificationStatus.Accepted;

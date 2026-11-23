@@ -22,7 +22,7 @@ Task<std::optional<Bitmap>> RetainFrame(std::optional<Bitmap> frame) {
 }
 
 auto ImportBuffer() noexcept {
-  // The framework itself still loads on API 19, where the PixelMap import symbol is absent.
+  // PixelMap import from a native buffer requires API 22 and is optional at runtime.
   static const auto import = reinterpret_cast<decltype(&OH_PixelmapNative_CreatePixelmapFromNativeBuffer)>(
       dlsym(RTLD_DEFAULT, "OH_PixelmapNative_CreatePixelmapFromNativeBuffer"));
   return import;

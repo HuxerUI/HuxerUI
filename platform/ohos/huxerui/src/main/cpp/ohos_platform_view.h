@@ -11,6 +11,7 @@ struct OH_Drawing_Canvas;
 
 namespace huxerui {
 class UiWindow;
+struct SemanticFrame;
 
 namespace detail {
 
@@ -25,7 +26,8 @@ public:
                     PlatformRegistry& registry, OhosRenderer& renderer, ForwardTouch forward_touch);
   ~OhosPlatformViews();
 
-  void Commit(const RenderFrame& frame, float scale);
+  // Uses visible semantic anchors to decide which embedded views are accessible. A null snapshot uses ArkUI defaults.
+  void Commit(const RenderFrame& frame, const SemanticFrame* semantics, float scale);
   void DrawBase(OH_Drawing_Canvas* canvas) const;
   void Clear() noexcept;
 

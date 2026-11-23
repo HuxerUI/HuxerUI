@@ -207,7 +207,7 @@ export struct HuxerUISurface {
     }
     .width('100%')
     .height('100%')
-    // ArkUI's ArkTS callback preserves the source tool on API 19. Begin can repeat the first wheel delta.
+    // Use the ArkTS source tool to distinguish touchpad and mouse. Begin can repeat the first wheel delta.
     .onAxisEvent((event: AxisEvent): void => {
       if (event.action === AxisAction.UPDATE) {
         const touchpad = event.sourceTool === SourceTool.TOUCHPAD || event.source === SourceType.TouchScreen;

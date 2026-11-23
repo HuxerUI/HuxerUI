@@ -122,7 +122,7 @@ struct ParagraphSource {
 std::string NormalizeTextRun(std::string_view source, const ResolvedTextRun& run,
                              ParagraphSource* paragraph) {
   const auto bytes = source.substr(run.byte_start, run.byte_end - run.byte_start);
-  if (!paragraph && bytes.find_first_of(std::string_view("\r\0\xE2", 3)) == bytes.npos) {
+  if (!paragraph && bytes.find_first_of("\r\xE2") == bytes.npos) {
     return std::string(bytes);
   }
 
@@ -146,9 +146,6 @@ std::string NormalizeTextRun(std::string_view source, const ResolvedTextRun& run
     } else {
       if (hard_break) {
         result.push_back('\n');
-      } else if (point.value == 0) {
-        // API 19 only accepts NUL-terminated strings. Preserve the invisible character's index.
-        result.append("\xE2\x81\xA0");
       } else {
         result.append(source.substr(byte, point.byte_length));
       }
@@ -158,7 +155,7 @@ std::string NormalizeTextRun(std::string_view source, const ResolvedTextRun& run
           paragraph->text.push_back(static_cast<char16_t>(0xD800U + (scalar >> 10U)));
           paragraph->text.push_back(static_cast<char16_t>(0xDC00U + (scalar & 0x3FFU)));
         } else {
-          paragraph->text.push_back(hard_break ? u'\n' : point.value == 0 ? u'\u2060' : char16_t(point.value));
+          paragraph->text.push_back(hard_break ? u'\n' : static_cast<char16_t>(point.value));
         }
         paragraph->boundaries.push_back({static_cast<TextOffset>(paragraph->text.size()), offset, hard_break});
       }
@@ -203,10 +200,13 @@ Paragraph Shape(const AttributedText& text, const TextStyle& style, float width,
       }
       continue;
     }
-    auto run_style = MakeStyle(run.style, options.shaping, fonts, run.background);
     const auto utf8 = NormalizeTextRun(source, run, paragraph_source);
+    if (utf8.empty()) {
+      continue;
+    }
+    auto run_style = MakeStyle(run.style, options.shaping, fonts, run.background);
     OH_Drawing_TypographyHandlerPushTextStyle(handler.get(), run_style.get());
-    OH_Drawing_TypographyHandlerAddText(handler.get(), utf8.c_str());
+    OH_Drawing_TypographyHandlerAddEncodedText(handler.get(), utf8.data(), utf8.size(), TEXT_ENCODING_UTF8);
     OH_Drawing_TypographyHandlerPopTextStyle(handler.get());
   }
   auto typography = Own<OH_Drawing_DestroyTypography>(OH_Drawing_CreateTypography(handler.get()));
@@ -271,7 +271,7 @@ std::vector<Line> ReadLines(const Paragraph& paragraph, const ParagraphSource& s
     }
     auto first = scalar_at(line.startIndex);
     if (i + 1 == count && line.width == 0 && boundaries.back().follows_break) {
-      // Some API 19 builds include the final break in the synthetic empty line's range.
+      // Native Drawing can start the synthetic empty line at the break. The caret belongs after it.
       first = boundaries.size() - 1;
     }
     lines.push_back({{
@@ -561,7 +561,7 @@ private:
     }
     std::vector<std::vector<GraphemeBox>> geometry(lines_.size());
     if (!source_.text.empty() && !lines_.empty()) {
-      // API 19 paragraph range queries can return no boxes. Keep the shaped line advances and resolve visual order.
+      // Map shaped line advances to grapheme boundaries in visual order for caret and selection geometry.
       auto native_lines = Own<OH_Drawing_DestroyTextLines>(
           OH_Drawing_TypographyGetTextLines(paragraph_.typography.get()));
       auto bidi = Own<ubidi_close>(ubidi_open());

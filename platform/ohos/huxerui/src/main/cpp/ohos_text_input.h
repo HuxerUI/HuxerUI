@@ -27,6 +27,8 @@ public:
   void RequestShowKeyboard(TextInputSessionId session_id) override;
   void RequestHideKeyboard(TextInputSessionId session_id) override;
 
+  // Requests the system keyboard for the current editable session, if one has started.
+  void ShowKeyboard();
   bool HandleBack();
   napi_value HandleCommand(napi_callback_info info);
   napi_value ReadContext(napi_callback_info info);

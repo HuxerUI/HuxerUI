@@ -1,5 +1,6 @@
 set(HUXERUI_OHOS_CPP_DIR "${HUXERUI_PROJECT_DIR}/platform/ohos/huxerui/src/main/cpp")
 set(HUXERUI_PLATFORM_SOURCE_FILES
+        "${HUXERUI_OHOS_CPP_DIR}/ohos_accessibility.cpp"
         "${HUXERUI_OHOS_CPP_DIR}/ohos_adapter.cpp"
         "${HUXERUI_OHOS_CPP_DIR}/ohos_bitmap.cpp"
         "${HUXERUI_OHOS_CPP_DIR}/ohos_clipboard.cpp"

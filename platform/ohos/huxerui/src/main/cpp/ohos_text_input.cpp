@@ -185,6 +185,10 @@ void OhosTextInput::RequestHideKeyboard(TextInputSessionId session_id) {
   }
 }
 
+void OhosTextInput::ShowKeyboard() {
+  if (state_.session_id && !configuration_.read_only) RequestShowKeyboard(state_.session_id);
+}
+
 bool OhosTextInput::HandleBack() {
   if (!show_keyboard_) {
     return false;

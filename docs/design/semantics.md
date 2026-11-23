@@ -692,7 +692,7 @@ The presentation does not create a SnackBar role, trap focus, or move focus when
 Adapters with platform accessibility support retain the newest `SemanticFrame` and cache retained platform objects by SemanticNodeId.
 Platform objects never retain MountedNode or NodeExtension pointers.
 
-The Windows, macOS, Android, and iOS bridges are implemented.
+Windows, macOS, Android, iOS, and HarmonyOS implement platform bridges.
 
 ### Windows
 
@@ -804,6 +804,16 @@ The bridge inserts that view at the anchor's semantic sibling position and does 
 HuxerUI slice and clipping views remain non-elements, while the PlatformView continues to own its labels, descendants, editing behavior, and actions.
 The iOS frame transaction commits PlatformViews before accessibility and accessibility before paint invalidation so every platform query observes one coherent frame.
 
+### HarmonyOS
+
+The XComponent publishes the committed `SemanticFrame` through the node-based ArkUI accessibility provider. The rendering host uses the same XComponent's `SurfaceHolder`, and ArkUI exposes embedded PlatformViews through its own hierarchy.
+
+Provider node IDs preserve UiWindow's semantic identity, with a reserved ID for the synthetic root. The provider supplies bounds in local physical pixels and ArkUI accounts for the host's screen position. Embedded views are separate ArkUI subtrees. Their accessibility follows the corresponding semantic anchor's visibility, including when a modal excludes the background.
+
+System actions use the existing UiWindow routes for activation, scrolling, range adjustment, and text editing. Screen-reader focus stays separate from input focus. Secure editors omit their text and selection. Queries and actions arriving on a Binder thread post to the application thread and cancel if they time out before execution. Surface detachment invalidates queued work before disposing the provider.
+
+The provider can expose current range and collection metadata and announce live-region changes. ArkUI's provider actions have no dedicated operation for absolute range assignment, dismissal, or application-defined custom actions.
+
 ## Invalidation and performance
 
 Semantic dirtiness is separate from paint dirtiness.
@@ -865,7 +875,7 @@ Dedicated macOS accessibility fixtures and manual screen-reader validation remai
 Manual validation uses the platform screen readers and accessibility inspectors available on each platform.
 Unavailable platforms and tools remain explicitly unverified.
 
-Windows UI Automation, AppKit, Android AccessibilityNodeProvider, and UIKit consume the shared contract.
+Windows UI Automation, AppKit, Android AccessibilityNodeProvider, UIKit, and HarmonyOS ArkUI consume the shared contract.
 Linux and Web do not provide platform accessibility mappings, and those bridges are not planned.
 
 Shared public API and UiWindow changes require common tests and every affected platform build available locally.

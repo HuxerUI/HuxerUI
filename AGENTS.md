@@ -245,7 +245,7 @@ Include `linux_internal.h` before any huxerui header in Linux sources so the pla
 
 HarmonyOS platform configuration lives in `cmake/platform/OHOS.cmake`. The Hvigor project under `platform/ohos/` contains the `huxerui` HAR and `example_runner` HAP modules. The `huxerui` module owns the ArkTS host and the C++ sources under `src/main/cpp`. The HAR supplies `UIAbility` lifecycle and `ContentSlot` hosting, and the application target links the C++ backend and Node-API registration into its shared library. The C++ backend owns the Runtime and UiWindow on the ArkUI thread. Recreate platform drawing resources when the surface changes while retaining the mounted UI on the same attachment. Keep coordinates in logical units in UiWindow and convert at the ArkUI boundary.
 
-The experimental arm64 runner targets API 19. Keep local SDK paths, signing material, and device profiles out of tracked files.
+The experimental arm64 runner requires HarmonyOS 6.0.0 (API 20). Keep local SDK paths, signing material, and device profiles out of tracked files.
 
 `ohos_adapter.cpp` owns the application and surface lifecycle. `ohos_renderer.cpp` replays PaintCommands, and `ohos_text_layout.cpp` owns Native Drawing typography and maps normalized line ranges and glyph advances to the source's UTF-16 grapheme boundaries. Use the system ICU bidi API when mapping the typography's logical advances into visual order.
 

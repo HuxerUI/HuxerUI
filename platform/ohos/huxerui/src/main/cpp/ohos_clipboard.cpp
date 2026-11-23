@@ -51,7 +51,7 @@ bool AddHtml(OH_UdmfRecord* record, const std::string& html, const std::optional
 
 bool AddBytes(OH_UdmfRecord* record, const char* type, std::span<const std::byte> bytes) {
   auto* data = reinterpret_cast<const unsigned char*>(bytes.data());
-  // The API 19 header is mutable, but UDMF copies the input into its own record.
+  // UDMF copies the input into its own record even though the parameter is mutable.
   return OH_UdmfRecord_AddGeneralEntry(record, type, const_cast<unsigned char*>(data), bytes.size()) == UDMF_E_OK;
 }
 

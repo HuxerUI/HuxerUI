@@ -15,7 +15,8 @@ Each backend uses platform lifecycle, input, text, accessibility, file, network,
 | iOS | Core Graphics and Core Text | Yes | UIKit accessibility | Yes | Yes | Application permissions | User Notifications | No |
 
 Capabilities not listed as implemented are not implied by the shared API.
-The HarmonyOS API 19 backend is experimental. The [HarmonyOS example runner](../../platform/ohos/README.md) builds and runs repository examples that use the current backend capabilities.
+The experimental HarmonyOS backend requires HarmonyOS 6.0.0 (API 20) or later. The [HarmonyOS example runner](../../platform/ohos/README.md) builds and runs repository examples that use the current backend capabilities.
+The system screen reader accesses HuxerUI controls and embedded PlatformViews through ArkUI.
 
 See [Application Permissions](../design/permissions.md#supported-capabilities) for supported queries, requests, and settings targets on each operating system.
 

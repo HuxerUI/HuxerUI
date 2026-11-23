@@ -328,10 +328,8 @@ napi_value OhosHttpTransport::Receive(napi_callback_info info) {
   case Event::Error:
     if (count == 3) {
       const int code = Integer(state.env, args[2]);
-      if (code == -2 || code == -3) {
-        operation->Fail(HttpErrorCode::Unsupported, code == -2
-            ? "HuxerUI streaming HTTP on HarmonyOS requires API 20"
-            : "HuxerUI HarmonyOS HTTP did not provide incremental response headers");
+      if (code == -3) {
+        operation->Fail(HttpErrorCode::Unsupported, "HuxerUI HarmonyOS HTTP did not provide streaming headers");
       } else {
         const auto category = code == 1007900028 ? HttpErrorCode::Timeout : HttpErrorCode::Transport;
         operation->Fail(category, "HuxerUI OHOS HTTP failed (" + std::to_string(code) + ")");

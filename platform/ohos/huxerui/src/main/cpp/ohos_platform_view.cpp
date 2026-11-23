@@ -5,6 +5,7 @@
 #include <arkui/ui_input_event.h>
 #include <hilog/log.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <map>
@@ -17,6 +18,7 @@
 #include <utility>
 
 #include <huxerui/ohos/platform_registry.h>
+#include <huxerui/semantics.h>
 
 #include "internal_access.h"
 #include "runtime/mounted_node_internal.h"
@@ -169,6 +171,13 @@ struct HostedView {
     }
   }
 
+  void SetAccessible(bool accessible) {
+    if (accessible == accessible_now) return;
+    Set(api, container.get(), NODE_ACCESSIBILITY_MODE,
+        {.i32 = accessible ? ARKUI_ACCESSIBILITY_MODE_AUTO : ARKUI_ACCESSIBILITY_MODE_DISABLED_FOR_DESCENDANTS});
+    accessible_now = accessible;
+  }
+
   void Commit() {
     route->active = true;
     if (factory->commit) factory->commit(instance);
@@ -190,7 +199,7 @@ struct HostedView {
         auto& route = *hosted->route;
         const Point position{origin.x + OH_ArkUI_PointerEvent_GetX(input), origin.y + OH_ArkUI_PointerEvent_GetY(input)};
         hosted->forwarding_touch = InternalAccess::HitTestPlatformView(route.window, position) != route.identity;
-        // API 19 blocks the child tree by taking the touch on the container. Send that touch to UiWindow.
+        // When HuxerUI content covers the embedded view, block its child tree and forward the touch to UiWindow.
         OH_ArkUI_PointerEvent_SetInterceptHitTestMode(input, hosted->forwarding_touch ? HTM_BLOCK : HTM_DEFAULT);
       } else if (hosted->forwarding_touch) {
         hosted->forward_touch(input, origin);
@@ -287,6 +296,7 @@ struct HostedView {
   Rect viewport;
   Rect world_bounds;
   bool visible_now = true;
+  bool accessible_now = true;
   bool view_added = false;
   bool container_added = false;
   bool forwarding_touch = false;
@@ -355,7 +365,7 @@ OhosPlatformViews::OhosPlatformViews(ArkUI_NativeNodeAPI_1& api, ArkUI_NodeHandl
 
 OhosPlatformViews::~OhosPlatformViews() = default;
 
-void OhosPlatformViews::Commit(const RenderFrame& frame, float scale) {
+void OhosPlatformViews::Commit(const RenderFrame& frame, const SemanticFrame* semantics, float scale) {
   auto& state = *impl_;
   state.scene = frame.scene;
   state.scale = scale;
@@ -404,6 +414,10 @@ void OhosPlatformViews::Commit(const RenderFrame& frame, float scale) {
   std::erase_if(state.hosted, [&views](const auto& entry) { return !views.contains(entry.first); });
   std::erase_if(state.slices, [&slices](const auto& entry) { return !slices.contains(entry.first); });
   for (const auto& [identity, hosted] : state.hosted) {
+    // A modal or a Semantics modifier can exclude the anchor even while ArkUI still draws the view.
+    hosted->SetAccessible(!semantics || std::ranges::any_of(semantics->nodes, [identity](const SemanticNode& node) {
+      return node.platform_view_identity == identity && !node.offscreen;
+    }));
     hosted->Commit();
   }
   const auto focus = InternalAccess::FocusedPlatformView(state.window);

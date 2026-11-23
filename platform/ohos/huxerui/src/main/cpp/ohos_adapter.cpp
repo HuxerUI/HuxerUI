@@ -42,6 +42,7 @@
 #include "internal_access.h"
 #include "text/text_internal.h"
 
+#include "ohos_accessibility.h"
 #include "ohos_clipboard.h"
 #include "ohos_file_picker.h"
 #include "ohos_http.h"
@@ -329,6 +330,7 @@ public:
         platform_views_(*node_api_, root_.get(), *this, InternalAccess::ApplicationRegistry(application), renderer_,
                         [this](const ArkUI_UIInputEvent* input, Point origin) { HandleTouch(input, origin); }),
         text_input_(*this, node_.get(), scale_, env, text_input_host),
+        accessibility_(*this, text_input_),
         file_picker_(std::make_shared<OhosFilePicker>(env, picker_host)) {
     Require(root_ && node_, "HuxerUI could not create the OHOS surface node");
     Require(static_cast<bool>(holder_), "HuxerUI could not create the OHOS surface holder");
@@ -355,6 +357,7 @@ public:
   }
 
   ~OhosUiWindow() override {
+    accessibility_.Detach();
     Retire();
     if (status_bar_callback_) {
       napi_delete_reference(env_, status_bar_callback_);
@@ -428,6 +431,7 @@ public:
     // Let the HuxerUI surface consume keys before ArkUI falls back to moving physical focus.
     OH_ArkUI_FocusSetKeyProcessingMode(context_.get(), ARKUI_KEY_PROCESSING_MODE_FOCUS_ANCESTOR_EVENT);
     Require(OH_ArkUI_XComponent_Initialize(node_.get()) == 0, "HuxerUI could not initialize the OHOS surface");
+    if (!accessibility_.Attach(node_.get())) LogError("HuxerUI could not register the OHOS accessibility provider");
   }
 
   void SetActive(bool active) {
@@ -878,7 +882,7 @@ private:
     }
     const FrameCommit& frame = BuildFrameOrErrorPage(LogError);
     try {
-      platform_views_.Commit(frame.render_frame, scale_);
+      platform_views_.Commit(frame.render_frame, frame.semantic_frame.get(), scale_);
     } catch (...) {
       platform_views_.Clear();
       throw;
@@ -888,6 +892,7 @@ private:
     OH_Drawing_CanvasClear(canvas, 0xFFF7F8FA);
     platform_views_.DrawBase(canvas);
     Require(OH_Drawing_SurfaceFlush(surface_.get()) == OH_DRAWING_SUCCESS, "HuxerUI failed to present the OHOS frame");
+    accessibility_.Commit(frame.semantic_frame, scale_);
     if (frame.next_frame_deadline) {
       RequestFrameAt(*frame.next_frame_deadline);
     }
@@ -921,6 +926,7 @@ private:
   OhosRenderer renderer_;
   OhosPlatformViews platform_views_;
   OhosTextInput text_input_;
+  OhosAccessibility accessibility_;
   std::shared_ptr<OhosFilePicker> file_picker_;
   std::uint64_t pixel_width_ = 0;
   std::uint64_t pixel_height_ = 0;

@@ -1,5 +1,5 @@
 import { url } from '@kit.ArkTS';
-import { BusinessError, deviceInfo } from '@kit.BasicServicesKit';
+import { BusinessError } from '@kit.BasicServicesKit';
 import { rcp } from '@kit.RemoteCommunicationKit';
 import { HuxerUIApplicationModule, HuxerUIHttpHost } from './HuxerUIApplicationModule';
 
@@ -141,10 +141,6 @@ export class HuxerUIHttp implements HuxerUIHttpHost {
 
   async start(token: string, address: string, method: string, fields: string[][], body: ArrayBuffer,
     streaming: boolean): Promise<void> {
-    if (streaming && deviceInfo.sdkApiVersion < 20) {
-      this.module.httpEvent(token, HttpEvent.Error, -2);
-      return;
-    }
     try {
       const request = new Request(this.module, token, address);
       this.requests.set(token, request);
