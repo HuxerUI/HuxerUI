@@ -386,7 +386,7 @@ Only already-admitted system executions can continue their bounded nested cleanu
 
 Closing a UiWindow does not by itself cancel system work. The existing quit_on_last_window_closed policy still controls whether closing the last owned desktop window requests application shutdown; active tasks do not silently override it. An initially windowless Runtime does not request exit merely because no window exists. Explicit Quit remains effective. BackgroundTask requests already accepted for future system delivery remain installed by default; RequestStop explicitly withdraws them.
 
-Business checkpoints are saved incrementally, not only during stop. After cold activation the backend reconciles platform requests it can actually establish and publishes Pending or another justified state. Framework snapshots, streamed results, attempt counters, and prior terminal records are not persistent. ContinuedTask and OngoingTask do not silently restart after process death; the application reconstructs business state and initiates a new eligible execution. FileReference access retains its existing lifetime and grant rules, and an in-memory or temporary reference does not become durable job input. Ordinary HttpClient transports do not become operating-system-owned background transfer sessions.
+Business checkpoints are saved incrementally, not only during stop. After cold activation the backend reconciles platform requests it can actually establish and publishes Pending or another justified state. HarmonyOS retains the latest background snapshot for cross-process observation. Applications own durable history, streamed results, and attempt counters. ContinuedTask and OngoingTask do not silently restart after process death; the application reconstructs business state and initiates a new eligible execution. FileReference access retains its existing lifetime and grant rules, and an in-memory or temporary reference does not become durable job input. Ordinary HttpClient transports do not become operating-system-owned background transfer sessions.
 
 ## Platform mapping
 
@@ -395,6 +395,7 @@ Business checkpoints are saved incrementally, not only during stop. After cold a
 | Android API 23+ | JobScheduler, with eligible cold activation | Appropriately declared foreground service | Appropriately declared foreground service |
 | iOS/iPadOS 15-25 | BGProcessingTask, with eligible cold activation | Unsupported | Generic ongoing sessions unsupported |
 | iOS/iPadOS 26+ | BGProcessingTask, with eligible cold activation | BGContinuedProcessingTask when compiled with the iOS 26 SDK or later | Generic ongoing sessions unsupported |
+| HarmonyOS API 20+ | WorkScheduler in a windowless extension process | Continuous task in data-transfer mode | Continuous task in a configured activity mode |
 | macOS | NSBackgroundActivityScheduler while the process lives | Process-local | Process-local |
 | Windows and Linux | Unsupported initially | Process-local | Process-local |
 | Web | Unsupported initially | Unsupported initially | Unsupported initially |
@@ -413,6 +414,12 @@ iOS preserves the deployment minimum while compiling the continued-processing pa
 
 iOS retains only the submitted background schedule and its correlation token in application preferences so cold delivery can preserve constraints on Retry. If a delivered grant has neither recoverable scheduling data nor a platform pending snapshot, the handler can complete and Retry reports Unavailable.
 
+HarmonyOS runs deferred tasks through an application-declared `HuxerUIBackgroundTaskExtensionAbility`. It initializes its own Runtime with the same application library. A private, locked catalog stores the latest request and snapshot per declaration. Work IDs are never reused by the catalog, including across retries. The extension checks that the callback still matches a pending request before bootstrapping and atomically claims it at handler entry. A withdrawal before that claim persists a terminal Stopped record. Once claimed, a withdrawal requests cooperative stop and the observer waits for the execution's terminal snapshot. The observing Runtime publishes snapshots without admitting a local handler. Retry schedules a fresh work ID with the original conditions and retains the request token so existing waiters follow it.
+
+An observing Runtime retains an open descriptor for each active request it observes. Before a new submission replaces that request, the transport writes the old terminal snapshot to the same file and unlinks it under the catalog lock. A suspended observer can still read the saved snapshot through its descriptor and deliver it before the latest state. Closing the descriptor or exiting the process releases the retained file.
+
+HarmonyOS requests continuous execution through the ArkTS ability. The application configures its actual modes by declaration identifier. The request stays Pending until the system returns a grant. A withdrawal racing with admission releases the resulting allowance without starting the handler. System cancellation or suspension interrupts only the associated grant. The host keeps API 20's single slot occupied until release is confirmed and uses per-task stopping on API 21 and later. Data-transfer progress updates the notification ID returned for that allowance.
+
 Platform manifests, Info.plist, entitlements, permissions, notification content, and packaging remain application-shell responsibilities. CMake can select reusable platform code and frameworks but does not generate or mutate those declarations. GetCapabilities does not grant permission, and starting a system task never implicitly creates a window or displays a permission prompt.
 
 ## Agent application behavior
@@ -426,10 +433,6 @@ Android execution requires acceptance under an appropriate real foreground-servi
 Remote generation and client execution have separate lifetimes. A server-owned run may continue after the client loses its execution allowance only if the application protocol provides that behavior. Persist a server run ID and sequence/checkpoint so foreground recovery can query or resume delivery; completion notifications may use a separately supported notification/push integration. Stopping a local task does not automatically cancel a remote job, and neither an SSE nor WebSocket connection is promised to survive suspension or process termination.
 
 ## Future backend extension
-
-Shared contracts use capabilities and platform outcomes rather than a closed platform list. A future HarmonyOS backend can reuse the three declarations while implementing application-thread dispatch, platform admission and expiration, notification/presentation, platform completion, cold entry where available, and host-owned configuration. This is an extension direction, not a support claim or an implementation included in the initial platform matrix.
-
-WorkScheduler and its ExtensionAbility are candidates for finite discretionary work; permitted continuous-background modes are candidates for eligible finite continued or ongoing activities. Actual mapping must be established by supported SDK version, device class, permissions, task purpose, concurrency limits, and platform lifecycle. A computational mode or data-transfer mode is not automatically available or appropriate for every Agent application. An asynchronous platform admission result can arrive while the request is Pending; the handler starts only after a grant, and platform rejection is reflected in TaskState. Start must not block the application thread waiting for a platform promise. No fourth task class or HarmonyOS-specific enum in shared declarations is required merely to add the backend.
 
 A backend whose background handler runs in another process creates its own application execution context and services there. State objects, service instances, and standard snapshots are not shared C++ memory across those processes; durable business data and any supported platform snapshot relay need explicit platform integration. The backend must report Unsupported for unavailable semantics rather than emulate them with a timer or promise uninterrupted background execution.
 

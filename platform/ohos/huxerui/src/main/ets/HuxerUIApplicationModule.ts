@@ -31,6 +31,21 @@ export interface HuxerUISystemServicesHost {
   perform(token: string, operation: number, args: string[]): void;
 }
 
+export interface HuxerUISystemTaskHost {
+  readonly canContinue: boolean;
+  readonly canRunOngoing: boolean;
+  submit(token: string, identifier: string, ongoing: boolean, title: string, subtitle: string): number;
+  release(token: string): number;
+  reportProgress(token: string, percent: number): number;
+  updatePresentation(token: string, title: string, subtitle: string): number;
+  close(): number;
+}
+
+export interface HuxerUIBackgroundTaskHost {
+  submit(id: number, delay: number, network: boolean, power: boolean): number;
+  withdraw(id: number, network: boolean, power: boolean): number;
+}
+
 export interface HuxerUINotificationActivation {
   identifier: string;
   payload: string;
@@ -49,9 +64,10 @@ export interface HuxerUIHttpHost {
 }
 
 export interface HuxerUIApplicationModule {
-  start(context: common.UIAbilityContext, locale: string, scale: number, services: HuxerUISystemServicesHost,
+  start(context: common.Context, locale: string, scale: number, services: HuxerUISystemServicesHost,
     http: HuxerUIHttpHost, activation: HuxerUIActivation | undefined, files: HuxerUIFilePickerHost,
-    extensions: Object | undefined): void;
+    extensions: Object | undefined, systemTasks: HuxerUISystemTaskHost | undefined,
+    backgroundTasks?: HuxerUIBackgroundTaskHost): void;
   stop(): void;
   setActive(active: boolean): void;
   setConfiguration(locale: string, scale: number, systemDark: boolean): void;
@@ -69,6 +85,11 @@ export interface HuxerUIApplicationModule {
   completeSaveFile(token: string, saved: boolean): void;
   completeFileAccess(token: string, files: HuxerUIPickedFile[], status: number, canPersist: boolean): void;
   completeSystemService(token: string, result: number): void;
+  systemTaskEvent(token: string, event: number, result: number, message?: string): void;
+  prepareBackgroundWork(directory: string, id: number): boolean;
+  backgroundWorkEvent(id: number, start: boolean): void;
+  readBackgroundWork(): number[] | undefined;
+  reconcileBackgroundWork(missing: number[]): void;
   activate(activation: HuxerUIActivation): void;
   httpEvent(token: string, type: number, value?: string | number | ArrayBuffer, status?: number,
     headers?: string[][]): void;

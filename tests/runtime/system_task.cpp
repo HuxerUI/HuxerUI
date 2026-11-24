@@ -49,6 +49,15 @@ public:
     return SystemTaskResult<void>::Success();
   }
 
+#if defined(__OHOS__)
+  bool ObservesWithdrawal(const SystemTaskRequest&) const noexcept override { return observes_withdrawal; }
+
+  void Observe(const SystemTaskRequest& request, TaskStatus status, std::optional<TaskStopReason> reason = {}) {
+    on_event_({.kind = SystemTaskEvent::Kind::Observed, .request = request,
+               .observation = detail::SystemTaskObservation{status, reason}});
+  }
+#endif
+
   std::shared_ptr<SystemTaskGrant> Grant(const SystemTaskRequest& request) {
     auto grant = std::make_shared<SystemTaskGrant>([this](SystemTaskOutcome outcome) {
       outcomes.push_back(outcome);
@@ -68,6 +77,9 @@ public:
   std::vector<std::string> withdrawals;
   std::vector<SystemTaskOutcome> outcomes;
   bool reject_withdrawal = false;
+#if defined(__OHOS__)
+  bool observes_withdrawal = false;
+#endif
 };
 
 class TaskPlatform final : public TestPlatform {
@@ -112,6 +124,31 @@ TEST_CASE("System tasks validate one installation list before invoking applicati
   REQUIRE_THROWS_AS(RuntimeLifetime(app, platform), std::invalid_argument);
   REQUIRE(hooks == 0);
 }
+
+#if defined(__OHOS__)
+TEST_CASE("Detailed system task completion forwards the execution error at most once") {
+  const SystemTaskError error{SystemTaskErrorCode::Handler, "HuxerUI test handler failed"};
+  std::vector<SystemTaskOutcome> outcomes;
+  std::optional<SystemTaskError> delivered;
+  SystemTaskGrant grant([&](SystemTaskOutcome outcome, const std::optional<SystemTaskError>& diagnostic) {
+    outcomes.push_back(outcome);
+    delivered = diagnostic;
+    return SystemTaskResult<void>::Success();
+  });
+
+  SECTION("Finishing consumes the callback") {
+    REQUIRE(grant.Finish(SystemTaskOutcome::Failed, error).Succeeded());
+    REQUIRE(grant.Finish(SystemTaskOutcome::Interrupted).Succeeded());
+    REQUIRE(outcomes == std::vector{SystemTaskOutcome::Failed});
+    REQUIRE(delivered == error);
+  }
+  SECTION("Revoking discards the callback") {
+    grant.Revoke();
+    REQUIRE(grant.Finish(SystemTaskOutcome::Failed, error).Succeeded());
+    REQUIRE(outcomes.empty());
+  }
+}
+#endif
 
 TEST_CASE("Continued tasks admit independent requests and retain the selected terminal identity") {
   TaskPlatform platform;
@@ -229,6 +266,51 @@ TEST_CASE("Background scheduling is lazy, retains retries, and records failed wi
   platform.RunPlatformModuleTasks();
   REQUIRE(attempts == 2);
   REQUIRE(observed->Status() == TaskStatus::Completed);
+}
+
+#if defined(__OHOS__)
+TEST_CASE("Observing remote background work never invokes the handler and waits for the stop outcome") {
+  TaskPlatform platform;
+  const BackgroundTask task("test.remote", [](BackgroundTask::Context) -> Task<BackgroundTask::Result> {
+    FAIL("Remote observation entered the local handler");
+    co_return BackgroundTask::Result::Completed;
+  });
+  platform.transport->observes_withdrawal = true;
+  const Application app(EmptyRoot, {.system_tasks = {task}});
+  RuntimeLifetime runtime(app, platform, std::nullopt);
+  const SystemTaskRequest request{.identifier = std::string(task.Identifier()), .token = "first"};
+  platform.transport->Observe(request, TaskStatus::Running);
+  platform.RunPlatformModuleTasks();
+  REQUIRE(task.GetState().Status() == TaskStatus::Running);
+
+  std::optional<TaskState> observed;
+  UseApplicationTaskScope().Launch([&]() -> Task<void> { observed = (co_await task.WaitAsync()).Value(); });
+  REQUIRE(task.RequestStop().Value() == StopRequestStatus::Requested);
+  platform.transport->Observe(request, TaskStatus::Running);
+  platform.RunPlatformModuleTasks();
+  REQUIRE(task.GetState().Status() == TaskStatus::Stopping);
+  REQUIRE_FALSE(observed);
+
+  platform.transport->Observe(request, TaskStatus::Stopped, TaskStopReason::Requested);
+  platform.RunPlatformModuleTasks();
+  REQUIRE(observed);
+  REQUIRE(observed->Status() == TaskStatus::Stopped);
+  REQUIRE(observed->StopReason() == TaskStopReason::Requested);
+}
+#endif
+
+TEST_CASE("A background grant canceled at handler entry does not run the handler") {
+  TaskPlatform platform;
+  const BackgroundTask task("test.entry", [](BackgroundTask::Context) -> Task<BackgroundTask::Result> {
+    FAIL("Canceled background handler ran");
+    co_return BackgroundTask::Result::Completed;
+  });
+  const Application app(EmptyRoot, {.system_tasks = {task}});
+  RuntimeLifetime runtime(app, platform, std::nullopt);
+  auto grant = platform.transport->Grant({.identifier = std::string(task.Identifier()), .token = "cancelled"});
+  grant->begin = [] { return false; };
+  platform.RunPlatformModuleTasks();
+  REQUIRE(task.GetState().Status() == TaskStatus::Stopped);
 }
 
 TEST_CASE("Cooperative stop retires a callback before bounded asynchronous cleanup") {

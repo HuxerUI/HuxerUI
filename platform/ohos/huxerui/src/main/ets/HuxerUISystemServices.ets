@@ -42,13 +42,20 @@ export function notificationActivation(want?: Want): HuxerUINotificationActivati
 export class HuxerUISystemServices implements HuxerUISystemServicesHost {
   readonly canSchedule: boolean;
   private module: HuxerUIApplicationModule;
-  private context: common.UIAbilityContext;
+  private context: common.Context;
+  private uiContext?: common.UIAbilityContext;
+  private bundleName: string;
+  private activationAbility: string;
 
-  constructor(module: HuxerUIApplicationModule, context: common.UIAbilityContext) {
+  constructor(module: HuxerUIApplicationModule, context: common.Context, bundleName: string, activationAbility: string,
+    uiContext?: common.UIAbilityContext) {
     this.module = module;
     this.context = context;
+    this.uiContext = uiContext;
+    this.bundleName = bundleName;
+    this.activationAbility = activationAbility;
     try {
-      this.canSchedule = canIUse('SystemCapability.Notification.ReminderAgent') &&
+      this.canSchedule = activationAbility.length > 0 && canIUse('SystemCapability.Notification.ReminderAgent') &&
         this.declaredPermissions(reminderPermission, this.getBundleInfo()).length > 0;
     } catch (_) {
       this.canSchedule = false;
@@ -109,9 +116,9 @@ export class HuxerUISystemServices implements HuxerUISystemServicesHost {
     const manager = abilityAccessCtrl.createAtManager();
     const token = info.appInfo.accessTokenId;
     let permanentlyDenied = false;
-    if (request && permissions.some((name: Permissions): boolean =>
+    if (request && this.uiContext && permissions.some((name: Permissions): boolean =>
       manager.checkAccessTokenSync(token, name) !== abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED)) {
-      const response = await manager.requestPermissionsFromUser(this.context, permissions);
+      const response = await manager.requestPermissionsFromUser(this.uiContext, permissions);
       permanentlyDenied = response.authResults.some((result: number, index: number): boolean =>
         result === abilityAccessCtrl.GrantStatus.PERMISSION_DENIED && response.dialogShownResults?.[index] === false);
     }
@@ -127,7 +134,7 @@ export class HuxerUISystemServices implements HuxerUISystemServicesHost {
   }
 
   private async openPermissionSettings(names: string, application: boolean): Promise<boolean> {
-    if (!application) {
+    if (!application || !this.uiContext) {
       return false;
     }
     if (names === 'notifications') {
@@ -137,7 +144,7 @@ export class HuxerUISystemServices implements HuxerUISystemServicesHost {
     if (permissions.length === 0) {
       return false;
     }
-    await abilityAccessCtrl.createAtManager().requestPermissionOnSetting(this.context, permissions);
+    await abilityAccessCtrl.createAtManager().requestPermissionOnSetting(this.uiContext, permissions);
     return true;
   }
 
@@ -145,9 +152,9 @@ export class HuxerUISystemServices implements HuxerUISystemServicesHost {
     if (await notificationManager.isNotificationEnabled()) {
       return PermissionStatus.Granted;
     }
-    if (request) {
+    if (request && this.uiContext) {
       try {
-        await notificationManager.requestEnableNotification(this.context);
+        await notificationManager.requestEnableNotification(this.uiContext);
       } catch (_) {}
       if (await notificationManager.isNotificationEnabled()) {
         return PermissionStatus.Granted;
@@ -163,8 +170,8 @@ export class HuxerUISystemServices implements HuxerUISystemServicesHost {
     }
     try {
       const destination: Want = {
-        bundleName: this.context.abilityInfo.bundleName,
-        abilityName: this.context.abilityInfo.name,
+        bundleName: this.bundleName,
+        abilityName: this.activationAbility,
         action: notificationAction,
         uri: notificationUri(identifier),
         parameters: {
@@ -172,12 +179,12 @@ export class HuxerUISystemServices implements HuxerUISystemServicesHost {
           'huxerui.notification.payload': payload
         }
       };
-      const activation = await wantAgent.getWantAgent({
+      const activation = this.activationAbility ? await wantAgent.getWantAgent({
         wants: [destination],
         actionType: wantAgent.OperationType.START_ABILITY,
         requestCode: 0,
         actionFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
-      });
+      }) : undefined;
       await notificationManager.publish({
         // The label pairs with the ID for both replacement and cancellation across process restarts.
         id: 0,
@@ -234,8 +241,8 @@ export class HuxerUISystemServices implements HuxerUISystemServicesHost {
         snoozeTimes: 0,
         slotType: notificationManager.SlotType.SERVICE_INFORMATION,
         wantAgent: {
-          pkgName: this.context.abilityInfo.bundleName,
-          abilityName: this.context.abilityInfo.name,
+          pkgName: this.bundleName,
+          abilityName: this.activationAbility,
           uri: notificationUri(identifier),
           parameters: {
             'huxerui.notification.identifier': identifier,

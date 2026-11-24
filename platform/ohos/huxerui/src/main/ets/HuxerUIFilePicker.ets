@@ -57,15 +57,16 @@ export function withGrantedFiles(uris: string[], writable: boolean,
 }
 
 export class HuxerUIFilePicker implements HuxerUIFilePickerHost {
-  readonly canSelectDirectory = canIUse('SystemCapability.FileManagement.UserFileService.FolderSelection') &&
-    (deviceInfo.deviceType !== 'phone' || deviceInfo.sdkApiVersion >= 26);
+  readonly canSelectDirectory: boolean;
   private module: HuxerUIApplicationModule;
-  private context: common.UIAbilityContext;
+  private context: common.Context;
   private accessQueue: Promise<void> = Promise.resolve();
 
-  constructor(module: HuxerUIApplicationModule, context: common.UIAbilityContext) {
+  constructor(module: HuxerUIApplicationModule, context: common.Context, hasWindow: boolean = true) {
     this.module = module;
     this.context = context;
+    this.canSelectDirectory = hasWindow && canIUse('SystemCapability.FileManagement.UserFileService.FolderSelection') &&
+      (deviceInfo.deviceType !== 'phone' || deviceInfo.sdkApiVersion >= 26);
   }
 
   retainPlatformFile<T>(uri: string, writable: boolean, retain: (files: HuxerUIPickedFile[]) => T): T | undefined {

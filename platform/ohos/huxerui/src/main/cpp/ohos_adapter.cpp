@@ -35,11 +35,11 @@
 #include <huxerui/resource.h>
 #include <huxerui/stream.h>
 
-#include "application/system_task_internal.h"
 #include "internal_access.h"
 #include "text/text_internal.h"
 
 #include "ohos_accessibility.h"
+#include "ohos_background_tasks.h"
 #include "ohos_clipboard.h"
 #include "ohos_file_picker.h"
 #include "ohos_http.h"
@@ -222,12 +222,14 @@ class OhosRuntime final : public Runtime {
 public:
   OhosRuntime(napi_env env, UiThreadDispatcher dispatch, AppDirectories directories, napi_value manager,
               ResourceConfiguration configuration, napi_value system_services, napi_value http_host,
-              ApplicationActivation activation, napi_value file_host, napi_value context, napi_value extensions)
+              std::optional<ApplicationActivation> activation, napi_value file_host, napi_value context,
+              napi_value extensions, napi_value system_tasks, std::shared_ptr<OhosBackgroundTasks> background_tasks)
       : Runtime(dispatch), directories_(std::move(directories)),
         resources_(env, manager, std::move(configuration)),
         arkts_host_(env, context, file_host, extensions),
         file_access_(std::make_shared<OhosFileAccess>(env, file_host)), clipboard_(file_access_),
         system_services_(std::make_shared<OhosSystemServices>(env, system_services)),
+        system_tasks_(std::make_shared<OhosSystemTaskTransport>(env, system_tasks, std::move(background_tasks))),
         http_(std::make_shared<OhosHttpTransport>(env, http_host, std::move(dispatch))) {
     InitializeApplication(CurrentApplication(), std::move(activation));
   }
@@ -246,6 +248,8 @@ public:
 
   OhosSystemServices& SystemServices() noexcept { return *system_services_; }
 
+  OhosSystemTaskTransport& SystemTasks() noexcept { return *system_tasks_; }
+
   OhosHttpTransport& Http() noexcept { return *http_; }
 
   OhosFileAccess& FileAccess() noexcept { return *file_access_; }
@@ -256,6 +260,7 @@ public:
 
   void SetActive(bool active) {
     active_ = active;
+    system_tasks_->SetActive(active);
     UpdateApplicationLifecycleState(active ? ApplicationLifecycleState::Active : ApplicationLifecycleState::Background);
   }
 
@@ -277,9 +282,7 @@ private:
 
   std::shared_ptr<PermissionTransport> CreatePermissionTransport() override { return system_services_; }
 
-  std::shared_ptr<SystemTaskTransport> CreateSystemTaskTransport() override {
-    return std::make_shared<ProcessLocalSystemTasks>();
-  }
+  std::shared_ptr<SystemTaskTransport> CreateSystemTaskTransport() override { return system_tasks_; }
 
   void OnRuntimeStopped() override {}
 
@@ -289,6 +292,7 @@ private:
   std::shared_ptr<OhosFileAccess> file_access_;
   OhosClipboard clipboard_;
   std::shared_ptr<OhosSystemServices> system_services_;
+  std::shared_ptr<OhosSystemTaskTransport> system_tasks_;
   std::shared_ptr<OhosHttpTransport> http_;
   bool active_ = false;
 };
@@ -1026,21 +1030,30 @@ std::optional<ApplicationActivation> ReadActivation(napi_env env, napi_value val
 
 napi_value Start(napi_env env, napi_callback_info info) {
   Require(!runtime, "HuxerUI OHOS application is already running");
-  napi_value args[8];
+  napi_value args[10]{};
   std::size_t count = std::size(args);
-  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args),
+  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count >= 9,
           "HuxerUI OHOS start expects the application context, locale, scale, and service hosts");
   const napi_value context = args[0];
+  const auto data_directory = ReadString(env, ReadProperty(env, context, "filesDir"));
   auto directories = AppDirectories{
       .executable_directory = std::nullopt,
-      .data_directory = File(ReadString(env, ReadProperty(env, context, "filesDir"))),
+      .data_directory = File(data_directory),
       .cache_directory = File(ReadString(env, ReadProperty(env, context, "cacheDir"))),
       .temporary_directory = File(ReadString(env, ReadProperty(env, context, "tempDir"))),
   };
-  auto activation = ReadActivation(env, args[5]).value_or(LaunchActivation{});
+  auto activation = ReadActivation(env, args[5]);
+  napi_valuetype ui = napi_undefined;
+  Require(napi_typeof(env, args[8], &ui) == napi_ok, "HuxerUI could not read the OHOS system task host");
+  if (!activation && ui != napi_undefined) activation = LaunchActivation{};
+  std::shared_ptr<OhosBackgroundTasks> background;
+  napi_valuetype type = napi_undefined;
+  if (count > 9 && napi_typeof(env, args[9], &type) == napi_ok && type == napi_object) {
+    background = std::make_shared<OhosBackgroundTasks>(env, args[9], data_directory);
+  }
   runtime = std::make_unique<OhosRuntime>(env, CreateDispatcher(env), std::move(directories),
       ReadProperty(env, context, "resourceManager"), ReadConfiguration(env, args[1], args[2]),
-      args[3], args[4], std::move(activation), args[6], context, args[7]);
+      args[3], args[4], std::move(activation), args[6], context, args[7], args[8], std::move(background));
   return nullptr;
 }
 
@@ -1177,6 +1190,84 @@ napi_value CompleteSystemService(napi_env, napi_callback_info info) {
   return runtime ? runtime->SystemServices().Complete(info) : nullptr;
 }
 
+napi_value ReceiveSystemTaskEvent(napi_env env, napi_callback_info info) {
+  if (!runtime) return nullptr;
+  napi_value args[4];
+  std::size_t count = std::size(args);
+  int event = 0;
+  int result = 0;
+  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count >= 3 &&
+              napi_get_value_int32(env, args[1], &event) == napi_ok &&
+              napi_get_value_int32(env, args[2], &result) == napi_ok,
+          "HuxerUI OHOS systemTaskEvent expects a request token and an event result");
+  runtime->SystemTasks().Receive(ReadString(env, args[0]), event, result,
+                                 count > 3 ? ReadString(env, args[3]) : std::string{});
+  return nullptr;
+}
+
+napi_value PrepareBackgroundWork(napi_env env, napi_callback_info info) {
+  napi_value args[2];
+  std::size_t count = std::size(args);
+  int id = 0;
+  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args) &&
+              napi_get_value_int32(env, args[1], &id) == napi_ok,
+          "HuxerUI OHOS background delivery expects the application directory and work ID");
+  napi_value result;
+  Require(napi_get_boolean(env, OhosBackgroundTasks::PrepareDelivery(ReadString(env, args[0]), id), &result) == napi_ok,
+          "HuxerUI could not report OHOS background delivery eligibility");
+  return result;
+}
+
+napi_value ReceiveBackgroundWork(napi_env env, napi_callback_info info) {
+  auto* background = runtime ? runtime->SystemTasks().Background() : nullptr;
+  if (!background) return nullptr;
+  napi_value args[2];
+  std::size_t count = std::size(args);
+  int id = 0;
+  bool start = false;
+  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args) &&
+              napi_get_value_int32(env, args[0], &id) == napi_ok && napi_get_value_bool(env, args[1], &start) == napi_ok,
+          "HuxerUI OHOS background work event expects a work ID and start flag");
+  if (start) background->OnStart(id);
+  else background->OnStop(id);
+  return nullptr;
+}
+
+napi_value ReadBackgroundWork(napi_env env, napi_callback_info) {
+  auto* background = runtime ? runtime->SystemTasks().Background() : nullptr;
+  if (!background) return nullptr;
+  auto [pending, active] = background->Refresh();
+  if (!active) return nullptr;
+  napi_value result;
+  Require(napi_create_array_with_length(env, pending.size(), &result) == napi_ok,
+          "HuxerUI could not create the pending OHOS background work list");
+  for (std::uint32_t i = 0; i < pending.size(); ++i) {
+    napi_value id;
+    Require(napi_create_int32(env, pending[i], &id) == napi_ok && napi_set_element(env, result, i, id) == napi_ok,
+            "HuxerUI could not export an OHOS background work ID");
+  }
+  return result;
+}
+
+napi_value ReconcileBackgroundWork(napi_env env, napi_callback_info info) {
+  auto* background = runtime ? runtime->SystemTasks().Background() : nullptr;
+  if (!background) return nullptr;
+  napi_value value;
+  std::size_t count = 1;
+  std::uint32_t length = 0;
+  Require(napi_get_cb_info(env, info, &count, &value, nullptr, nullptr) == napi_ok && count == 1 &&
+              napi_get_array_length(env, value, &length) == napi_ok,
+          "HuxerUI OHOS background reconciliation expects missing work IDs");
+  std::vector<int> ids(length);
+  for (std::uint32_t i = 0; i < length; ++i) {
+    napi_value id;
+    Require(napi_get_element(env, value, i, &id) == napi_ok && napi_get_value_int32(env, id, &ids[i]) == napi_ok,
+            "HuxerUI could not read an OHOS background work ID");
+  }
+  background->Reconcile(ids);
+  return nullptr;
+}
+
 napi_value Activate(napi_env env, napi_callback_info info) {
   napi_value value;
   std::size_t count = 1;
@@ -1224,6 +1315,13 @@ napi_value InitializeOhosModule(napi_env env, napi_value exports) {
       {"completeSaveFile", nullptr, Invoke<CompleteSaveFile>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"completeFileAccess", nullptr, Invoke<CompleteFileAccess>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"completeSystemService", nullptr, Invoke<CompleteSystemService>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"systemTaskEvent", nullptr, Invoke<ReceiveSystemTaskEvent>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"prepareBackgroundWork", nullptr, Invoke<PrepareBackgroundWork>, nullptr, nullptr, nullptr,
+       napi_default, nullptr},
+      {"backgroundWorkEvent", nullptr, Invoke<ReceiveBackgroundWork>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"readBackgroundWork", nullptr, Invoke<ReadBackgroundWork>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"reconcileBackgroundWork", nullptr, Invoke<ReconcileBackgroundWork>, nullptr, nullptr, nullptr,
+       napi_default, nullptr},
       {"activate", nullptr, Invoke<Activate>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"httpEvent", nullptr, Invoke<HttpEvent>, nullptr, nullptr, nullptr, napi_default, nullptr},
   };
@@ -1237,6 +1335,7 @@ napi_value InitializeOhosModule(napi_env env, napi_value exports) {
         if (runtime) {
           runtime->ArkTsHost().DisableCallbacks();
           runtime->Http().ReleaseHost();
+          runtime->SystemTasks().ReleaseHost();
         }
         Stop();
       }, nullptr) != napi_ok) {

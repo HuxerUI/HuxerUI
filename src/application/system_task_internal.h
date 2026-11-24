@@ -10,6 +10,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <huxerui/state.h>
@@ -55,14 +56,26 @@ struct SystemTaskRequest {
 class SystemTaskGrant final {
 public:
   using Completion = std::function<SystemTaskResult<void>(SystemTaskOutcome)>;
-
   explicit SystemTaskGrant(Completion completion = {});
+
+#if defined(__OHOS__)
+  /// Used by transports that publish the execution diagnostic outside the originating Runtime.
+  using DetailedCompletion = std::function<SystemTaskResult<void>(SystemTaskOutcome,
+                                                                 const std::optional<SystemTaskError>&)>;
+  explicit SystemTaskGrant(DetailedCompletion completion);
+#endif
+
   ~SystemTaskGrant();
   SystemTaskGrant(const SystemTaskGrant&) = delete;
   SystemTaskGrant& operator=(const SystemTaskGrant&) = delete;
 
-  /// Ends the allowance and reports a platform failure, including a rejected retry.
+  /// Finalizes the allowance and returns any platform completion or retry error.
+#if defined(__OHOS__)
+  /// The execution error accompanies the terminal snapshot sent to the observing Runtime.
+  SystemTaskResult<void> Finish(SystemTaskOutcome outcome, const std::optional<SystemTaskError>& error = {});
+#else
   SystemTaskResult<void> Finish(SystemTaskOutcome outcome);
+#endif
   /// Marks a platform allowance that has already been revoked, suppressing its completion callback.
   void Revoke() noexcept;
   /// Indicates whether this exact allowance can admit a handler.
@@ -70,22 +83,46 @@ public:
   /// Indicates that the host withdrew the allowance before local completion.
   bool WasRevoked() const noexcept { return revoked_; }
 
+  /// Rechecks admission at handler entry when cancellation can come from another process.
+  std::function<bool()> begin;
   std::function<SystemTaskResult<void>(TaskProgress)> update_progress;
   std::function<SystemTaskResult<void>(const ResolvedTaskPresentation&)> update_presentation;
 
 private:
+#if defined(__OHOS__)
+  std::variant<Completion, DetailedCompletion> completion_;
+#else
   Completion completion_;
+#endif
   bool live_ = true;
   bool revoked_ = false;
 };
 
+#if defined(__OHOS__)
+/// A snapshot of work owned by another Runtime. Observing it does not admit a local handler.
+struct SystemTaskObservation {
+  TaskStatus status;
+  std::optional<TaskStopReason> stop_reason{};
+  std::optional<TaskProgress> progress{};
+};
+#endif
+
 struct SystemTaskEvent {
-  enum class Kind { Reconciled, Granted, Rejected, StopRequested, Revoked };
+  enum class Kind {
+    Reconciled, Granted, Rejected, StopRequested, Revoked,
+#if defined(__OHOS__)
+    Observed,
+#endif
+  };
   Kind kind;
   SystemTaskRequest request;
   std::shared_ptr<SystemTaskGrant> grant{};
   std::optional<std::chrono::steady_clock::time_point> deadline{};
   std::optional<SystemTaskError> error{};
+  std::optional<TaskStopReason> stop_reason{};
+#if defined(__OHOS__)
+  std::optional<SystemTaskObservation> observation{};
+#endif
 };
 
 /// System scheduling and platform admission. Calls and event publication use the original application thread.
@@ -100,6 +137,10 @@ public:
   virtual void Install(std::span<const SystemTaskRegistration> registrations, EventHandler on_event) = 0;
   virtual SystemTaskResult<void> Submit(const SystemTaskRequest& request) = 0;
   virtual SystemTaskResult<void> Withdraw(const SystemTaskRequest& request) = 0;
+#if defined(__OHOS__)
+  /// Whether an accepted withdrawal will report its outcome through an observation from another process.
+  virtual bool ObservesWithdrawal(const SystemTaskRequest&) const noexcept { return false; }
+#endif
   /// Detaches callbacks and retires process-local work.
   /// Accepted background requests remain scheduled with the system.
   virtual void Disconnect() noexcept = 0;

@@ -105,16 +105,32 @@ TaskPresentation SnapshotPresentation(const ResolvedTaskPresentation& presentati
 
 SystemTaskGrant::SystemTaskGrant(Completion completion) : completion_(std::move(completion)) {}
 
+#if defined(__OHOS__)
+SystemTaskGrant::SystemTaskGrant(DetailedCompletion completion) : completion_(std::move(completion)) {}
+#endif
+
 SystemTaskGrant::~SystemTaskGrant() {
   HUXERUI_DISCARD(Finish(SystemTaskOutcome::Interrupted));
 }
 
+#if defined(__OHOS__)
+SystemTaskResult<void> SystemTaskGrant::Finish(SystemTaskOutcome outcome, const std::optional<SystemTaskError>& error) {
+#else
 SystemTaskResult<void> SystemTaskGrant::Finish(SystemTaskOutcome outcome) {
+#endif
   live_ = false;
   auto completion = std::exchange(completion_, {});
-  if (!completion) return SystemTaskResult<void>::Success();
   try {
-    return completion(outcome);
+#if defined(__OHOS__)
+    if (const auto* ordinary = std::get_if<Completion>(&completion)) {
+      if (*ordinary) return (*ordinary)(outcome);
+    } else if (const auto& detailed = std::get<DetailedCompletion>(completion); detailed) {
+      return detailed(outcome, error);
+    }
+#else
+    if (completion) return completion(outcome);
+#endif
+    return SystemTaskResult<void>::Success();
   } catch (const std::exception& exception) {
     return TaskFailure<void>(SystemTaskErrorCode::Platform,
                              std::string("HuxerUI platform task completion failed: ") + exception.what());
@@ -341,6 +357,9 @@ SystemTaskResult<StopRequestStatus> SystemTasks::RequestStop(
       return Result::Failure(std::move(result).Error());
     }
     state.status_ = TaskStatus::Stopped;
+#if defined(__OHOS__)
+    if (transport_->ObservesWithdrawal(record->request)) state.status_ = TaskStatus::Stopping;
+#endif
     state.stop_reason_ = TaskStopReason::Requested;
     state.error_.reset();
     Publish(*record, std::move(state));
@@ -426,6 +445,26 @@ void SystemTasks::OnEvent(SystemTaskEvent event) {
     if (!event.request.token.empty()) AddRecord(slot, std::move(event.request));
     return;
   }
+#if defined(__OHOS__)
+  if (event.kind == SystemTaskEvent::Kind::Observed) {
+    if (event.request.kind != SystemTaskKind::Background || event.request.token.empty() || !event.observation) return;
+    if (record && record->request.token != event.request.token) {
+      if (!record->state->IsTerminal()) return;
+      record.reset();
+    }
+    if (!record) record = AddRecord(slot, std::move(event.request));
+    if (record->attempt || record->state->IsTerminal()) return;
+    if (record->state->Status() == TaskStatus::Stopping &&
+        (event.observation->status == TaskStatus::Running || event.observation->status == TaskStatus::Pending)) return;
+    TaskState state = record->state;
+    state.status_ = event.observation->status;
+    state.stop_reason_ = event.observation->stop_reason;
+    state.progress_ = event.observation->progress;
+    state.error_ = std::move(event.error);
+    Publish(*record, std::move(state));
+    return;
+  }
+#endif
   if (!record && event.kind == SystemTaskEvent::Kind::Granted && event.grant &&
       event.request.kind == SystemTaskKind::Background && !event.request.token.empty() &&
       Application()->accepts_tasks) {
@@ -449,15 +488,18 @@ void SystemTasks::OnEvent(SystemTaskEvent event) {
     case SystemTaskEvent::Kind::Revoked:
       if (auto attempt = record->attempt; attempt && attempt->grant == event.grant) {
         if (event.kind == SystemTaskEvent::Kind::Revoked) {
-          if (!attempt->stop_reason) attempt->stop_reason = TaskStopReason::System;
+          if (!attempt->stop_reason) attempt->stop_reason = event.stop_reason.value_or(TaskStopReason::System);
           Finish(attempt, SystemTaskOutcome::Interrupted, std::move(event.error));
         } else {
           if (event.deadline) SetDeadline(attempt, *event.deadline);
-          Stop(attempt, TaskStopReason::System);
+          Stop(attempt, event.stop_reason.value_or(TaskStopReason::System));
         }
       }
       break;
     case SystemTaskEvent::Kind::Reconciled:
+#if defined(__OHOS__)
+    case SystemTaskEvent::Kind::Observed:
+#endif
       break;
   }
 }
@@ -496,7 +538,9 @@ Task<void> SystemTasks::Run(
   SystemTaskOutcome outcome = SystemTaskOutcome::Completed;
   std::optional<SystemTaskError> error;
   try {
-    if (attempt->stop->source.stop_requested()) throw TaskStopped{};
+    if (attempt->stop->source.stop_requested() || (attempt->grant->begin && !attempt->grant->begin())) {
+      throw TaskStopped{};
+    }
     switch (declaration->Kind()) {
       case SystemTaskKind::Background: {
         const auto result = co_await std::get<BackgroundTask::Handler>(declaration->handler)(
@@ -587,7 +631,11 @@ void SystemTasks::Finish(
     attempt->execution.Cancel();
   }
   TaskState state = record->state;
+#if defined(__OHOS__)
+  auto result = attempt->grant->Finish(outcome, error);
+#else
   auto result = attempt->grant->Finish(outcome);
+#endif
   switch (outcome) {
     case SystemTaskOutcome::Completed: state.status_ = TaskStatus::Completed; break;
     case SystemTaskOutcome::Retry:

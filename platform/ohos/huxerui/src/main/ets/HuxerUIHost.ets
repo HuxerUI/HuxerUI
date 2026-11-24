@@ -1,11 +1,14 @@
 import { Configuration, ConfigurationConstant, UIAbility, Want, wantConstant } from '@kit.AbilityKit';
 import { display, KeyboardAvoidMode, NodeContent, window } from '@kit.ArkUI';
+import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { i18n } from '@kit.LocalizationKit';
 import { HuxerUIActivation, HuxerUIApplicationModule } from './HuxerUIApplicationModule';
+import { HuxerUIBackgroundTasks } from './HuxerUIBackgroundTasks';
 import { HuxerUIFilePicker, withGrantedFiles } from './HuxerUIFilePicker';
 import { HuxerUIHttp } from './HuxerUIHttp';
 import { HuxerUIPlatformExtensions } from './HuxerUIPlatform';
 import { HuxerUISystemServices, notificationActivation } from './HuxerUISystemServices';
+import { HuxerUISystemTasks } from './HuxerUISystemTasks';
 import { HuxerUITextInput } from './HuxerUITextInput';
 
 let applicationModule: HuxerUIApplicationModule | undefined;
@@ -81,20 +84,35 @@ function withActivation(want: Want | undefined, receive: (activation?: HuxerUIAc
 
 /** Hosts the HuxerUI application and loads `pages/Index` when its window is ready. */
 export abstract class HuxerUIAbility extends UIAbility {
+  private backgroundTasks?: HuxerUIBackgroundTasks;
+
   /** Returns the default export of the application's HuxerUI shared library, such as `libmy_app.so`. */
   protected abstract getApplicationModule(): HuxerUIApplicationModule;
 
   /** Supplies ArkTS factory objects for the C++ application's registered platform modules and views. */
   protected getPlatformExtensions(): HuxerUIPlatformExtensions | undefined { return undefined; }
 
+  /** Maps C++ system task declaration identifiers to this ability's declared continuous background modes. */
+  protected getSystemTaskModes(): Map<string, backgroundTaskManager.BackgroundMode> { return new Map(); }
+
+  /** Returns the name of this app's declared HuxerUIBackgroundTaskExtensionAbility, when configured. */
+  protected getBackgroundTaskAbility(): string | undefined { return undefined; }
+
   onCreate(want?: Want): void {
     const module = this.getApplicationModule();
-    const services = new HuxerUISystemServices(module, this.context);
+    const ability = this.context.abilityInfo;
+    const services = new HuxerUISystemServices(module, this.context, ability.bundleName, ability.name, this.context);
     const files = new HuxerUIFilePicker(module, this.context);
+    const tasks = new HuxerUISystemTasks(module, this.context, this.getSystemTaskModes());
+    const extension = this.getBackgroundTaskAbility();
+    if (extension && canIUse('SystemCapability.ResourceSchedule.WorkScheduler')) {
+      this.backgroundTasks = new HuxerUIBackgroundTasks(module, ability.bundleName, extension);
+    }
     systemDark = this.context.config.colorMode === ConfigurationConstant.ColorMode.COLOR_MODE_DARK;
     withActivation(want, activation => {
       module.start(this.context, i18n.System.getSystemLocale(), displayScale(), services, new HuxerUIHttp(module),
-        activation, files, this.getPlatformExtensions());
+        activation, files, this.getPlatformExtensions(), tasks, this.backgroundTasks);
+      this.backgroundTasks?.watch();
     });
     applicationModule = module;
     filePicker = files;
@@ -112,6 +130,7 @@ export abstract class HuxerUIAbility extends UIAbility {
 
   onForeground(): void {
     applicationModule?.setActive(true);
+    this.backgroundTasks?.watch();
   }
 
   onBackground(): void {
@@ -134,7 +153,9 @@ export abstract class HuxerUIAbility extends UIAbility {
   }
 
   onDestroy(): void {
+    this.backgroundTasks?.close();
     applicationModule?.stop();
+    this.backgroundTasks = undefined;
     applicationModule = undefined;
     filePicker = undefined;
     applicationWindow = undefined;

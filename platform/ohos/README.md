@@ -41,6 +41,8 @@ To remember read access across launches, declare `ohos.permission.FILE_ACCESS_PE
 
 HTTP uses Remote Communication Kit for buffered and streaming requests, including server-sent events. Declare `ohos.permission.INTERNET` in the application module.
 
-Runtime permission requests use the application's declared permissions. Local notifications support immediate and scheduled delivery, cancellation, and activation with the submitted payload. For scheduling, declare `ohos.permission.PUBLISH_AGENT_REMINDER` and configure [agent-powered reminders](https://developer.huawei.com/consumer/en/doc/HarmonyOS-Guides/agent-powered-reminder/) for the application. Continued tasks use the process-local allowance. System background-task admission is pending.
+Runtime permission requests use the application's declared permissions. Local notifications support immediate and scheduled delivery, cancellation, and activation with the submitted payload. For scheduling, declare `ohos.permission.PUBLISH_AGENT_REMINDER` and configure [agent-powered reminders](https://developer.huawei.com/consumer/en/doc/HarmonyOS-Guides/agent-powered-reminder/) for the application.
+
+`BackgroundTask` uses a WorkScheduler extension. `ContinuedTask` and `OngoingTask` use configured continuous background modes on the entry ability. See [HarmonyOS system tasks](../../docs/guide/system-tasks.md#harmonyos) for application setup.
 
 Hardware keyboard and mouse input use the shared HuxerUI key, pointer, and scroll events. Text editing also uses the system input method. Register [links](https://developer.huawei.com/consumer/en/doc/HarmonyOS-Guides/app-linking-startup/) and [document types](https://developer.huawei.com/consumer/en/doc/HarmonyOS-Guides/file-processing-apps-startup/) in the ability's `skills` to receive `UrlActivation` and `FileActivation`.
