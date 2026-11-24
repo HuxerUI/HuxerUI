@@ -112,11 +112,12 @@ OhosTextInput::~OhosTextInput() {
 
 void OhosTextInput::Start(TextInputSessionId session_id, const TextInputConfiguration& configuration,
                           const TextInputState& state, const TextInputGeometry& geometry) {
-  const HandleScope scope(env_);
   state_ = state;
   configuration_ = configuration;
-  token_ = std::to_string(++next_token);
   selection_sent_ = false;
+  if (!focused_) return;
+  const HandleScope scope(env_);
+  token_ = std::to_string(++next_token);
   napi_value token;
   Check(napi_create_string_utf8(env_, token_.data(), token_.size(), &token));
   Call("connect", {token, Number(InputType(configuration)), Number(EnterKey(configuration))});
@@ -127,10 +128,11 @@ void OhosTextInput::Update(TextInputSessionId session_id, const TextInputState& 
   if (state_.session_id != session_id) {
     return;
   }
-  const HandleScope scope(env_);
   const bool selection_changed = !selection_sent_ || state_.selection != state.selection ||
                                  state_.content_revision != state.content_revision;
   state_ = state;
+  if (!focused_) return;
+  const HandleScope scope(env_);
   if (selection_changed) {
     auto context = TextInputContext{};
     if (!configuration_.secure) {
@@ -165,23 +167,22 @@ void OhosTextInput::Restart(TextInputSessionId session_id, const TextInputConfig
 void OhosTextInput::Stop(TextInputSessionId session_id) {
   if (state_.session_id == session_id) {
     state_ = {};
-    token_.clear();
     show_keyboard_ = false;
-    Call("disconnect", {});
+    if (!std::exchange(token_, {}).empty()) Call("disconnect", {});
   }
 }
 
 void OhosTextInput::RequestShowKeyboard(TextInputSessionId session_id) {
   if (state_.session_id == session_id) {
     show_keyboard_ = true;
-    Call("show", {});
+    if (focused_) Call("show", {});
   }
 }
 
 void OhosTextInput::RequestHideKeyboard(TextInputSessionId session_id) {
   if (state_.session_id == session_id) {
     show_keyboard_ = false;
-    Call("hide", {});
+    if (focused_) Call("hide", {});
   }
 }
 
@@ -197,11 +198,26 @@ bool OhosTextInput::HandleBack() {
   return true;
 }
 
-napi_value OhosTextInput::HandleCommand(napi_callback_info info) {
-  napi_value args[5];
-  std::size_t count = std::size(args);
-  Check(napi_get_cb_info(env_, info, &count, args, nullptr, nullptr));
-  if (count != std::size(args) || !Matches(args[0])) {
+void OhosTextInput::SetFocused(bool focused) {
+  if (std::exchange(focused_, focused) == focused || !state_.session_id) return;
+  if (focused) {
+    const auto session = state_.session_id;
+    Start(session, configuration_, state_, window_.QueryTextInputGeometry(session, state_.selection.Range()));
+    if (show_keyboard_) RequestShowKeyboard(session);
+  } else {
+    // Revoke the window's token before disconnecting the shared IME or applying its last provisional text.
+    if (!std::exchange(token_, {}).empty()) Call("disconnect", {});
+    show_keyboard_ = false;
+    if (state_.composition) {
+      TextInputCommand command;
+      command.kind = TextInputCommandKind::FinishComposition;
+      window_.HandleTextInputCommands({state_.session_id, {std::move(command)}});
+    }
+  }
+}
+
+napi_value OhosTextInput::HandleCommand(std::span<const napi_value, 5> args) {
+  if (!Matches(args[0])) {
     return nullptr;
   }
   const auto kind = static_cast<EditCommand>(ReadInteger(env_, args[1]));
@@ -273,13 +289,7 @@ napi_value OhosTextInput::HandleCommand(napi_callback_info info) {
   return nullptr;
 }
 
-napi_value OhosTextInput::ReadContext(napi_callback_info info) {
-  napi_value args[3];
-  std::size_t count = std::size(args);
-  Check(napi_get_cb_info(env_, info, &count, args, nullptr, nullptr));
-  if (count != std::size(args)) {
-    return nullptr;
-  }
+napi_value OhosTextInput::ReadContext(std::span<const napi_value, 3> args) {
   const auto kind = static_cast<ContextQuery>(ReadInteger(env_, args[1]));
   const bool allowed = Matches(args[0]) && !configuration_.secure;
   const auto caret = state_.selection.active;

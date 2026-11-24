@@ -350,7 +350,7 @@ public:
   [[nodiscard]] bool SupportsMultipleWindows() const;
   WindowCapabilities WindowSupport() const;
   WindowHandle OpenWindow(ViewFactory content, WindowOptions options) const;
-#if defined(__APPLE__) && TARGET_OS_IOS && !TARGET_OS_MACCATALYST
+#if (defined(__APPLE__) && TARGET_OS_IOS && !TARGET_OS_MACCATALYST) || defined(__OHOS__)
   bool CanOpenWindow() const;
   Task<WindowHandle> OpenWindowAsync(ViewFactory content, WindowOptions options) const;
 #endif

@@ -119,9 +119,9 @@ struct OhosAccessibility::Impl {
   Impl(UiWindow& window, OhosTextInput& text_input) : window(window), text_input(text_input) {}
 
   bool Attach(ArkUI_NodeHandle node) {
+    if (provider) return false;
     {
       std::lock_guard lock(attachment_mutex);
-      if (attached) return false;
       static std::uint64_t next_instance = 0;
       instance = std::to_string(++next_instance);
     }
@@ -133,9 +133,9 @@ struct OhosAccessibility::Impl {
     }
     {
       std::lock_guard lock(attachment_mutex);
-      attached = this;
+      attachments.emplace(instance, this);
     }
-    ui_owner = this;
+    ++ui_attachments;
     return true;
   }
 
@@ -186,9 +186,8 @@ struct OhosAccessibility::Impl {
   void Detach() noexcept {
     {
       std::lock_guard lock(attachment_mutex);
-      if (attached == this) attached = nullptr;
+      if (attachments.erase(instance)) --ui_attachments;
     }
-    if (ui_owner == this) ui_owner = nullptr;
     if (provider) OH_ArkUI_AccessibilityProvider_Dispose(std::exchange(provider, nullptr));
     nodes.clear();
     ordered.clear();
@@ -522,7 +521,8 @@ struct OhosAccessibility::Impl {
   static std::int32_t Dispatch(const char* instance, Callback callback) noexcept {
     if (!instance) return failure;
     try {
-      if (ui_owner) return OnUiThread(instance, callback);
+      const std::string id(instance);
+      if (ui_attachments) return OnUiThread(id, callback);
 
       // System queries can arrive on a Binder thread. ArkUI owns their argument and output buffers until we return.
       struct Request {
@@ -534,8 +534,9 @@ struct OhosAccessibility::Impl {
       auto request = std::make_shared<Request>();
       {
         std::lock_guard lock(attachment_mutex);
-        if (!attached || attached->instance != instance) return failure;
-        attached->window.DispatchToUiThread([request, id = std::string(instance), callback] {
+        const auto entry = attachments.find(id);
+        if (entry == attachments.end()) return failure;
+        entry->second->window.DispatchToUiThread([request, id, callback] {
           std::lock_guard lock(request->mutex);
           if (request->finished) return;
           request->result = OnUiThread(id, callback);
@@ -553,10 +554,17 @@ struct OhosAccessibility::Impl {
     }
   }
 
-  static std::int32_t OnUiThread(std::string_view instance, const auto& callback) noexcept {
-    auto* owner = ui_owner;
-    if (!owner || owner->instance != instance || !owner->frame) return failure;
+  static std::int32_t OnUiThread(const std::string& id, const auto& callback) noexcept {
     try {
+      Impl* owner;
+      {
+        std::lock_guard lock(attachment_mutex);
+        const auto entry = attachments.find(id);
+        if (entry == attachments.end()) return failure;
+        owner = entry->second;
+      }
+      // Attachments share the ArkUI thread, so retirement cannot run between lookup and dispatch.
+      if (!owner->frame) return failure;
       owner->observed = true;
       return callback(*owner) ? success : failure;
     } catch (...) {
@@ -565,8 +573,8 @@ struct OhosAccessibility::Impl {
   }
 
   static std::mutex attachment_mutex;
-  static Impl* attached;
-  static thread_local Impl* ui_owner;
+  static std::unordered_map<std::string, Impl*> attachments;
+  static thread_local std::size_t ui_attachments;
   static ArkUI_AccessibilityProviderCallbacksWithInstance callbacks;
 
   UiWindow& window;
@@ -582,8 +590,8 @@ struct OhosAccessibility::Impl {
 };
 
 std::mutex OhosAccessibility::Impl::attachment_mutex;
-OhosAccessibility::Impl* OhosAccessibility::Impl::attached = nullptr;
-thread_local OhosAccessibility::Impl* OhosAccessibility::Impl::ui_owner = nullptr;
+std::unordered_map<std::string, OhosAccessibility::Impl*> OhosAccessibility::Impl::attachments;
+thread_local std::size_t OhosAccessibility::Impl::ui_attachments = 0;
 
 ArkUI_AccessibilityProviderCallbacksWithInstance OhosAccessibility::Impl::callbacks{
     .findAccessibilityNodeInfosById = [](const char* instance, std::int64_t id, ArkUI_AccessibilitySearchMode mode,

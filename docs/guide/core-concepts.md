@@ -286,6 +286,8 @@ On iOS and iPadOS, set `UIApplicationSupportsMultipleScenes` to `true` inside `U
 
 On iOS, `Close()` consults the mounted close handler before requesting destruction, and `IsOpen()` becomes false when UIKit confirms permanent discard. A temporary disconnect keeps `IsOpen()` true and moves the window lifecycle to Background. Reconnecting the same session creates a fresh composition with an equal `WindowHandle`. Keep document and workspace data in application-owned state.
 
+On HarmonyOS, query `CanOpenWindow()` once the main window is attached in the foreground and await `OpenWindowAsync(content, options)`. The system creates a child of the main window and constrains its preferred initial size. The Task returns after attachment and presentation. `Show()`, `Hide()`, `Activate()`, and `Close()` operate on the child, and closing the main window closes its children. Canceling an open request destroys any window the system creates for it later.
+
 Use `window.SetFullscreen(true)` or `window.SetFullscreen(false)` to request a fullscreen transition. `window.IsFullscreen()` is observable and updates after the host confirms entry or exit, including exits initiated by the host. Desktop windows return to their previous windowed placement, including maximized state, subject to the window manager. On Web, request entry directly from a user interaction callback. The browser controls whether the request succeeds. Android and iOS ignore fullscreen requests and report false.
 
 On Windows, `Maximize()`, `Restore()`, and `ToggleMaximize()` have no effect during fullscreen. Call `SetFullscreen(false)` to restore the previous windowed placement.
@@ -304,7 +306,7 @@ Window hooks see the new native window's resource configuration from the beginni
 Empty content and invalid options throw `std::invalid_argument`; invalid thread, lifetime, or timing throws `std::logic_error`; unsupported native creation throws `std::runtime_error`.
 A hook exception propagates after partial window cleanup without affecting other windows or causing application exit.
 Successful creation does not guarantee that the first frame has rendered.
-macOS, Windows, and Linux support this API; Android, iOS, and Web currently report false while retaining their host-managed UI attachments.
+macOS, Windows, and Linux support synchronous `OpenWindow()`. Android, iOS, HarmonyOS, and Web report false from `SupportsMultipleWindows()`.
 
 Closing the last framework-owned desktop window requests application shutdown by default.
 Set `AppOptions::quit_on_last_window_closed = false` to keep application services, tasks, and activation handlers available without windows; an application or tray callback can then open a new window.

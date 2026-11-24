@@ -4,7 +4,7 @@ import { HuxerUISurface, handleHuxerUIBack } from '@huxerui/huxerui';
 @Component
 struct Index {
   onBackPress(): boolean {
-    return handleHuxerUIBack();
+    return handleHuxerUIBack(this.getUIContext());
   }
 
   build() {

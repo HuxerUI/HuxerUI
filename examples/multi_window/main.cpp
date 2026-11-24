@@ -7,6 +7,62 @@
 
 using namespace huxerui;
 
+#if defined(__OHOS__)
+
+[[huxerui::composable]]
+View WindowEditor(std::string title, State<int> count) {
+  auto text = UseState(TextEditingValue{});
+  return Column {
+    Text(std::move(title), TextRole::Title),
+    Button("Shared count: " + std::to_string(static_cast<int>(count))).OnClick([count] { ++count; }),
+    TextField(text).Placeholder("Type here").OnChanged([text](TextEditingValue value) { text = std::move(value); }),
+  }.With(Spacing(8.0F), CrossAlign(CrossAxisAlignment::Stretch));
+}
+
+Task<void> OpenSecondary(ApplicationHandle application, State<int> count, State<std::vector<WindowHandle>> windows,
+                         State<std::string> status) {
+  try {
+    auto window = co_await application.OpenWindowAsync([count] {
+      return Column {
+        WindowEditor("Secondary window", count),
+        Button("Close window").OnClick([window = UseWindow()] { window.Close(); }),
+      }.With(Padding(16.0F), Spacing(8.0F), CrossAlign(CrossAxisAlignment::Stretch));
+    }, {.title = "Secondary window", .initial_size = {300.0F, 230.0F}});
+    windows.Update([&window](auto& open) {
+      std::erase_if(open, [](const WindowHandle& previous) { return !previous.IsOpen(); });
+      open.push_back(std::move(window));
+    });
+    status = "Window opened";
+  } catch (const std::exception& error) {
+    status = std::string(error.what());
+  }
+}
+
+View App() {
+  const auto application = UseApplication();
+  const auto tasks = UseTaskScope();
+  auto count = UseState(0);
+  auto windows = UseState(std::vector<WindowHandle>{});
+  auto status = UseState(std::string{});
+  const std::vector<WindowHandle>& open = windows;
+  const auto visible = std::ranges::count_if(open, &WindowHandle::IsOpen);
+  return Column {
+    WindowEditor("Main window", count),
+    Button("Open window").OnClick([=] { tasks.Launch(OpenSecondary(application, count, windows, status)); }),
+    Button("Open and cancel").OnClick([=] {
+      auto opening = tasks.Launch(OpenSecondary(application, count, windows, status));
+      tasks.Post([opening, status] {
+        opening.Cancel();
+        status = "Canceled opening";
+      });
+    }),
+    Text("Open secondary windows: " + std::to_string(visible)),
+    Text(status),
+  }.With(Padding(16.0F), Spacing(8.0F), CrossAlign(CrossAxisAlignment::Stretch));
+}
+
+#else
+
 struct TabGroup {
   std::vector<std::string> tabs;
   std::string selected;
@@ -108,6 +164,8 @@ View App() {
     TabPanel(workspace, false),
   }.With(Padding(24.0F), Spacing(12.0F), CrossAlign(CrossAxisAlignment::Stretch));
 }
+
+#endif
 
 const Application application{
     App,

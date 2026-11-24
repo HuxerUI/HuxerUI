@@ -35,6 +35,8 @@
 #include <huxerui/resource.h>
 #include <huxerui/stream.h>
 
+#include "application/application_internal.h"
+#include "application/window_internal.h"
 #include "internal_access.h"
 #include "text/text_internal.h"
 
@@ -218,13 +220,15 @@ private:
   ResourceConfiguration configuration_;
 };
 
+class OhosUiWindow;
+
 class OhosRuntime final : public Runtime {
 public:
   OhosRuntime(napi_env env, UiThreadDispatcher dispatch, AppDirectories directories, napi_value manager,
               ResourceConfiguration configuration, napi_value system_services, napi_value http_host,
               std::optional<ApplicationActivation> activation, napi_value file_host, napi_value context,
               napi_value extensions, napi_value system_tasks, std::shared_ptr<OhosBackgroundTasks> background_tasks)
-      : Runtime(dispatch), directories_(std::move(directories)),
+      : Runtime(dispatch), env_(env), directories_(std::move(directories)),
         resources_(env, manager, std::move(configuration)),
         arkts_host_(env, context, file_host, extensions),
         file_access_(std::make_shared<OhosFileAccess>(env, file_host)), clipboard_(file_access_),
@@ -234,13 +238,7 @@ public:
     InitializeApplication(CurrentApplication(), std::move(activation));
   }
 
-  ~OhosRuntime() override {
-    Retire();
-    arkts_host_.Close();
-    file_access_->Disconnect();
-    http_->Disconnect();
-    system_services_->Disconnect();
-  }
+  ~OhosRuntime() override;
 
   OhosResources* Resources() noexcept override { return &resources_; }
 
@@ -258,18 +256,38 @@ public:
 
   bool IsActive() const noexcept { return active_; }
 
-  void SetActive(bool active) {
-    active_ = active;
-    system_tasks_->SetActive(active);
-    UpdateApplicationLifecycleState(active ? ApplicationLifecycleState::Active : ApplicationLifecycleState::Background);
-  }
+  void SetActive(bool active);
+  void SetConfiguration(ResourceConfiguration configuration, ThemeBrightness brightness);
 
-  void SetConfiguration(ResourceConfiguration configuration) {
-    resources_.SetConfiguration(configuration);
-    UpdateResourceConfiguration(std::move(configuration));
-  }
+  bool CanOpenWindow() const noexcept;
+  std::function<void()> RequestOpenWindow(ViewFactory content, WindowOptions options,
+      CallbackCompletion<WindowHandle> completion, std::shared_ptr<ExecutionContext> source);
+  void SetWindowStage(std::string id, napi_value host);
+  void CloseWindowStage();
+  void CompleteOpenWindow(const std::string& id, std::optional<std::string> error);
+  bool IsMainWindow(const std::string& id) const noexcept { return id == main_window_id_; }
+  OhosUiWindow* FindWindow(const std::string& id) const noexcept;
+  std::optional<std::pair<ViewFactory, WindowOptions>> WindowContent(const std::string& id);
+  void AttachWindow(const std::string& id, std::unique_ptr<OhosUiWindow> window);
+  void DetachWindow(const std::string& id);
+  void SendWindowCommand(const std::string& id, std::string_view command, Size size = {});
+  void DisableCallbacks() noexcept;
+
+  std::uintptr_t RegisterFrame(OhosUiWindow& window);
+  OhosUiWindow* FindFrame(std::uintptr_t token) const noexcept;
+  void ForgetFrame(std::uintptr_t token) noexcept { frames_.erase(token); }
 
 private:
+  struct OpenRequest {
+    ViewFactory content;
+    WindowOptions options;
+    CallbackCompletion<WindowHandle> completion;
+    std::shared_ptr<ExecutionContext> source;
+    bool presented = false;
+  };
+
+  void FinishOpenWindow(const std::string& id);
+
   std::optional<AppDirectories> CreateAppDirectories() override { return directories_; }
 
   std::shared_ptr<FileAccessStore> CreateFileAccessStore(const AppDirectories&) override { return file_access_; }
@@ -284,8 +302,9 @@ private:
 
   std::shared_ptr<SystemTaskTransport> CreateSystemTaskTransport() override { return system_tasks_; }
 
-  void OnRuntimeStopped() override {}
+  void OnRuntimeStopped() override;
 
+  napi_env env_;
   AppDirectories directories_;
   OhosResources resources_;
   ArkTsPlatformHost arkts_host_;
@@ -294,6 +313,11 @@ private:
   std::shared_ptr<OhosSystemServices> system_services_;
   std::shared_ptr<OhosSystemTaskTransport> system_tasks_;
   std::shared_ptr<OhosHttpTransport> http_;
+  napi_ref window_stage_ = nullptr;
+  std::string main_window_id_;
+  std::unordered_map<std::string, std::unique_ptr<OhosUiWindow>> windows_;
+  std::unordered_map<std::string, OpenRequest> open_requests_;
+  std::unordered_map<std::uintptr_t, OhosUiWindow*> frames_;
   bool active_ = false;
 };
 
@@ -309,19 +333,19 @@ ArkUI_NativeNodeAPI_1* GetNodeApi() {
   return api;
 }
 
-class OhosUiWindow;
 std::unique_ptr<OhosRuntime> runtime;
-std::unique_ptr<OhosUiWindow> attachment;
+std::uint64_t next_window_id = 0;
 std::uintptr_t next_frame_token = 0;
 bool in_frame_callback = false;
 
 class OhosUiWindow final : public UiWindow {
 public:
-  OhosUiWindow(OhosRuntime& application, ArkUI_NodeContentHandle content, UiContext context, float scale,
-               ThemeBrightness brightness, napi_env env, napi_value text_input_host, napi_value picker_host,
-               napi_value ui_context, napi_value window)
-      : content_(content), context_(std::move(context)), scale_(scale), system_brightness_(brightness),
-        active_(application.IsActive()), env_(env), arkts_host_(env, ui_context, picker_host, nullptr, window),
+  OhosUiWindow(OhosRuntime& application, std::string id, ViewFactory view, const WindowOptions& options,
+               ArkUI_NodeContentHandle content, UiContext context, float scale, ThemeBrightness brightness,
+               napi_env env, napi_value text_input_host, napi_value picker_host, napi_value ui_context,
+               napi_value window)
+      : application_(application), id_(std::move(id)), content_(content), context_(std::move(context)), scale_(scale),
+        system_brightness_(brightness), env_(env), arkts_host_(env, ui_context, picker_host, nullptr, window),
         node_api_(GetNodeApi()),
         root_(node_api_->createNode(ARKUI_NODE_STACK), node_api_->disposeNode),
         node_(node_api_->createNode(ARKUI_NODE_XCOMPONENT), node_api_->disposeNode),
@@ -349,14 +373,13 @@ public:
             "HuxerUI could not set the OHOS surface stacking order");
     Require(OH_ArkUI_XComponent_SetAutoInitialize(node_.get(), false) == 0,
             "HuxerUI could not configure OHOS surface initialization");
-    const auto& app = CurrentApplication();
     auto configuration = application.Resources()->Configuration();
     configuration.display_scale = scale;
-    InitializeWindow(application, app.root_factory, app.options.window, std::move(configuration),
-                     active_ ? WindowLifecycleState::Active : WindowLifecycleState::Background);
+    InitializeWindow(application, std::move(view), options, std::move(configuration));
   }
 
   ~OhosUiWindow() override {
+    CancelFrame();
     accessibility_.Detach();
     Retire();
     if (status_bar_callback_) {
@@ -434,24 +457,31 @@ public:
     if (!accessibility_.Attach(node_.get())) LogError("HuxerUI could not register the OHOS accessibility provider");
   }
 
-  void SetActive(bool active) {
-    active_ = active;
-    UpdateWindowLifecycleState(active ? WindowLifecycleState::Active : WindowLifecycleState::Background);
-    if (active) {
+  void SetPresentation(bool visible, bool focused) {
+    visible_ = visible;
+    focused_ = focused;
+    UpdatePresentation();
+  }
+
+  void UpdatePresentation() {
+    const auto next = !visible_ || !application_.IsActive() ? WindowLifecycleState::Background
+                    : focused_ ? WindowLifecycleState::Active : WindowLifecycleState::Inactive;
+    if (next == lifecycle_) return;
+    const auto previous = std::exchange(lifecycle_, next);
+    UpdateWindowLifecycleState(next);
+    if (next == WindowLifecycleState::Active || previous == WindowLifecycleState::Active) {
+      text_input_.SetFocused(next == WindowLifecycleState::Active);
+    }
+    if (next != WindowLifecycleState::Background) {
       RequestFrameAt(Now());
     } else {
       CancelFrame();
-      CancelInput();
     }
+    if (next != WindowLifecycleState::Active) CancelInput();
   }
 
   void SetConfiguration(ResourceConfiguration configuration, ThemeBrightness brightness) {
-    if (scale_ != configuration.display_scale) {
-      scale_ = configuration.display_scale;
-      if (HasViewport()) {
-        UpdateViewport();
-      }
-    }
+    configuration.display_scale = scale_;
     UpdateResourceConfiguration(std::move(configuration));
     if (system_brightness_ != brightness) {
       system_brightness_ = brightness;
@@ -459,7 +489,12 @@ public:
     }
   }
 
-  void SetSystemInsets(EdgeInsets insets, float window_height) {
+  void SetSystemInsets(EdgeInsets insets, float window_height, float scale) {
+    if (std::exchange(scale_, scale) != scale) {
+      auto configuration = application_.Resources()->Configuration();
+      configuration.display_scale = scale;
+      UpdateResourceConfiguration(std::move(configuration));
+    }
     system_insets_px_ = insets;
     window_height_px_ = window_height;
     if (HasViewport()) {
@@ -468,7 +503,7 @@ public:
   }
 
   void RequestFrameAt(double deadline) override {
-    if (!active_ || !HasViewport() || frame_token_) {
+    if (lifecycle_ == WindowLifecycleState::Background || !HasViewport() || frame_token_) {
       return;
     }
     const double delay = deadline - Now();
@@ -489,9 +524,9 @@ public:
     }
     CancelFrame();
     // ArkUI may deliver a queued callback after the surface or attachment has gone away.
-    frame_token_ = ++next_frame_token;
+    frame_token_ = application_.RegisterFrame(*this);
     if (OH_ArkUI_PostFrameCallback(context_.get(), reinterpret_cast<void*>(frame_token_), OnFrame) != 0) {
-      frame_token_ = 0;
+      CancelFrame();
       LogError("HuxerUI could not request an OHOS frame");
       return;
     }
@@ -504,12 +539,12 @@ public:
     // ArkUI clears the current render dirty flag after running its frame callbacks.
     try {
       DispatchToUiThread([token = frame_token_] {
-        if (attachment && attachment->frame_token_ == token) {
-          attachment->node_api_->markDirty(attachment->node_.get(), NODE_NEED_RENDER);
+        if (auto* window = runtime ? runtime->FindFrame(token) : nullptr) {
+          window->node_api_->markDirty(window->node_.get(), NODE_NEED_RENDER);
         }
       });
     } catch (...) {
-      frame_token_ = 0;
+      CancelFrame();
       throw;
     }
   }
@@ -539,7 +574,7 @@ public:
   ArkTsPlatformHost& ApplicationArkTsHost() { return static_cast<OhosRuntime&>(ApplicationRuntime()).ArkTsHost(); }
 
   bool Scroll(Point position, Point delta, bool touchpad, KeyModifiers modifiers) {
-    if (!active_ || !HasViewport() || (delta.x == 0.0F && delta.y == 0.0F)) {
+    if (lifecycle_ == WindowLifecycleState::Background || !HasViewport() || (delta.x == 0.0F && delta.y == 0.0F)) {
       return false;
     }
     modifiers.meta = pressed_keys_.contains(ARKUI_KEYCODE_META_LEFT) || pressed_keys_.contains(ARKUI_KEYCODE_META_RIGHT);
@@ -550,6 +585,17 @@ public:
   }
 
 private:
+  void RequestWindowCommand(WindowCommand command) override {
+    if (application_.IsMainWindow(id_)) return;
+    switch (command) {
+    case WindowCommand::Show: application_.SendWindowCommand(id_, "show"); break;
+    case WindowCommand::Activate: application_.SendWindowCommand(id_, "activate"); break;
+    case WindowCommand::Hide: application_.SendWindowCommand(id_, "hide"); break;
+    case WindowCommand::Close: application_.SendWindowCommand(id_, "close"); break;
+    default: break;
+    }
+  }
+
   ThemeBrightness QuerySystemThemeBrightness() const override { return system_brightness_; }
 
   void SetSystemBarsContentBrightness(SystemBarContentBrightness status, SystemBarContentBrightness) override {
@@ -599,7 +645,7 @@ private:
 
   static void OnNodeEvent(ArkUI_NodeEvent* event) noexcept {
     auto* window = static_cast<OhosUiWindow*>(OH_ArkUI_NodeEvent_GetUserData(event));
-    if (!window || !window->active_ || !window->HasViewport()) {
+    if (!window || window->lifecycle_ == WindowLifecycleState::Background || !window->HasViewport()) {
       return;
     }
     try {
@@ -619,7 +665,9 @@ private:
           // XComponent stops axis events by default. The ArkTS host receives them with the source tool intact.
           OH_ArkUI_AxisEvent_SetPropagation(input, true);
           break;
-        case NODE_ON_KEY_EVENT: window->HandleKey(input); break;
+        case NODE_ON_KEY_EVENT:
+          if (window->lifecycle_ == WindowLifecycleState::Active) window->HandleKey(input);
+          break;
         default: break;
         }
       }
@@ -676,13 +724,12 @@ private:
   }
 
   static void OnFrame(std::uint64_t, std::uint32_t, void* token) noexcept {
-    if (!attachment || reinterpret_cast<std::uintptr_t>(token) != attachment->frame_token_) {
-      return;
-    }
-    attachment->frame_token_ = 0;
+    auto* window = runtime ? runtime->FindFrame(reinterpret_cast<std::uintptr_t>(token)) : nullptr;
+    if (!window) return;
+    window->CancelFrame();
     const bool was_in_frame_callback = std::exchange(in_frame_callback, true);
     try {
-      attachment->PaintFrame();
+      window->PaintFrame();
     } catch (const std::exception& error) {
       LogError(error.what());
     }
@@ -690,7 +737,7 @@ private:
   }
 
   void CancelFrame() noexcept {
-    frame_token_ = 0;
+    if (frame_token_) application_.ForgetFrame(std::exchange(frame_token_, 0));
     if (cancel_timer_) {
       std::exchange(cancel_timer_, {})();
     }
@@ -887,7 +934,7 @@ private:
   }
 
   void PaintFrame() {
-    if (!active_ || !HasViewport()) {
+    if (lifecycle_ == WindowLifecycleState::Background || !HasViewport()) {
       return;
     }
     const FrameCommit& frame = BuildFrameOrErrorPage(LogError);
@@ -903,11 +950,15 @@ private:
     }
   }
 
+  OhosRuntime& application_;
+  std::string id_;
   ArkUI_NodeContentHandle content_;
   UiContext context_;
   float scale_;
   ThemeBrightness system_brightness_;
-  bool active_;
+  WindowLifecycleState lifecycle_ = WindowLifecycleState::Background;
+  bool visible_ = false;
+  bool focused_ = false;
   napi_env env_;
   napi_ref status_bar_callback_ = nullptr;
   ArkTsPlatformHost arkts_host_;
@@ -944,9 +995,170 @@ private:
   double timer_deadline_ = 0.0;
 };
 
-void Stop() noexcept {
-  attachment.reset();
-  runtime.reset();
+OhosRuntime::~OhosRuntime() {
+  CloseWindowStage();
+  Retire();
+  arkts_host_.Close();
+  file_access_->Disconnect();
+  http_->Disconnect();
+  system_services_->Disconnect();
+}
+
+void OhosRuntime::SetActive(bool active) {
+  active_ = active;
+  system_tasks_->SetActive(active);
+  UpdateApplicationLifecycleState(active ? ApplicationLifecycleState::Active : ApplicationLifecycleState::Background);
+  for (auto& entry : windows_) entry.second->UpdatePresentation();
+}
+
+void OhosRuntime::SetConfiguration(ResourceConfiguration configuration, ThemeBrightness brightness) {
+  resources_.SetConfiguration(configuration);
+  UpdateResourceConfiguration(configuration);
+  for (auto& entry : windows_) entry.second->SetConfiguration(configuration, brightness);
+}
+
+bool OhosRuntime::CanOpenWindow() const noexcept {
+  return IsInitialized() && active_ && window_stage_ && FindWindow(main_window_id_);
+}
+
+std::function<void()> OhosRuntime::RequestOpenWindow(ViewFactory content, WindowOptions options,
+    CallbackCompletion<WindowHandle> completion, std::shared_ptr<ExecutionContext> source) {
+  Require(CanOpenWindow(), "HuxerUI OHOS main window is not ready to open a child window");
+  ValidateWindowSupport(options, {});
+  const auto id = "child-" + std::to_string(++next_window_id);
+  const auto size = ResolveInitialWindowSize(options);
+  std::weak_ptr<ApplicationRuntimeState> application = source->application;
+  open_requests_.emplace(id, OpenRequest{std::move(content), std::move(options), completion, std::move(source)});
+  try {
+    SendWindowCommand(id, "open", size);
+  } catch (...) {
+    open_requests_.erase(id);
+    throw;
+  }
+  return [this, application, id] {
+    if (const auto owner = application.lock(); owner && owner->owner == this && open_requests_.erase(id)) {
+      SendWindowCommand(id, "close");
+    }
+  };
+}
+
+void OhosRuntime::SetWindowStage(std::string id, napi_value host) {
+  Require(!window_stage_, "HuxerUI OHOS already owns a window stage");
+  Require(napi_create_reference(env_, host, 1, &window_stage_) == napi_ok,
+          "HuxerUI could not retain the OHOS window stage");
+  main_window_id_ = std::move(id);
+}
+
+void OhosRuntime::OnRuntimeStopped() {
+  try {
+    SendWindowCommand(main_window_id_, "quit");
+  } catch (const std::exception& error) {
+    LogError(error.what());
+  }
+  CloseWindowStage();
+}
+
+void OhosRuntime::CloseWindowStage() {
+  if (const auto host = std::exchange(window_stage_, nullptr)) napi_delete_reference(env_, host);
+  main_window_id_.clear();
+  for (const auto& entry : std::exchange(open_requests_, {})) {
+    entry.second.completion.Fail(std::make_exception_ptr(std::runtime_error("HuxerUI OHOS window stage closed")));
+  }
+  // Retiring an attachment may call back into ArkTS. Remove the entries before releasing the windows.
+  std::exchange(windows_, {}).clear();
+}
+
+void OhosRuntime::CompleteOpenWindow(const std::string& id, std::optional<std::string> error) {
+  const auto request = open_requests_.find(id);
+  if (request == open_requests_.end()) return;
+  if (error) {
+    const auto entry = open_requests_.extract(request);
+    entry.mapped().completion.Fail(std::make_exception_ptr(std::runtime_error(std::move(*error))));
+    return;
+  }
+  request->second.presented = true;
+  FinishOpenWindow(id);
+}
+
+void OhosRuntime::FinishOpenWindow(const std::string& id) {
+  const auto request = open_requests_.find(id);
+  auto* window = FindWindow(id);
+  if (request == open_requests_.end() || !request->second.presented || !window) return;
+  auto entry = open_requests_.extract(request);
+  auto& open = entry.mapped();
+  if (!IsPresentationSourceAvailable(open.source)) {
+    open.completion.Fail(std::make_exception_ptr(std::logic_error("HuxerUI originating window disconnected")));
+    SendWindowCommand(id, "close");
+    return;
+  }
+  ExecutionGuard guard(InternalAccess::WindowExecution(*window));
+  open.completion.Complete(UseWindow());
+}
+
+OhosUiWindow* OhosRuntime::FindWindow(const std::string& id) const noexcept {
+  const auto entry = windows_.find(id);
+  return entry == windows_.end() ? nullptr : entry->second.get();
+}
+
+std::optional<std::pair<ViewFactory, WindowOptions>> OhosRuntime::WindowContent(const std::string& id) {
+  if (IsMainWindow(id)) {
+    const auto& app = CurrentApplication();
+    return std::pair{app.root_factory, app.options.window};
+  }
+  const auto request = open_requests_.find(id);
+  if (request == open_requests_.end() || !request->second.content) return std::nullopt;
+  return std::pair{std::move(request->second.content), std::move(request->second.options)};
+}
+
+void OhosRuntime::AttachWindow(const std::string& id, std::unique_ptr<OhosUiWindow> window) {
+  windows_.emplace(id, std::move(window));
+  FinishOpenWindow(id);
+}
+
+void OhosRuntime::DetachWindow(const std::string& id) {
+  const auto window = windows_.extract(id);
+  if (!window.empty() && open_requests_.contains(id)) {
+    CompleteOpenWindow(id, "HuxerUI OHOS child window closed during creation");
+  }
+}
+
+void OhosRuntime::SendWindowCommand(const std::string& id, std::string_view command, Size size) {
+  if (!window_stage_) return;
+  napi_handle_scope scope = nullptr;
+  Require(napi_open_handle_scope(env_, &scope) == napi_ok, "HuxerUI could not open the OHOS bridge scope");
+  napi_value host = nullptr;
+  napi_value function = nullptr;
+  napi_value args[4];
+  const bool sent = napi_get_reference_value(env_, window_stage_, &host) == napi_ok &&
+      napi_get_named_property(env_, host, "command", &function) == napi_ok &&
+      napi_create_string_utf8(env_, id.data(), id.size(), &args[0]) == napi_ok &&
+      napi_create_string_utf8(env_, command.data(), command.size(), &args[1]) == napi_ok &&
+      napi_create_double(env_, size.width, &args[2]) == napi_ok &&
+      napi_create_double(env_, size.height, &args[3]) == napi_ok &&
+      napi_call_function(env_, host, function, std::size(args), args, nullptr) == napi_ok;
+  napi_close_handle_scope(env_, scope);
+  Require(sent, "HuxerUI could not send an OHOS window command");
+}
+
+void OhosRuntime::DisableCallbacks() noexcept {
+  for (auto& entry : windows_) {
+    entry.second->ArkTsHost().DisableCallbacks();
+    entry.second->TextInput()->ReleaseHost();
+  }
+  arkts_host_.DisableCallbacks();
+  http_->ReleaseHost();
+  system_tasks_->ReleaseHost();
+}
+
+std::uintptr_t OhosRuntime::RegisterFrame(OhosUiWindow& window) {
+  const auto token = ++next_frame_token;
+  frames_.emplace(token, &window);
+  return token;
+}
+
+OhosUiWindow* OhosRuntime::FindFrame(std::uintptr_t token) const noexcept {
+  const auto entry = frames_.find(token);
+  return entry == frames_.end() ? nullptr : entry->second;
 }
 
 template <auto operation>
@@ -968,6 +1180,19 @@ std::string ReadString(napi_env env, napi_value value) {
           "HuxerUI could not read an OHOS string");
   text.resize(length);
   return text;
+}
+
+template <std::size_t N>
+std::array<napi_value, N> ReadArguments(napi_env env, napi_callback_info info) {
+  std::array<napi_value, N> args;
+  auto count = args.size();
+  Require(napi_get_cb_info(env, info, &count, args.data(), nullptr, nullptr) == napi_ok && count == N,
+          "HuxerUI OHOS bridge received an unexpected argument count");
+  return args;
+}
+
+OhosUiWindow* FindWindow(napi_env env, napi_value id) {
+  return runtime ? runtime->FindWindow(ReadString(env, id)) : nullptr;
 }
 
 napi_value ReadProperty(napi_env env, napi_value object, const char* name) {
@@ -1067,85 +1292,119 @@ napi_value SetActive(napi_env env, napi_callback_info info) {
   if (runtime) {
     runtime->SetActive(next);
   }
-  if (attachment) {
-    attachment->SetActive(next);
-  }
   return nullptr;
 }
 
 napi_value SetConfiguration(napi_env env, napi_callback_info info) {
-  napi_value args[3];
-  std::size_t count = std::size(args);
-  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args),
-          "HuxerUI OHOS setConfiguration expects the locale, scale, and dark mode flag");
+  const auto [locale, scale, dark] = ReadArguments<3>(env, info);
   if (runtime) {
-    auto configuration = ReadConfiguration(env, args[0], args[1]);
-    runtime->SetConfiguration(configuration);
-    if (attachment) {
-      attachment->SetConfiguration(std::move(configuration), ReadSystemBrightness(env, args[2]));
-    }
+    runtime->SetConfiguration(ReadConfiguration(env, locale, scale), ReadSystemBrightness(env, dark));
+  }
+  return nullptr;
+}
+
+napi_value SetWindowStage(napi_env env, napi_callback_info info) {
+  const auto [value, host] = ReadArguments<2>(env, info);
+  if (!runtime) return nullptr;
+  auto id = ReadString(env, value);
+  napi_valuetype type = napi_undefined;
+  Require(napi_typeof(env, host, &type) == napi_ok, "HuxerUI could not read the OHOS window stage");
+  if (type == napi_object) {
+    runtime->SetWindowStage(std::move(id), host);
+  } else if (runtime->IsMainWindow(id)) {
+    runtime->CloseWindowStage();
+  }
+  return nullptr;
+}
+
+napi_value CompleteOpenWindow(napi_env env, napi_callback_info info) {
+  const auto [id, error] = ReadArguments<2>(env, info);
+  napi_valuetype type = napi_undefined;
+  if (runtime && napi_typeof(env, error, &type) == napi_ok) {
+    runtime->CompleteOpenWindow(ReadString(env, id),
+                                type == napi_string ? std::optional(ReadString(env, error)) : std::nullopt);
   }
   return nullptr;
 }
 
 napi_value Attach(napi_env env, napi_callback_info info) {
-  Require(runtime && !attachment, "HuxerUI OHOS needs a running application and a new UI attachment");
-  napi_value args[8];
-  std::size_t count = std::size(args);
+  const auto [value, node, ui_context, density, input, picker, dark, status_bar, system_window] =
+      ReadArguments<9>(env, info);
+  if (!runtime) return nullptr;
+  auto id = ReadString(env, value);
+  Require(!runtime->FindWindow(id), "HuxerUI OHOS window already has a UI attachment");
+  auto view = runtime->WindowContent(id);
+  if (!view) return nullptr;
   ArkUI_NodeContentHandle content = nullptr;
-  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args) &&
-              OH_ArkUI_GetNodeContentFromNapiValue(env, args[0], &content) == 0 && content,
-          "HuxerUI OHOS attach expects node content, a UI context, scale, and service hosts");
-  const float scale = ReadDisplayScale(env, args[2]);
+  Require(OH_ArkUI_GetNodeContentFromNapiValue(env, node, &content) == 0 && content,
+          "HuxerUI OHOS attach expects ArkUI node content");
   ArkUI_ContextHandle handle = nullptr;
-  Require(OH_ArkUI_GetContextFromNapiValue(env, args[1], &handle) == 0 && handle,
+  Require(OH_ArkUI_GetContextFromNapiValue(env, ui_context, &handle) == 0 && handle,
           "HuxerUI OHOS attach expects a UI context");
   // The NDK allocates an opaque context that the caller releases with C++ delete.
   UiContext context(handle, [](ArkUI_ContextHandle value) { ::operator delete(value); });
-  auto window = std::make_unique<OhosUiWindow>(*runtime, content, std::move(context), scale,
-      ReadSystemBrightness(env, args[5]), env, args[3], args[4], args[1], args[7]);
-  window->Attach(args[6]);
-  attachment = std::move(window);
+  auto window = std::make_unique<OhosUiWindow>(*runtime, id, std::move(view->first), view->second, content,
+      std::move(context), ReadDisplayScale(env, density), ReadSystemBrightness(env, dark),
+      env, input, picker, ui_context, system_window);
+  window->Attach(status_bar);
+  runtime->AttachWindow(id, std::move(window));
   return nullptr;
 }
 
-napi_value Detach(napi_env, napi_callback_info) {
-  attachment.reset();
+napi_value Detach(napi_env env, napi_callback_info info) {
+  const auto [id] = ReadArguments<1>(env, info);
+  if (runtime) runtime->DetachWindow(ReadString(env, id));
+  return nullptr;
+}
+
+napi_value SetWindowPresentation(napi_env env, napi_callback_info info) {
+  const auto [id, visibility, focus] = ReadArguments<3>(env, info);
+  if (auto* window = FindWindow(env, id)) {
+    bool visible = false;
+    bool focused = false;
+    Require(napi_get_value_bool(env, visibility, &visible) == napi_ok &&
+                napi_get_value_bool(env, focus, &focused) == napi_ok,
+            "HuxerUI expected OHOS window visibility and focus flags");
+    window->SetPresentation(visible, focused);
+  }
   return nullptr;
 }
 
 napi_value SetSystemInsets(napi_env env, napi_callback_info info) {
-  napi_value args[5];
-  std::size_t count = std::size(args);
-  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args),
-          "HuxerUI OHOS setSystemInsets expects four insets and the window height");
+  const auto args = ReadArguments<7>(env, info);
+  auto* window = FindWindow(env, args[0]);
+  if (!window) return nullptr;
   std::array<float, 5> values{};
   for (std::size_t index = 0; index < values.size(); ++index) {
     double value = 0.0;
-    Require(napi_get_value_double(env, args[index], &value) == napi_ok &&
+    Require(napi_get_value_double(env, args[index + 1], &value) == napi_ok &&
                 value >= 0.0 && value <= std::numeric_limits<float>::max(),
             "HuxerUI expected nonnegative OHOS inset and window dimensions");
     values[index] = static_cast<float>(value);
   }
-  if (attachment) {
-    attachment->SetSystemInsets({values[0], values[1], values[2], values[3]}, values[4]);
-  }
+  window->SetSystemInsets({values[0], values[1], values[2], values[3]}, values[4], ReadDisplayScale(env, args[6]));
   return nullptr;
 }
 
-napi_value HandleBack(napi_env env, napi_callback_info) {
+napi_value HandleBack(napi_env env, napi_callback_info info) {
+  const auto [value] = ReadArguments<1>(env, info);
+  const auto id = ReadString(env, value);
+  auto* window = runtime ? runtime->FindWindow(id) : nullptr;
+  bool handled = window && (window->TextInput()->HandleBack() || window->HandleBack());
+  if (!handled && runtime && !runtime->IsMainWindow(id)) {
+    if (auto* child = runtime->FindWindow(id)) {
+      if (!child->HandleWindowRequest(WindowCommand::Close)) runtime->SendWindowCommand(id, "close");
+      handled = true;
+    }
+  }
   napi_value result = nullptr;
-  const bool handled = attachment && (attachment->TextInput()->HandleBack() || attachment->HandleBack());
   Require(napi_get_boolean(env, handled, &result) == napi_ok,
           "HuxerUI could not return the OHOS back action result");
   return result;
 }
 
 napi_value Scroll(napi_env env, napi_callback_info info) {
-  napi_value args[8];
-  std::size_t count = std::size(args);
-  Require(napi_get_cb_info(env, info, &count, args, nullptr, nullptr) == napi_ok && count == std::size(args),
-          "HuxerUI OHOS scroll expects a position, deltas, input device, and modifiers");
+  const auto args = ReadArguments<9>(env, info);
   std::array<double, 4> values{};
   for (std::size_t index = 0; index < values.size(); ++index) {
     Require(napi_get_value_double(env, args[index], &values[index]) == napi_ok,
@@ -1160,26 +1419,35 @@ napi_value Scroll(napi_env env, napi_callback_info info) {
           "HuxerUI expected boolean OHOS scroll device and modifier flags");
   const Point position{static_cast<float>(values[0]), static_cast<float>(values[1])};
   const Point delta{static_cast<float>(values[2]), static_cast<float>(values[3])};
-  const bool consumed = attachment && attachment->Scroll(position, delta, touchpad, modifiers);
+  auto* window = FindWindow(env, args[8]);
+  const bool consumed = window && window->Scroll(position, delta, touchpad, modifiers);
   napi_value result = nullptr;
   Require(napi_get_boolean(env, consumed, &result) == napi_ok, "HuxerUI could not return the OHOS scroll result");
   return result;
 }
 
-napi_value EditText(napi_env, napi_callback_info info) {
-  return attachment ? attachment->TextInput()->HandleCommand(info) : nullptr;
+napi_value EditText(napi_env env, napi_callback_info info) {
+  const auto args = ReadArguments<6>(env, info);
+  auto* window = FindWindow(env, args[0]);
+  return window ? window->TextInput()->HandleCommand(std::span(args).subspan<1>()) : nullptr;
 }
 
-napi_value ReadTextContext(napi_env, napi_callback_info info) {
-  return attachment ? attachment->TextInput()->ReadContext(info) : nullptr;
+napi_value ReadTextContext(napi_env env, napi_callback_info info) {
+  const auto args = ReadArguments<4>(env, info);
+  auto* window = FindWindow(env, args[0]);
+  return window ? window->TextInput()->ReadContext(std::span(args).subspan<1>()) : nullptr;
 }
 
-napi_value CompleteOpenFiles(napi_env, napi_callback_info info) {
-  return attachment ? attachment->FilePicker().CompleteOpen(info) : nullptr;
+napi_value CompleteOpenFiles(napi_env env, napi_callback_info info) {
+  const auto [id, token, files] = ReadArguments<3>(env, info);
+  if (auto* window = FindWindow(env, id)) window->FilePicker().CompleteOpen(token, files);
+  return nullptr;
 }
 
-napi_value CompleteSaveFile(napi_env, napi_callback_info info) {
-  return attachment ? attachment->FilePicker().CompleteSave(info) : nullptr;
+napi_value CompleteSaveFile(napi_env env, napi_callback_info info) {
+  const auto [id, token, saved] = ReadArguments<3>(env, info);
+  if (auto* window = FindWindow(env, id)) window->FilePicker().CompleteSave(token, saved);
+  return nullptr;
 }
 
 napi_value CompleteFileAccess(napi_env, napi_callback_info info) {
@@ -1285,6 +1553,30 @@ napi_value HttpEvent(napi_env, napi_callback_info info) {
 
 } // namespace
 
+bool ApplicationService::CanOpenWindow() const {
+  if (!runtime_) return false;
+  runtime_->state_->RequireThread();
+  const auto* platform = dynamic_cast<OhosRuntime*>(runtime_);
+  return platform && platform->CanOpenWindow();
+}
+
+Task<WindowHandle> ApplicationService::OpenWindowAsync(ViewFactory content, WindowOptions options) const {
+  if (!runtime_) throw std::logic_error("HuxerUI application is disconnected");
+  auto source = CapturePresentationContext(runtime_->state_->execution);
+  return RunCallbackTask<WindowHandle>(
+      [source = std::move(source), content = std::move(content), options = std::move(options)](
+          CallbackCompletion<WindowHandle> completion) mutable {
+        if (!IsPresentationSourceAvailable(source)) {
+          throw std::logic_error("HuxerUI originating application or window is disconnected");
+        }
+        auto* owner = source->application.lock()->owner;
+        owner->ValidateWindowCreation(content, options);
+        auto* platform = dynamic_cast<OhosRuntime*>(owner);
+        if (!platform) throw std::runtime_error("HuxerUI host does not support creating another HarmonyOS window");
+        return platform->RequestOpenWindow(std::move(content), std::move(options), completion, std::move(source));
+      });
+}
+
 ArkTsPlatformHost& GetArkTsPlatformHost(Runtime& owner) { return static_cast<OhosRuntime&>(owner).ArkTsHost(); }
 
 ArkTsPlatformHost& GetArkTsPlatformHost(UiWindow& owner) { return static_cast<OhosUiWindow&>(owner).ArkTsHost(); }
@@ -1300,12 +1592,15 @@ int RunPlatformApplication(const Application&) {
 napi_value InitializeOhosModule(napi_env env, napi_value exports) {
   const napi_property_descriptor properties[] = {
       {"start", nullptr, Invoke<Start>, nullptr, nullptr, nullptr, napi_default, nullptr},
-      {"stop", nullptr, [](napi_env, napi_callback_info) -> napi_value { Stop(); return nullptr; },
+      {"stop", nullptr, [](napi_env, napi_callback_info) -> napi_value { runtime.reset(); return nullptr; },
        nullptr, nullptr, nullptr, napi_default, nullptr},
       {"setActive", nullptr, Invoke<SetActive>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"setConfiguration", nullptr, Invoke<SetConfiguration>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"setWindowStage", nullptr, Invoke<SetWindowStage>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"completeOpenWindow", nullptr, Invoke<CompleteOpenWindow>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"attach", nullptr, Invoke<Attach>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"detach", nullptr, Invoke<Detach>, nullptr, nullptr, nullptr, napi_default, nullptr},
+      {"setWindowPresentation", nullptr, Invoke<SetWindowPresentation>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"setSystemInsets", nullptr, Invoke<SetSystemInsets>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"handleBack", nullptr, Invoke<HandleBack>, nullptr, nullptr, nullptr, napi_default, nullptr},
       {"scroll", nullptr, Invoke<Scroll>, nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -1328,16 +1623,8 @@ napi_value InitializeOhosModule(napi_env env, napi_value exports) {
   if (napi_define_properties(env, exports, std::size(properties), properties) != napi_ok ||
       napi_add_env_cleanup_hook(env, [](void*) {
         // Environment teardown may only release references. The ability's normal teardown can still call ArkTS.
-        if (attachment) {
-          attachment->ArkTsHost().DisableCallbacks();
-          attachment->TextInput()->ReleaseHost();
-        }
-        if (runtime) {
-          runtime->ArkTsHost().DisableCallbacks();
-          runtime->Http().ReleaseHost();
-          runtime->SystemTasks().ReleaseHost();
-        }
-        Stop();
+        if (runtime) runtime->DisableCallbacks();
+        runtime.reset();
       }, nullptr) != napi_ok) {
     napi_throw_error(env, nullptr, "HuxerUI failed to expose the OHOS application host");
     return nullptr;
@@ -1346,3 +1633,13 @@ napi_value InitializeOhosModule(napi_env env, napi_value exports) {
 }
 
 } // namespace huxerui::detail
+
+namespace huxerui {
+
+bool ApplicationHandle::CanOpenWindow() const { return service_->CanOpenWindow(); }
+
+Task<WindowHandle> ApplicationHandle::OpenWindowAsync(ViewFactory content, WindowOptions options) const {
+  return service_->OpenWindowAsync(std::move(content), std::move(options));
+}
+
+} // namespace huxerui

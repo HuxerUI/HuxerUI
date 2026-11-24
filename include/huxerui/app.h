@@ -627,22 +627,22 @@ public:
   /// failed native creation throws std::runtime_error. Success does not imply that the first frame has rendered.
   /// Discarding the returned handle leaves the window open. Options do not inherit from the opening window.
   WindowHandle OpenWindow(ViewFactory content, WindowOptions options = {}) const;
-#if defined(__APPLE__) && TARGET_OS_IOS && !TARGET_OS_MACCATALYST
-  /// Reports whether the iOS host supports requesting another window scene.
-  /// Query on the application thread. UIKit can still reject an individual request.
-  /// @note Available only on iOS and iPadOS.
+#if (defined(__APPLE__) && TARGET_OS_IOS && !TARGET_OS_MACCATALYST) || defined(__OHOS__)
+  /// Reports whether the current host can accept an asynchronous window request.
+  /// Query on the application thread. The system can still reject an individual request.
+  /// @note Available on iOS, iPadOS, and HarmonyOS.
   bool CanOpenWindow() const;
 
-  /// Requests another UIKit window.
+  /// Requests another window sharing this application's services and State.
   /// @param content Owned factory for the new window's root composition and fresh Environment.
-  /// @param options Startup options; UIKit determines the window placement and size.
-  /// @return A lazy Task that yields the new handle on the application thread after UIKit connects the scene
-  /// and HuxerUI initializes its attachment.
+  /// @param options Startup options. The system determines the placement and may constrain the size.
+  /// @return A lazy Task that yields the new handle on the application thread once the host presents the attachment.
   /// @throws std::invalid_argument If the factory or options are invalid.
   /// @throws std::logic_error If the application or requesting attachment is unavailable when started.
-  /// @throws std::runtime_error If UIKit rejects the request or the window cannot be initialized.
-  /// Start outside composition and installation. Canceling before initialization suppresses a late window.
-  /// @note Available only on iOS and iPadOS.
+  /// @throws std::runtime_error If the system rejects the request or the window cannot be initialized.
+  /// Start outside composition and installation. Canceling a pending request suppresses a late window.
+  /// HarmonyOS opens a child of the application main window. Closing the main window closes its children.
+  /// @note Available on iOS, iPadOS, and HarmonyOS.
   Task<WindowHandle> OpenWindowAsync(ViewFactory content, WindowOptions options = {}) const;
 #endif
 

@@ -59,8 +59,8 @@ public:
   std::function<void()> SaveFile(File source, SaveFileOptions options, FilePickerSaveCompletion completion) override;
   std::function<void()> OpenDirectory(bool writable, FilePickerOpenCompletion completion) override;
 
-  napi_value CompleteOpen(napi_callback_info info);
-  napi_value CompleteSave(napi_callback_info info);
+  void CompleteOpen(napi_value token, napi_value selections);
+  void CompleteSave(napi_value token, napi_value saved);
   void ReleaseHost() noexcept;
 
 private:

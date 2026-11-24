@@ -63,6 +63,10 @@ export interface HuxerUIHttpHost {
   abort(token: string): void;
 }
 
+export interface HuxerUIWindowStageHost {
+  command(id: string, command: string, width: number, height: number): void;
+}
+
 export interface HuxerUIApplicationModule {
   start(context: common.Context, locale: string, scale: number, services: HuxerUISystemServicesHost,
     http: HuxerUIHttpHost, activation: HuxerUIActivation | undefined, files: HuxerUIFilePickerHost,
@@ -71,18 +75,22 @@ export interface HuxerUIApplicationModule {
   stop(): void;
   setActive(active: boolean): void;
   setConfiguration(locale: string, scale: number, systemDark: boolean): void;
-  attach(content: NodeContent, context: UIContext, scale: number, textInput: HuxerUITextInputHost,
+  setWindowStage(mainId: string, host: HuxerUIWindowStageHost | undefined): void;
+  completeOpenWindow(id: string, error: string | undefined): void;
+  attach(id: string, content: NodeContent, context: UIContext, scale: number, textInput: HuxerUITextInputHost,
     filePicker: HuxerUIFilePickerHost, systemDark: boolean, setStatusBarBrightness: (light: boolean) => void,
     owner: window.Window): void;
-  detach(): void;
-  setSystemInsets(top: number, right: number, bottom: number, left: number, windowHeight: number): void;
-  handleBack(): boolean;
+  detach(id: string): void;
+  setWindowPresentation(id: string, visible: boolean, focused: boolean): void;
+  setSystemInsets(id: string, top: number, right: number, bottom: number, left: number, windowHeight: number,
+    scale: number): void;
+  handleBack(id: string): boolean;
   scroll(x: number, y: number, deltaX: number, deltaY: number, touchpad: boolean, shift: boolean, control: boolean,
-    alt: boolean): boolean;
-  editText(token: string, command: number, first: number, second: number, text: string): void;
-  readTextContext(token: string, query: number, length: number): string | number | undefined;
-  completeOpenFiles(token: string, files: HuxerUIPickedFile[]): void;
-  completeSaveFile(token: string, saved: boolean): void;
+    alt: boolean, id: string): boolean;
+  editText(id: string, token: string, command: number, first: number, second: number, text: string): void;
+  readTextContext(id: string, token: string, query: number, length: number): string | number | undefined;
+  completeOpenFiles(id: string, token: string, files: HuxerUIPickedFile[]): void;
+  completeSaveFile(id: string, token: string, saved: boolean): void;
   completeFileAccess(token: string, files: HuxerUIPickedFile[], status: number, canPersist: boolean): void;
   completeSystemService(token: string, result: number): void;
   systemTaskEvent(token: string, event: number, result: number, message?: string): void;

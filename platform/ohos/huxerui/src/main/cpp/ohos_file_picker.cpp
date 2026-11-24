@@ -634,31 +634,23 @@ std::function<void()> OhosFilePicker::OpenDirectory(bool writable, FilePickerOpe
   return {};
 }
 
-napi_value OhosFilePicker::CompleteOpen(napi_callback_info info) {
-  napi_value args[2];
-  std::size_t count = std::size(args);
-  Check(napi_get_cb_info(env_, info, &count, args, nullptr, nullptr));
-  if (count != std::size(args) || !open_completion_ || !Matches(args[0])) {
-    return nullptr;
+void OhosFilePicker::CompleteOpen(napi_value token, napi_value selections) {
+  if (!open_completion_ || !Matches(token)) {
+    return;
   }
-  auto files = ReadSelections(env_, args[1], true);
+  auto files = ReadSelections(env_, selections, true);
   request_.clear();
   std::exchange(open_completion_, {})(std::move(files).value_or(std::vector<FileReference>{}));
-  return nullptr;
 }
 
-napi_value OhosFilePicker::CompleteSave(napi_callback_info info) {
-  napi_value args[2];
-  std::size_t count = std::size(args);
-  Check(napi_get_cb_info(env_, info, &count, args, nullptr, nullptr));
-  if (count != std::size(args) || !save_completion_ || !Matches(args[0])) {
-    return nullptr;
+void OhosFilePicker::CompleteSave(napi_value token, napi_value succeeded) {
+  if (!save_completion_ || !Matches(token)) {
+    return;
   }
   bool saved = false;
-  Check(napi_get_value_bool(env_, args[1], &saved));
+  Check(napi_get_value_bool(env_, succeeded, &saved));
   request_.clear();
   std::exchange(save_completion_, {})(saved);
-  return nullptr;
 }
 
 void OhosFilePicker::ReleaseHost() noexcept {

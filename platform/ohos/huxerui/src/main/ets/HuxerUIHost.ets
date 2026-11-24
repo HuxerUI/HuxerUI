@@ -1,8 +1,8 @@
 import { Configuration, ConfigurationConstant, UIAbility, Want, wantConstant } from '@kit.AbilityKit';
-import { display, KeyboardAvoidMode, NodeContent, window } from '@kit.ArkUI';
+import { display, KeyboardAvoidMode, NodeContent, UIContext, window } from '@kit.ArkUI';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { i18n } from '@kit.LocalizationKit';
-import { HuxerUIActivation, HuxerUIApplicationModule } from './HuxerUIApplicationModule';
+import { HuxerUIActivation, HuxerUIApplicationModule, HuxerUIWindowStageHost } from './HuxerUIApplicationModule';
 import { HuxerUIBackgroundTasks } from './HuxerUIBackgroundTasks';
 import { HuxerUIFilePicker, withGrantedFiles } from './HuxerUIFilePicker';
 import { HuxerUIHttp } from './HuxerUIHttp';
@@ -12,8 +12,8 @@ import { HuxerUISystemTasks } from './HuxerUISystemTasks';
 import { HuxerUITextInput } from './HuxerUITextInput';
 
 let applicationModule: HuxerUIApplicationModule | undefined;
-let filePicker: HuxerUIFilePicker | undefined;
-let applicationWindow: window.Window | undefined;
+let applicationWindows: HuxerUIWindows | undefined;
+let nextStageId = 0;
 let systemDark = false;
 
 const systemAvoidAreaTypes: window.AvoidAreaType[] = [
@@ -82,6 +82,151 @@ function withActivation(want: Want | undefined, receive: (activation?: HuxerUIAc
   withGrantedFiles(uris, writable, files => receive(files ? { files: files } : undefined));
 }
 
+const windowStorageKey = 'huxeruiWindow';
+
+class HuxerUIWindows implements HuxerUIWindowStageHost {
+  readonly mainId: string = 'main-' + (++nextStageId).toString();
+  private stage: window.WindowStage;
+  private module: HuxerUIApplicationModule;
+  private quit: () => Promise<void>;
+  private windows: Map<string, window.Window> = new Map();
+  private opening: Set<string> = new Set();
+  private closing: Set<string> = new Set();
+
+  constructor(stage: window.WindowStage, module: HuxerUIApplicationModule, quit: () => Promise<void>) {
+    this.stage = stage;
+    this.module = module;
+    this.quit = quit;
+    this.windows.set(this.mainId, stage.getMainWindowSync());
+    this.module.setWindowStage(this.mainId, this);
+  }
+
+  id(context?: UIContext): string {
+    return context?.getSharedLocalStorage()?.get<string>(windowStorageKey) ?? this.mainId;
+  }
+
+  get(id: string): window.Window | undefined {
+    return this.windows.get(id);
+  }
+
+  async loadMain(): Promise<void> {
+    const main = this.windows.get(this.mainId);
+    if (!main) return;
+    try {
+      await main.setWindowLayoutFullScreen(true);
+    } catch (error) {
+      console.warn(`HuxerUI could not enable immersive layout: ${error}`);
+    }
+    if (this.windows.has(this.mainId)) {
+      await this.stage.loadContent('pages/Index', this.storage(this.mainId));
+    }
+  }
+
+  command(id: string, command: string, width: number, height: number): void {
+    if (command === 'quit') {
+      this.opening.clear();
+      // Let the C++ shutdown callback return before retiring the ability.
+      void Promise.resolve().then(this.quit).catch((error: Error): void => {
+        console.warn(`HuxerUI could not terminate the OHOS ability: ${error}`);
+      });
+    } else if (command === 'open') {
+      this.opening.add(id);
+      void this.open(id, width, height);
+    } else {
+      void this.update(id, command).catch((error: Error): void => {
+        console.warn(`HuxerUI could not ${command} an OHOS window: ${error}`);
+      });
+    }
+  }
+
+  forget(id: string): void {
+    this.windows.delete(id);
+    this.module.detach(id);
+  }
+
+  dispose(): void {
+    this.module.setWindowStage(this.mainId, undefined);
+    this.opening.clear();
+    this.windows.delete(this.mainId);
+    this.windows.forEach((_: window.Window, id: string): void => this.command(id, 'close', 0, 0));
+  }
+
+  failOpen(id: string, message: string): void {
+    if (this.opening.delete(id)) {
+      this.module.completeOpenWindow(id, message);
+      this.command(id, 'close', 0, 0);
+    }
+  }
+
+  private storage(id: string): LocalStorage {
+    const storage = new LocalStorage();
+    storage.setOrCreate(windowStorageKey, id);
+    return storage;
+  }
+
+  private async open(id: string, width: number, height: number): Promise<void> {
+    try {
+      const child = await this.stage.createSubWindow('huxerui-' + id);
+      // The creation promise may finish after the Task was canceled or its stage was destroyed.
+      if (!this.opening.has(id)) {
+        await child.destroyWindow();
+        return;
+      }
+      this.windows.set(id, child);
+      const bounds = this.stage.getMainWindowSync().getWindowProperties().windowRect;
+      const scale = displayScale();
+      const w = Math.max(1, Math.min(Math.round(width * scale), bounds.width));
+      const h = Math.max(1, Math.min(Math.round(height * scale), bounds.height));
+      try {
+        await child.resize(w, h);
+        await child.moveWindowTo(bounds.left + Math.floor((bounds.width - w) / 2),
+          bounds.top + Math.floor((bounds.height - h) / 2));
+      } catch (error) {
+        console.warn(`HuxerUI could not set the preferred OHOS child window size or position: ${error}`);
+      }
+      if (!this.opening.has(id)) return;
+      await child.loadContent('pages/Index', this.storage(id));
+      if (!this.opening.has(id)) return;
+      await child.showWindow();
+      if (this.opening.delete(id)) {
+        this.module.completeOpenWindow(id, undefined);
+      }
+    } catch (error) {
+      this.failOpen(id, `HuxerUI could not open an OHOS window: ${error}`);
+    }
+  }
+
+  private async update(id: string, command: string): Promise<void> {
+    if (command === 'close') this.opening.delete(id);
+    const child = this.windows.get(id);
+    if (!child || this.closing.has(id)) return;
+    switch (command) {
+      case 'close':
+        this.closing.add(id);
+        try {
+          await child.destroyWindow();
+          this.forget(id);
+        } finally {
+          this.closing.delete(id);
+        }
+        break;
+      case 'show':
+        await child.showWindow();
+        break;
+      case 'activate':
+        if (child.isWindowShowing()) {
+          await child.raiseToAppTop();
+        } else {
+          await child.showWindow();
+        }
+        break;
+      case 'hide':
+        await child.minimize();
+        break;
+    }
+  }
+}
+
 /** Hosts the HuxerUI application and loads `pages/Index` when its window is ready. */
 export abstract class HuxerUIAbility extends UIAbility {
   private backgroundTasks?: HuxerUIBackgroundTasks;
@@ -115,17 +260,22 @@ export abstract class HuxerUIAbility extends UIAbility {
       this.backgroundTasks?.watch();
     });
     applicationModule = module;
-    filePicker = files;
   }
 
   onWindowStageCreate(stage: window.WindowStage): void {
-    const mainWindow = stage.getMainWindowSync();
-    applicationWindow = mainWindow;
-    void this.loadWindowContent(stage, mainWindow);
+    if (!applicationModule) return;
+    const windows = new HuxerUIWindows(stage, applicationModule, () => {
+      this.closeWindowStage();
+      return this.context.terminateSelf();
+    });
+    applicationWindows = windows;
+    void windows.loadMain().catch((error: Error): void => {
+      console.error(`HuxerUI could not load the application page: ${error}`);
+    });
   }
 
   onWindowStageDestroy(): void {
-    applicationWindow = undefined;
+    this.closeWindowStage();
   }
 
   onForeground(): void {
@@ -153,43 +303,46 @@ export abstract class HuxerUIAbility extends UIAbility {
   }
 
   onDestroy(): void {
+    this.closeWindowStage();
     this.backgroundTasks?.close();
     applicationModule?.stop();
     this.backgroundTasks = undefined;
     applicationModule = undefined;
-    filePicker = undefined;
-    applicationWindow = undefined;
   }
 
-  private async loadWindowContent(stage: window.WindowStage, mainWindow: window.Window): Promise<void> {
-    try {
-      await mainWindow.setWindowLayoutFullScreen(true);
-    } catch (error) {
-      console.warn(`HuxerUI could not enable immersive layout: ${error}`);
-    }
-    if (applicationWindow === mainWindow) {
-      try {
-        await stage.loadContent('pages/Index');
-      } catch (error) {
-        console.error(`HuxerUI could not load the application page: ${error}`);
-      }
-    }
+  private closeWindowStage(): void {
+    const windows = applicationWindows;
+    applicationWindows = undefined;
+    windows?.dispose();
   }
 }
 
 /**
  * Forwards the page's back action to HuxerUI.
+ * @param context The originating page's UI context. Omit it when forwarding only from the main window.
  * @returns True when HuxerUI handled the action.
  */
-export function handleHuxerUIBack(): boolean {
-  return applicationModule?.handleBack() ?? false;
+export function handleHuxerUIBack(context?: UIContext): boolean {
+  const id = applicationWindows?.id(context);
+  return id !== undefined && (applicationModule?.handleBack(id) ?? false);
 }
 
-/** Attaches the running application to the ArkUI page. Each Runtime supports one attached surface at a time. */
+/** Attaches one ArkUI page to its HuxerUI window in the running application. */
 @Component
 export struct HuxerUISurface {
   private surface: NodeContent = new NodeContent();
   private attachedWindow?: window.Window;
+  private attachedId: string = '';
+
+  private updatePresentation = (event?: window.WindowEventType): void => {
+    const owner = this.attachedWindow;
+    if (!owner) return;
+    if (event === window.WindowEventType.WINDOW_DESTROYED) {
+      applicationWindows?.forget(this.attachedId);
+    } else {
+      applicationModule?.setWindowPresentation(this.attachedId, owner.isWindowShowing(), owner.isFocused());
+    }
+  };
 
   private updateInsets = (): void => {
     const mainWindow = this.attachedWindow;
@@ -219,7 +372,8 @@ export struct HuxerUISurface {
         }
       }
     }
-    applicationModule?.setSystemInsets(top, right, bottom, left, properties.windowRect.height);
+    applicationModule?.setSystemInsets(this.attachedId, top, right, bottom, left, properties.windowRect.height,
+      this.getUIContext().vp2px(1));
   };
 
   build() {
@@ -230,12 +384,13 @@ export struct HuxerUISurface {
     .height('100%')
     // Use the ArkTS source tool to distinguish touchpad and mouse. Begin can repeat the first wheel delta.
     .onAxisEvent((event: AxisEvent): void => {
-      if (event.action === AxisAction.UPDATE) {
+      if (this.attachedWindow && event.action === AxisAction.UPDATE) {
         const touchpad = event.sourceTool === SourceTool.TOUCHPAD || event.source === SourceType.TouchScreen;
         if (touchpad || event.source === SourceType.Mouse) {
           const consumed = applicationModule?.scroll(event.x, event.y, event.getHorizontalAxisValue(),
             event.getVerticalAxisValue(), touchpad, event.getModifierKeyState?.(['Shift']) ?? false,
-            event.getModifierKeyState?.(['Ctrl']) ?? false, event.getModifierKeyState?.(['Alt']) ?? false);
+            event.getModifierKeyState?.(['Ctrl']) ?? false, event.getModifierKeyState?.(['Alt']) ?? false,
+            this.attachedId);
           if (consumed) {
             return;
           }
@@ -244,26 +399,49 @@ export struct HuxerUISurface {
       event.propagation();
     })
     .onAttach(() => {
-      const mainWindow = applicationWindow;
-      if (!applicationModule || !filePicker || !mainWindow) {
-        throw new Error('HuxerUI surface requires a running application');
-      }
       const context = this.getUIContext();
+      const windows = applicationWindows;
+      const module = applicationModule;
+      const id = windows?.id(context);
+      const owner = id === undefined ? undefined : windows?.get(id);
+      if (!windows || !module || !owner || id === undefined) return;
+      const main = id === windows.mainId;
+      const hostContext = context.getHostContext();
+      if (!hostContext) return;
+      const picker = new HuxerUIFilePicker(module, hostContext, true, id);
       context.setKeyboardAvoidMode(KeyboardAvoidMode.RESIZE);
-      const textInput = new HuxerUITextInput(applicationModule, mainWindow.getWindowProperties().id);
-      applicationModule.attach(this.surface, context, context.vp2px(1), textInput, filePicker, systemDark,
-        light => setStatusBarBrightness(mainWindow, light), mainWindow);
-      this.attachedWindow = mainWindow;
-      mainWindow.on('avoidAreaChange', this.updateInsets);
-      mainWindow.on('windowSizeChange', this.updateInsets);
+      const textInput = new HuxerUITextInput(module, id, owner.getWindowProperties().id);
+      try {
+        module.attach(id, this.surface, context, context.vp2px(1), textInput, picker, systemDark, light => {
+          if (main) void setStatusBarBrightness(owner, light);
+        }, owner);
+      } catch (error) {
+        if (main) throw new Error(`HuxerUI could not attach the OHOS main window: ${error}`);
+        windows.failOpen(id, `HuxerUI could not attach the OHOS child window: ${error}`);
+        return;
+      }
+      this.attachedWindow = owner;
+      this.attachedId = id;
+      owner.on('avoidAreaChange', this.updateInsets);
+      owner.on('windowSizeChange', this.updateInsets);
+      owner.on('windowEvent', this.updatePresentation);
       this.updateInsets();
+      this.updatePresentation();
     })
     .onDetach(() => {
-      const mainWindow = this.attachedWindow;
+      const owner = this.attachedWindow;
+      if (!owner) return;
+      const id = this.attachedId;
       this.attachedWindow = undefined;
-      mainWindow?.off('avoidAreaChange', this.updateInsets);
-      mainWindow?.off('windowSizeChange', this.updateInsets);
-      applicationModule?.detach();
+      this.attachedId = '';
+      try {
+        owner.off('avoidAreaChange', this.updateInsets);
+        owner.off('windowSizeChange', this.updateInsets);
+        owner.off('windowEvent', this.updatePresentation);
+      } catch (_) {
+        // The system can destroy the window before ArkUI detaches the content.
+      }
+      applicationModule?.detach(id);
     })
   }
 }

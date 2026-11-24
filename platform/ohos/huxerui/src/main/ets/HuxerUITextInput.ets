@@ -12,10 +12,12 @@ enum ContextQuery { Left, Right, Cursor }
 
 class TextInputConnection {
   private module: HuxerUIApplicationModule;
+  private id: string;
   private token: string;
 
-  constructor(module: HuxerUIApplicationModule, token: string) {
+  constructor(module: HuxerUIApplicationModule, id: string, token: string) {
     this.module = module;
+    this.id = id;
     this.token = token;
   }
 
@@ -57,11 +59,11 @@ class TextInputConnection {
   }
 
   private edit(command: EditCommand, first: number = 0, second: number = 0, text: string = ''): void {
-    this.module.editText(this.token, command, first, second, text);
+    this.module.editText(this.id, this.token, command, first, second, text);
   }
 
   private read(query: ContextQuery, length: number): string {
-    const result = this.module.readTextContext(this.token, query, length);
+    const result = this.module.readTextContext(this.id, this.token, query, length);
     return typeof result === 'string' ? result : '';
   }
 
@@ -84,13 +86,14 @@ class TextInputConnection {
   private leftText = (length: number): string => this.read(ContextQuery.Left, length);
   private rightText = (length: number): string => this.read(ContextQuery.Right, length);
   private cursor = (): number => {
-    const result = this.module.readTextContext(this.token, ContextQuery.Cursor, 0);
+    const result = this.module.readTextContext(this.id, this.token, ContextQuery.Cursor, 0);
     return typeof result === 'number' ? result : 0;
   };
 }
 
-// The system controller is shared. Serialize operations across surface replacement as well as focus changes.
+// The system controller has one connection across all windows. An old window may disconnect after the next one starts.
 let operations: Promise<void> = Promise.resolve();
+let connected: TextInputConnection | undefined;
 
 function enqueue(operation: () => Promise<void>): void {
   operations = operations.then(operation).catch((error: BusinessError) => {
@@ -101,21 +104,30 @@ function enqueue(operation: () => Promise<void>): void {
 export class HuxerUITextInput implements HuxerUITextInputHost {
   private controller: inputMethod.InputMethodController = inputMethod.getController();
   private requested: TextInputConnection | undefined;
-  private connected: TextInputConnection | undefined;
   private module: HuxerUIApplicationModule;
+  private id: string;
   private windowId: number | undefined;
 
-  constructor(module: HuxerUIApplicationModule, windowId: number | undefined) {
+  constructor(module: HuxerUIApplicationModule, id: string, windowId: number | undefined) {
     this.module = module;
+    this.id = id;
     this.windowId = windowId;
   }
 
   connect(token: string, inputType: number, enterKey: number): void {
-    const connection = new TextInputConnection(this.module, token);
+    const connection = new TextInputConnection(this.module, this.id, token);
     this.requested = connection;
     enqueue(async () => {
       if (this.requested !== connection) {
         return;
+      }
+      if (connected) {
+        connected.unsubscribe(this.controller);
+        connected = undefined;
+        await this.controller.detach();
+        if (this.requested !== connection) {
+          return;
+        }
       }
       const config: inputMethod.TextConfig = {
         inputAttribute: { textInputType: inputType, enterKeyType: enterKey }
@@ -127,12 +139,12 @@ export class HuxerUITextInput implements HuxerUITextInputHost {
         // Preview support is negotiated at attachment. Editing events require an attached client.
         connection.subscribePreview(this.controller);
         await this.controller.attach(false, config);
-        this.connected = connection;
+        connected = connection;
         connection.subscribeEditing(this.controller);
       } catch (error) {
         connection.unsubscribe(this.controller);
-        if (this.connected === connection) {
-          this.connected = undefined;
+        if (connected === connection) {
+          connected = undefined;
           await this.controller.detach();
         }
         hilog.warn(0xCAFE, 'HuxerUI', 'Could not attach the OHOS input method (%{public}d)',
@@ -142,11 +154,11 @@ export class HuxerUITextInput implements HuxerUITextInputHost {
   }
 
   disconnect(): void {
+    const connection = this.requested;
     this.requested = undefined;
     enqueue(async () => {
-      const connection = this.connected;
-      if (connection) {
-        this.connected = undefined;
+      if (connection && connected === connection) {
+        connected = undefined;
         connection.unsubscribe(this.controller);
         await this.controller.detach();
       }
@@ -173,7 +185,7 @@ export class HuxerUITextInput implements HuxerUITextInputHost {
     const connection = this.requested;
     if (connection) {
       enqueue(async () => {
-        if (this.requested === connection && this.connected === connection) {
+        if (this.requested === connection && connected === connection) {
           await operation();
         }
       });

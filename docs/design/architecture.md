@@ -30,7 +30,7 @@ Application services belong to Runtime. Window services and layers belong to the
 
 ## Top-level window ownership and dispatch
 
-The platform application runner or host owns the event loop. Desktop `OpenWindow()` asks Runtime to create and initialize a top-level window before presenting it. Native facilities are ready before shared initialization admits callbacks. iOS scene requests use `OpenWindowAsync()` when the host supports multiple scenes. An externally attached window remains owned by its host.
+The platform application runner or host owns the event loop. Desktop `OpenWindow()` asks Runtime to create and initialize a top-level window before presenting it. Native facilities are ready before shared initialization admits callbacks. `OpenWindowAsync()` requests an iOS scene or a HarmonyOS child window in the existing application Runtime. An externally attached window remains owned by its host.
 
 Accepting closure of an owned desktop window stops new callbacks. Runtime defers teardown until active UI calls, including native callback tails and nested loops, have returned. Window retirement retires mounted work, layers, and services before the host releases its facilities. An iOS scene may temporarily lose its attachment while its window session remains open. [Multiple windows](../guide/core-concepts.md#multiple-windows) describes the public handle behavior.
 

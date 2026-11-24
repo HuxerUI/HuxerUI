@@ -25,6 +25,8 @@ For the Windows DevEco emulator, select `x86_64` locally in `externalNativeOptio
 
 The main window supports `SafeArea` and `EdgeToEdge` content, drawing behind the system bars in immersive layout. `SystemBarsAppearance` controls the status-bar icons, and HarmonyOS controls the bottom gesture indicator. `UseSystemThemeBrightness()` follows system light and dark mode changes.
 
+`OpenWindowAsync()` creates child windows in the running ability's `WindowStage`. Each loads the same host page and composes its own C++ root in the shared Runtime. Pass the page's `getUIContext()` to `handleHuxerUIBack()` so the back action goes to the originating window. Run with `-DHUXERUI_EXAMPLE=multi_window` to open or cancel a child window, share a counter, and edit text independently in each window.
+
 Text measurement and replay use Native Drawing typography. Application-supplied fonts use private font collections, and attributed inline objects use paragraph placeholders. Line limits and ellipsis use the shared overflow implementation. `TextLayout` exposes line, caret, hit-test, and range geometry in logical units with UTF-16 offsets. When the drawing engine groups multiple graphemes into a glyph, HuxerUI estimates the interior caret positions and retains the shaped line width. Editable clients use system keyboard sessions with selection, preedit, and action keys. Secure editors suppress surrounding text.
 
 Turn on the system screen reader to navigate and activate HuxerUI controls using their shared semantics. The `platform_view` example demonstrates an accessible ArkUI editor in the same window as HuxerUI controls.

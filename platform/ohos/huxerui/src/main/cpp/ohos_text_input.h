@@ -4,6 +4,7 @@
 #include <napi/native_api.h>
 
 #include <initializer_list>
+#include <span>
 #include <string>
 
 #include <huxerui/text_input.h>
@@ -30,8 +31,9 @@ public:
   // Requests the system keyboard for the current editable session, if one has started.
   void ShowKeyboard();
   bool HandleBack();
-  napi_value HandleCommand(napi_callback_info info);
-  napi_value ReadContext(napi_callback_info info);
+  void SetFocused(bool focused);
+  napi_value HandleCommand(std::span<const napi_value, 5> args);
+  napi_value ReadContext(std::span<const napi_value, 3> args);
   void ReleaseHost() noexcept;
 
 private:
@@ -50,6 +52,7 @@ private:
   std::string token_;
   bool selection_sent_ = false;
   bool show_keyboard_ = false;
+  bool focused_ = false;
 };
 
 } // namespace detail

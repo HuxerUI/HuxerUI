@@ -60,11 +60,14 @@ export class HuxerUIFilePicker implements HuxerUIFilePickerHost {
   readonly canSelectDirectory: boolean;
   private module: HuxerUIApplicationModule;
   private context: common.Context;
+  private windowId: string;
   private accessQueue: Promise<void> = Promise.resolve();
 
-  constructor(module: HuxerUIApplicationModule, context: common.Context, hasWindow: boolean = true) {
+  constructor(module: HuxerUIApplicationModule, context: common.Context, hasWindow: boolean = true,
+    windowId: string = '') {
     this.module = module;
     this.context = context;
+    this.windowId = windowId;
     this.canSelectDirectory = hasWindow && canIUse('SystemCapability.FileManagement.UserFileService.FolderSelection') &&
       (deviceInfo.deviceType !== 'phone' || deviceInfo.sdkApiVersion >= 26);
   }
@@ -107,7 +110,7 @@ export class HuxerUIFilePicker implements HuxerUIFilePickerHost {
         saved = true;
       }
     } catch (_) {}
-    this.module.completeSaveFile(token, saved);
+    this.module.completeSaveFile(this.windowId, token, saved);
   }
 
   async openDirectory(token: string, writable: boolean): Promise<void> {
@@ -142,7 +145,7 @@ export class HuxerUIFilePicker implements HuxerUIFilePickerHost {
     }
     try {
       // The application library duplicates the descriptors before this callback returns.
-      this.module.completeOpenFiles(token, files);
+      this.module.completeOpenFiles(this.windowId, token, files);
     } finally {
       for (const file of opened) {
         fileIo.closeSync(file);
