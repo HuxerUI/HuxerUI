@@ -172,6 +172,7 @@ struct ViewProperties {
   EdgeInsets padding;
   // This declaration selects which inherited safe-area edges measurement adds to the node's resolved padding.
   std::optional<SafeAreaPadding> safe_area_padding;
+  std::optional<float> avoid_keyboard_gap;
   // This marker participates only in system window hit testing and has no layout, paint, or retained lifecycle state.
   bool window_drag_region = false;
   // Cursor resolution reads this declaration from the final pointer hit route without affecting layout or paint.

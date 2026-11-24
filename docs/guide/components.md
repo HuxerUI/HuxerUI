@@ -741,6 +741,10 @@ Use `LeadingIcon`, `TrailingIcon`, `LineLimits`, `MaxLength`, `Secure`, `InputCo
 
 `TextField` and `ComboBox` request the software keyboard when an editable client starts a session and when the user taps the focused editor again. To choose when it appears, configure the editor with `.InputConfiguration({.keyboard_policy = SoftwareKeyboardPolicy::Manual})`. The editor still receives focus and can place the caret or select text on a tap.
 
+Android and iOS resize the layout viewport by default. To keep the page in place while moving a specific toolbar, set `WindowOptions::keyboard_avoidance` to `KeyboardAvoidance::Overlay` and apply `AvoidKeyboard{}` to the toolbar. It moves only when the toolbar overlaps the keyboard and returns to its original position on dismissal. Set `.gap` to leave space above the keyboard. Place the toolbar outside a clipped scroll area if it needs to move outside that area.
+
+For custom placement, `UseWindow().KeyboardBounds()` returns the occlusion in full window logical coordinates and subscribes the current composition to changes. It returns no rectangle when the keyboard is hidden or the host cannot report one. The standard Android Activity supports bottom-docked keyboards from API 23 with the generated `adjustResize` manifest setting.
+
 Get the window handle with `UseWindow()` and capture it in an event handler. Call `window.ShowKeyboard()` or `window.HideKeyboard()` on the application thread to request a change for that window's focused editor. Both methods work with either policy. Hiding preserves HuxerUI focus, the editing session, and the selection, subject to any final edits delivered by the input method. With no focused editable client the calls have no effect. Keyboard presentation is best effort, and Web browsers can require the show request to run during a user gesture.
 
 ## Validation and secure input

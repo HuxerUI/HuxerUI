@@ -51,7 +51,7 @@ call:
 
 ```toml
 [dependencies]
-huxerui = "0.5.0"
+huxerui = "0.5.5"
 
 [build]
 sources = []

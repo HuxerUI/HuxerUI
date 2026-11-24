@@ -108,6 +108,12 @@ enum class WindowContentMode {
   EdgeToEdge, ///< Lays out the application across the complete viewport and leaves inset consumption to its Views.
 };
 
+/// Controls whether a software keyboard changes the window's layout viewport.
+enum class KeyboardAvoidance {
+  Resize,  ///< Uses the host's keyboard-adjusted viewport.
+  Overlay, ///< Keeps the underlying layout and lets individual views avoid the keyboard.
+};
+
 /// Selects platform-owned or application-defined top-level window chrome.
 enum class WindowChromeMode {
   System, ///< Retains the platform's ordinary title bar and decorations.
@@ -233,6 +239,9 @@ struct WindowOptions {
   /// Allows the user to resize this desktop window in windowed mode. Display changes may still affect its geometry.
   bool resizable = true;
 
+  /// Software keyboard layout policy on supported mobile hosts. Independent of focus and keyboard show requests.
+  KeyboardAvoidance keyboard_avoidance = KeyboardAvoidance::Resize;
+
   /// Compares all startup configuration fields exactly.
   bool operator==(const WindowOptions&) const = default;
 };
@@ -269,6 +278,9 @@ struct WindowMetrics {
 
   /// Resolved title-bar geometry, present only when application content occupies native title-bar space.
   std::optional<WindowTitleBarMetrics> title_bar{};
+
+  /// Host-reported keyboard occlusion in full window coordinates, before any viewport reduction for Resize.
+  std::optional<Rect> keyboard_bounds{};
 
   /// Compares all submitted geometry fields exactly.
   bool operator==(const WindowMetrics&) const = default;
@@ -331,6 +343,18 @@ struct SafeAreaPadding {
 
   /// Compares the selected edges exactly.
   bool operator==(const SafeAreaPadding&) const = default;
+};
+
+/// Moves this View above an overlapping software keyboard in a window using KeyboardAvoidance::Overlay.
+/// Adjusts presentation and hit testing without changing measurement, placement, or ancestor clipping.
+struct AvoidKeyboard {
+  /// Preferred gap in window logical units. Must be finite and non-negative.
+  float gap = 0.0F;
+
+  /// Returns the modifier descriptor used by View::With().
+  static const detail::ModifierDescriptor& Descriptor();
+
+  bool operator==(const AvoidKeyboard&) const = default;
 };
 
 /// Marks non-interactive client content as a native window drag region in Custom or None chrome mode.
@@ -451,6 +475,11 @@ public:
 
   /// Requests software-keyboard dismissal on the application thread while preserving editor focus and session.
   void HideKeyboard() const;
+
+  /// Reads the current software-keyboard occlusion in window logical coordinates on the application thread.
+  /// Reading during composition subscribes to changes. Hidden keyboards, hosts without geometry and detached windows
+  /// return no rectangle. In Resize mode the rectangle can fall outside the current layout viewport.
+  std::optional<Rect> KeyboardBounds() const;
 
   /// Shows and brings the native window to the foreground when permitted by the platform.
   /// Windows configured with WindowOptions::activatable set to false are only shown.

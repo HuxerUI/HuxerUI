@@ -35,14 +35,18 @@ inline Size ResolveInitialWindowSize(const WindowOptions& options) noexcept {
 struct WindowState {
   explicit WindowState(const WindowOptions& options)
       : content_mode(options.content_mode), chrome_mode(options.chrome_mode), caption_labels(options.caption_labels),
-        activatable(options.activatable), resizable(options.resizable) {}
+        activatable(options.activatable), resizable(options.resizable), keyboard_avoidance(options.keyboard_avoidance) {}
 
   WindowContentMode content_mode = WindowContentMode::SafeArea;
   WindowChromeMode chrome_mode = WindowChromeMode::System;
   WindowCaptionLabels caption_labels;
   bool activatable;
   bool resizable;
+  KeyboardAvoidance keyboard_avoidance;
   WindowMetrics metrics;
+  std::optional<Rect> OverlayKeyboardBounds() const noexcept {
+    return keyboard_avoidance == KeyboardAvoidance::Overlay ? metrics.keyboard_bounds : std::nullopt;
+  }
   SystemBarsAppearance appearance = SystemBarsAppearance::Default();
   Color caption_foreground = Color::Rgb(32, 32, 32);
   // This cache suppresses redundant native system-bar updates; the resolved appearance remains the paint authority.
@@ -71,6 +75,8 @@ public:
   bool SetAlwaysOnTop(bool enabled);
   bool SetPointerPassThrough(bool enabled);
   void RequestKeyboard(bool show);
+  std::optional<Rect> KeyboardBounds() const;
+  void UpdateKeyboardBounds(std::optional<Rect> bounds);
   void RequestFullscreen(bool fullscreen);
   void UpdateFullscreen(bool fullscreen);
 
@@ -106,6 +112,7 @@ private:
   UiWindow* ui_window_ = nullptr;
   State<bool> open_{false};
   State<bool> fullscreen_{false};
+  State<std::optional<Rect>> keyboard_bounds_{std::optional<Rect>{}};
   bool handling_minimize_request_ = false;
   bool handling_close_request_ = false;
   RequestHandler minimize_handler_;

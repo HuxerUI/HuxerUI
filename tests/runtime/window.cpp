@@ -17,6 +17,9 @@ int title_bar_compositions = 0;
 bool use_light_status_bar = false;
 Color title_bar_background = Color::Rgb(48, 32, 96);
 std::optional<WindowHandle> window_handle;
+constexpr Color keyboard_toolbar_color = Color::Rgb(231, 26, 115);
+constexpr Color keyboard_canvas_color = Color::Rgb(220, 236, 252);
+int keyboard_toolbar_clicks = 0;
 bool handle_minimize_request = false;
 bool handle_close_request = false;
 int minimize_requests = 0;
@@ -73,6 +76,18 @@ View WindowTitleBarApp() {
 View WindowCommandsApp() {
   window_handle = UseWindow();
   return Spacer();
+}
+
+View KeyboardAvoidanceApp() {
+  ++window_compositions;
+  window_handle = UseWindow();
+  return Stack {
+    Spacer().With(Frame{.width = 200.0F, .height = 300.0F}, Background(keyboard_canvas_color)),
+    Stack {
+      Button("Toolbar").OnClick([] { ++keyboard_toolbar_clicks; })
+          .With(Frame{.width = 80.0F, .height = 30.0F}, Background(keyboard_toolbar_color), AvoidKeyboard{.gap = 4.0F}),
+    }.With(Align(HorizontalAlignment::Start, VerticalAlignment::End)),
+  }.With(Align(HorizontalAlignment::Stretch, VerticalAlignment::Stretch));
 }
 
 View WindowRequestsApp() {
@@ -146,6 +161,69 @@ TEST_CASE("WindowEdgeToEdgeModeLetsViewsConsumeSelectedInsets") {
       (static_cast<const detail::MountedNode&>(root->ChildAt(0)).resolved_padding ==
        EdgeInsets{.bottom = 10.0F})
   );
+}
+
+TEST_CASE("Window keyboard avoidance moves only intersecting views in overlay mode", "[keyboard-avoidance]") {
+  const bool overlay = GENERATE(true, false);
+  window_handle.reset();
+  keyboard_toolbar_clicks = 0;
+  window_compositions = 0;
+  TestPlatform platform;
+  AppOptions options;
+  options.show_debug_overlay = false;
+  options.window.keyboard_avoidance = overlay ? KeyboardAvoidance::Overlay : KeyboardAvoidance::Resize;
+  UiWindow runtime(KeyboardAvoidanceApp, platform, options);
+  WindowMetrics metrics{.viewport = {200.0F, 300.0F}, .safe_area = {.bottom = 20.0F}};
+  runtime.SetWindowMetrics(metrics);
+  const auto& initial_scene = runtime.BuildFrame();
+  const auto initial_toolbar = FindPresentedRectWithColor(initial_scene, keyboard_toolbar_color);
+  const auto initial_canvas = FindPresentedRectWithColor(initial_scene, keyboard_canvas_color);
+  REQUIRE(initial_toolbar.has_value());
+  REQUIRE(initial_canvas.has_value());
+  REQUIRE(window_handle.has_value());
+  CHECK_FALSE(window_handle->KeyboardBounds());
+
+  metrics.keyboard_bounds = Rect{0.0F, 180.0F, 200.0F, 120.0F};
+  runtime.SetWindowMetrics(metrics);
+  const auto& keyboard_scene = runtime.BuildFrame();
+  CHECK(window_handle->KeyboardBounds() == metrics.keyboard_bounds);
+  const auto toolbar = FindPresentedRectWithColor(keyboard_scene, keyboard_toolbar_color);
+  REQUIRE(toolbar.has_value());
+  CHECK(toolbar->height == initial_toolbar->height);
+  CHECK(toolbar->y + toolbar->height == (overlay ? 176.0F : initial_toolbar->y + initial_toolbar->height));
+  CHECK(FindPresentedRectWithColor(keyboard_scene, keyboard_canvas_color) == initial_canvas);
+  CHECK(window_compositions == 1);
+  const Point center{toolbar->x + toolbar->width / 2.0F, toolbar->y + toolbar->height / 2.0F};
+  runtime.HandlePointerEvent({PointerEventType::Down, 1, center, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Up, 1, center, PointerDeviceKind::Touch});
+  CHECK(keyboard_toolbar_clicks == 1);
+
+  metrics.keyboard_bounds = Rect{120.0F, 220.0F, 80.0F, 80.0F};
+  runtime.SetWindowMetrics(metrics);
+  CHECK(FindPresentedRectWithColor(runtime.BuildFrame(), keyboard_toolbar_color) == initial_toolbar);
+  metrics.keyboard_bounds.reset();
+  runtime.SetWindowMetrics(metrics);
+  CHECK(FindPresentedRectWithColor(runtime.BuildFrame(), keyboard_toolbar_color) == initial_toolbar);
+  CHECK_FALSE(window_handle->KeyboardBounds());
+}
+
+TEST_CASE("Window keyboard bounds are observable and clear on retirement", "[keyboard-avoidance]") {
+  TestPlatform platform;
+  window_handle.reset();
+  {
+    UiWindow runtime([]() -> View {
+      window_handle = UseWindow();
+      return Text(window_handle->KeyboardBounds() ? "Obstructed" : "Clear");
+    }, platform);
+    WindowMetrics metrics{.viewport = {200.0F, 200.0F}};
+    runtime.SetWindowMetrics(metrics);
+    CHECK(ContainsText(runtime.BuildFrame(), "Clear"));
+    metrics.keyboard_bounds = Rect{0.0F, 200.0F, 200.0F, 100.0F};
+    runtime.SetWindowMetrics(metrics);
+    CHECK(ContainsText(runtime.BuildFrame(), "Obstructed"));
+    CHECK(window_handle->KeyboardBounds() == metrics.keyboard_bounds);
+  }
+  CHECK_FALSE(window_handle->KeyboardBounds());
 }
 
 TEST_CASE("WindowAppearanceResolvesAutomaticSystemBarBrightnessOnce") {

@@ -110,7 +110,7 @@ bool MatchesCapturedPaint(const MountedNode& node, const RenderNode& captured,
       captured.child_clips != ResolveChildClips(node) ||
       captured.children_transform != ResolveChildrenTransform(node)) { return false; }
   if (!root && (captured.offset != node.layout_offset ||
-      captured.transform != node.presentation.local_transform ||
+      captured.transform != ResolveLocalTransform(node.presentation) ||
       captured.opacity != node.presentation.render_opacity)) { return false; }
   std::size_t child_index = 0;
   for (std::size_t index = 0; index < node.children.size(); ++index) {
@@ -300,7 +300,7 @@ std::vector<SharedVisual> SharedTransitionSession::Collect(
     const bool page_wrapper = navigation_ && first;
     if (!first) {
       transform = ComposeTransform(transform,
-          ComposeTransform(TranslationTransform(node.layout_offset), node.presentation.local_transform));
+          ComposeTransform(TranslationTransform(node.layout_offset), ResolveLocalTransform(node.presentation)));
     }
     eligible = eligible && AxisAligned(transform);
     // The overlay inherits its owner's opacity; navigation page effects are excluded as well.

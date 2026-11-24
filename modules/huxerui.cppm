@@ -40,6 +40,7 @@ export namespace huxerui {
     using huxerui::AsyncInputStream;
     using huxerui::AsyncOutputStream;
     using huxerui::AttributedText;
+    using huxerui::AvoidKeyboard;
     using huxerui::AwaitCallback;
     using huxerui::Axis;
     using huxerui::BackEvent;
@@ -228,6 +229,7 @@ export namespace huxerui {
     using huxerui::KeyEvent;
     using huxerui::KeyEventType;
     using huxerui::KeyModifiers;
+    using huxerui::KeyboardAvoidance;
     using huxerui::KeyframeSpec;
     using huxerui::LaunchActivation;
     using huxerui::LayerCancelPolicy;

@@ -22,6 +22,13 @@
 
 namespace huxerui::detail {
 
+Transform2D ResolveLocalTransform(const NodePresentation& presentation) {
+  auto transform = presentation.local_transform;
+  transform.translate_x += presentation.keyboard_translation.x;
+  transform.translate_y += presentation.keyboard_translation.y;
+  return transform;
+}
+
 namespace {
 
 constexpr Rect fragment_source_bounds{-1.0e10F, -1.0e10F, 2.0e10F, 2.0e10F};
@@ -628,8 +635,9 @@ ForegroundContext ResolveForeground(MountedNode& node, ForegroundContext inherit
 }
 
 void ResolvePresentationTreeImpl(MountedNode& node, const Transform2D& inherited_transform, float inherited_opacity,
-                                 ForegroundContext inherited_foreground) {
+                                 ForegroundContext inherited_foreground, const std::optional<Rect>& keyboard) {
   SortChildPaintOrder(node);
+  node.presentation.keyboard_translation = {};
   const Transform2D node_transform =
       ComposeTransform(TranslationTransform(node.layout_offset), node.presentation.local_transform);
   node.presentation.resolved_transform = ComposeTransform(inherited_transform, node_transform);
@@ -637,6 +645,22 @@ void ResolvePresentationTreeImpl(MountedNode& node, const Transform2D& inherited
     node.presentation.render_opacity = 0.0F;
     node.presentation.resolved_opacity = 0.0F;
     return;
+  }
+  if (keyboard && node.properties.avoid_keyboard_gap) {
+    const Rect bounds = node.PresentationBounds();
+    const float target_bottom = keyboard->y - *node.properties.avoid_keyboard_gap;
+    if (!bounds.IsEmpty() && bounds.x < keyboard->x + keyboard->width && bounds.x + bounds.width > keyboard->x &&
+        bounds.y < keyboard->y + keyboard->height && bounds.y + bounds.height > target_bottom) {
+      const float lift = std::min(bounds.y + bounds.height - target_bottom, std::max(0.0F, bounds.y));
+      // Convert the window-space displacement to the parent's axes before appending it to the local transform.
+      auto parent_axes = inherited_transform;
+      parent_axes.translate_x = 0.0F;
+      parent_axes.translate_y = 0.0F;
+      if (const auto translation = parent_axes.Inverse({0.0F, -lift})) {
+        node.presentation.keyboard_translation = *translation;
+        node.presentation.resolved_transform.translate_y -= lift;
+      }
+    }
   }
   if (node.view_handle) {
     // A geometry pass can realize additional virtual items after interaction was refreshed.
@@ -658,7 +682,7 @@ void ResolvePresentationTreeImpl(MountedNode& node, const Transform2D& inherited
   // Shared transitions can record subtrees before the final scene walk.
   const ForegroundContext foreground = ResolveForeground(node, inherited_foreground);
   for (auto& child : node.children) {
-    ResolvePresentationTreeImpl(*child, children_transform, node.presentation.resolved_opacity, foreground);
+    ResolvePresentationTreeImpl(*child, children_transform, node.presentation.resolved_opacity, foreground, keyboard);
   }
 }
 
@@ -843,7 +867,7 @@ void PaintNodeWithinClip(huxerui::ViewNode& mounted_node, const Rect& clip, cons
   auto& node = static_cast<detail::MountedNode&>(mounted_node);
   HUXERUI_PROFILE_COMPONENT(node);
   RenderNode& render_node = node.render_node;
-  const Transform2D& local_transform = node.presentation.local_transform;
+  const Transform2D local_transform = ResolveLocalTransform(node.presentation);
   const Transform2D children_transform = ResolveChildrenTransform(node);
   const Transform2D& transform = node.presentation.resolved_transform;
   const float opacity = node.presentation.resolved_opacity;
@@ -1008,7 +1032,7 @@ std::shared_ptr<FrozenScene> CaptureRenderSubtree(MountedNode& source, bool reco
     RenderNode& result = *copy;
     result.id = next_identity.fetch_add(1, std::memory_order_relaxed);
     result.offset = root ? Point{} : node.layout_offset;
-    result.transform = root ? Transform2D{} : node.presentation.local_transform;
+    result.transform = root ? Transform2D{} : ResolveLocalTransform(node.presentation);
     result.opacity = root ? 1.0F : node.presentation.render_opacity;
     result.child_clips = ResolveChildClips(node);
     result.children_transform = ResolveChildrenTransform(node);
@@ -1030,8 +1054,8 @@ bool RenderSceneHasPlatformViews(const RenderNode* root) {
   return root != nullptr && RenderNodeHasPlatformViews(*root);
 }
 
-void ResolvePresentationTree(MountedNode& node) {
-  ResolvePresentationTreeImpl(node, Transform2D{}, 1.0F, {});
+void ResolvePresentationTree(MountedNode& node, const std::optional<Rect>& keyboard_bounds) {
+  ResolvePresentationTreeImpl(node, Transform2D{}, 1.0F, {}, keyboard_bounds);
 }
 
 void UpdateRenderScene(MountedNode& node, Rect clip, const RenderNode* overlay) {

@@ -8,7 +8,7 @@ HuxerUI is a declarative, cross-platform UI framework for C++20. The name *Huxer
 
 ## Quick Start
 
-This quick start targets HuxerUI **0.5.0**. The installers select the latest published SDK.
+This quick start targets HuxerUI **0.5.5**. The installers select the latest published SDK.
 
 ### Install the SDK
 

@@ -646,18 +646,21 @@ void detail::TextInteraction::PaintTextSelectionOverlay() {
   );
   const float selection_top = std::min(start.y, end.y);
   const float selection_bottom = std::max(start.y + start.height, end.y + end.height);
-  const float maximum_toolbar_y =
-      std::max(
-          minimum_toolbar_y,
-          runtime_state_.window_->metrics.viewport.height - safe_area.bottom - viewport_padding - toolbar_height
-      );
+  const float maximum_toolbar_y = std::max(
+      minimum_toolbar_y,
+      runtime_state_.window_->metrics.viewport.height - safe_area.bottom - viewport_padding - toolbar_height
+  );
   const float above_y = std::clamp(selection_top - toolbar_height - 10.0F, minimum_toolbar_y, maximum_toolbar_y);
   const float handle_extent = overlay.show_handles ? handle_radius * 2.0F : 0.0F;
   const float below_y =
       std::clamp(selection_bottom + handle_extent + 10.0F, minimum_toolbar_y, maximum_toolbar_y);
   const float above_gap = selection_top - (above_y + toolbar_height);
   const float below_gap = below_y - (selection_bottom + handle_extent);
-  const float toolbar_y = above_gap >= 0.0F || above_gap >= below_gap ? above_y : below_y;
+  float toolbar_y = above_gap >= 0.0F || above_gap >= below_gap ? above_y : below_y;
+  if (const auto keyboard = runtime_state_.window_->OverlayKeyboardBounds();
+      keyboard && keyboard->Intersects({toolbar_x, toolbar_y, toolbar_width, toolbar_height})) {
+    toolbar_y = std::max(minimum_toolbar_y, keyboard->y - viewport_padding - toolbar_height);
+  }
   overlay.toolbar_rect = {toolbar_x, toolbar_y, toolbar_width, toolbar_height};
   overlay.toolbar_background = detail::ResolveVisualFill(menu_style.background, *runtime_state_.app_resources_, locale);
   overlay.toolbar_separator = menu_style.separator_color;

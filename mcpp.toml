@@ -8,7 +8,7 @@
 [package]
 name        = "huxerui"
 namespace   = "huxerui"
-version     = "0.5.0"
+version     = "0.5.5"
 # mcpp's default. A build program is compiled at its package's standard, and the
 # official `mcpp:plugins` members the rules import need C++23. CMake keeps its
 # own C++20 floor.

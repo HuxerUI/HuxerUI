@@ -20,6 +20,5 @@ class IosUiWindow;
 }
 - (void)commitHuxerUIFrame;
 - (void)cancelHuxerUITouches;
-- (void)huxeruiKeyboardFrameDidChange:(NSNotification*)notification;
 - (void)huxeruiResourceConfigurationDidChange:(NSNotification*)notification;
 @end

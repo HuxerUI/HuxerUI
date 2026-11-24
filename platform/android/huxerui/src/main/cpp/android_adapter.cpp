@@ -1032,15 +1032,21 @@ public:
     }
   }
 
-  void Resize(float width, float height, float safe_left, float safe_top, float safe_right, float safe_bottom) {
+  void Resize(float width, float height, EdgeInsets safe_area, float resize_ime_inset, float keyboard_overlap,
+              float overlay_safe_bottom) {
+    const bool overlay = CurrentApplication().options.window.keyboard_avoidance == KeyboardAvoidance::Overlay;
+    const float keyboard_top = std::max(0.0F, height - keyboard_overlap);
+    if (overlay) {
+      safe_area.bottom = overlay_safe_bottom;
+    } else if (resize_ime_inset > 0.0F) {
+      safe_area.bottom = 0.0F;
+    }
     UiWindow::SetWindowMetrics({
-        .viewport = {std::max(0.0F, width), std::max(0.0F, height)},
-        .safe_area = {
-            .top = std::max(0.0F, safe_top),
-            .right = std::max(0.0F, safe_right),
-            .bottom = std::max(0.0F, safe_bottom),
-            .left = std::max(0.0F, safe_left),
-        },
+        .viewport = {std::max(0.0F, width), std::max(0.0F, overlay ? height : height - resize_ime_inset)},
+        .safe_area = safe_area,
+        .keyboard_bounds = width > 0.0F && keyboard_top < height
+                               ? std::optional{Rect{0.0F, keyboard_top, width, height - keyboard_top}}
+                               : std::nullopt,
     });
   }
 
@@ -1994,11 +2000,12 @@ extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeDestroy(JNI
 
 extern "C" JNIEXPORT void JNICALL Java_org_huxerui_HuxerUIView_nativeResize(
     JNIEnv* environment, jclass, jlong handle, jfloat width, jfloat height, jfloat safe_left, jfloat safe_top,
-    jfloat safe_right, jfloat safe_bottom
+    jfloat safe_right, jfloat safe_bottom, jfloat resize_ime_inset, jfloat keyboard_overlap, jfloat overlay_safe_bottom
 ) {
   try {
     if (auto* session = huxerui::detail::Session(handle)) {
-      session->Resize(width, height, safe_left, safe_top, safe_right, safe_bottom);
+      session->Resize(width, height, {safe_top, safe_right, safe_bottom, safe_left}, resize_ime_inset, keyboard_overlap,
+                      overlay_safe_bottom);
     }
   } catch (const std::exception& exception) {
     huxerui::detail::ThrowJavaException(environment, exception.what());

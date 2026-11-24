@@ -265,6 +265,8 @@ struct FragmentRenderGroup {
 
 struct NodePresentation {
   Transform2D local_transform;
+  // Kept separate so resolving presentation twice never accumulates keyboard avoidance.
+  Point keyboard_translation;
   // A retained container can move its descendants without changing its own layout or foreground presentation.
   Transform2D children_transform;
   // Clips intersect in this node's local space, after descendant transforms.
@@ -628,7 +630,8 @@ Rect ResolveToggleControlBounds(const MountedNode& node) noexcept;
 Rect ResolveToggleLabelBounds(const MountedNode& node) noexcept;
 TextSelectionClient* FindTextSelectionClient(MountedNode& node);
 MountedNode* FindTextSelectionOwner(MountedNode& root, std::uint64_t identity);
-void ResolvePresentationTree(MountedNode& node);
+Transform2D ResolveLocalTransform(const NodePresentation& presentation);
+void ResolvePresentationTree(MountedNode& node, const std::optional<Rect>& keyboard_bounds);
 MountedNode& ChildInPaintOrder(const MountedNode& node, std::size_t index);
 void ValidateBorder(const Border& border);
 void UpdateRenderScene(MountedNode& node, Rect clip, const RenderNode* overlay = nullptr);

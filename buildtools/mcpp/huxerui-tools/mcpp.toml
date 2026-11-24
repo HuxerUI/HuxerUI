@@ -17,7 +17,7 @@
 [package]
 name        = "huxerui-tools"
 namespace   = "huxerui"
-version     = "0.5.0"
+version     = "0.5.5"
 standard    = "c++23"
 description = "Repository tooling: the module-shell generator and the build-parity check"
 license     = "Apache-2.0"

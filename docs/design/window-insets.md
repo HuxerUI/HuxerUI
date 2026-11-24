@@ -128,12 +128,12 @@ This separation keeps navigation transitions deterministic and avoids a window-c
 ## WindowMetrics semantics
 
 `WindowMetrics::viewport` is the current logical HuxerUI viewport in device-independent units.
-The existing native IME-avoidance policy may reduce its height before the metrics reach Runtime.
+The default keyboard avoidance policy may reduce its height before the metrics reach Runtime.
 
 `WindowMetrics::safe_area` is relative to that current viewport.
-When the IME covers the native bottom system area, the effective bottom safe inset is zero rather than being subtracted a second time.
+In `Resize` mode, when the IME replaces the native bottom system area, the effective bottom safe inset is zero rather than being subtracted a second time.
 
-Each platform adapter submits viewport and safe-area changes together on its UI thread.
+Each platform adapter submits viewport, safe-area and keyboard geometry together on its UI thread.
 Runtime validates that the viewport and every inset are finite and non-negative.
 Platform adapters normalize transient or unsupported platform values before calling Runtime.
 
@@ -363,14 +363,13 @@ The platform foreground call remains deduplicated.
 ## IME and text input
 
 IME occlusion is not part of `safe_area`.
-Android IME Insets, the iOS keyboard frame, and future OHOS keyboard AvoidArea continue through the current logical viewport-resize path.
+Android and iOS publish `WindowMetrics::keyboard_bounds` in full host-view coordinates, including when the effective layout viewport ends above the rectangle. `WindowHandle::KeyboardBounds()` observes only that geometry; it does not infer visibility from focus or keyboard requests. Detached windows and hosts without geometry publish no rectangle.
 
-The platform computes the effective safe area after applying keyboard occlusion.
-When the keyboard covers the bottom system area, the submitted bottom inset is zero.
-When it hides, the platform restores the native navigation or home-indicator inset.
+UIKit reads the owning window's keyboard layout guide during native layout. This tracks floating keyboard movement on iPad and excludes the bottom safe-area placeholder when the keyboard is hidden.
 
-BringTextInputIntoView, selection handles, the selection menu, and platform caret geometry use the final logical viewport and host-view coordinate transforms exactly as they do today.
-They do not add platform-specific SafeArea branches.
+`KeyboardAvoidance::Resize` preserves the existing viewport reduction and clears the bottom safe-area inset when the keyboard takes its place. `Overlay` keeps the complete viewport and the ordinary system-bar and cutout insets. Geometry-only changes schedule presentation and update text-selection geometry without invalidating root measurement. Existing caret reveal still uses the ancestor scroll viewports.
+
+`AvoidKeyboard` tests the node's window bounds before applying its own avoidance. It translates an overlapping node upward in presentation, leaving sibling layout and clips intact. The same transform feeds drawing, hit testing, accessibility, and text-input geometry. The built-in selection toolbar uses the same keyboard bounds to stay visible. Other layers still use the ordinary safe area.
 
 ## UiWindow host boundary
 
@@ -403,8 +402,8 @@ In that case the adapter reports geometry but the optional system-bar operation 
 HuxerUIActivity configures an edge-to-edge Android window consistently across the supported API range.
 `WindowContentMode::SafeArea` remains a shared Runtime layout policy rather than attempting to disable Android edge-to-edge behavior.
 
-On API 30 and later, HuxerUIView obtains system bars, display cutout, and IME Insets through their typed WindowInsets categories.
-On API 23 through 29, it uses the corresponding guarded system-window and display-cutout values.
+On API 30 and later, HuxerUIView obtains system bars, display cutout, and IME insets through their typed WindowInsets categories and observes software keyboard animation progress.
+On API 23 through 29, the standard Activity preserves `adjustResize` and the legacy edge-to-edge flags. HuxerUIView compares the root window's system-window and stable bottom insets before the decor consumes them. It uses the full obstruction, not the difference, to locate the top edge, then intersects it with the host view. These APIs describe a bottom inset; they cannot supply arbitrary floating-keyboard geometry or a per-frame animation. An embedded HuxerUIView does not override its Activity's window configuration.
 
 The resolved safe area takes the maximum obstruction on each edge rather than adding overlapping status-bar and cutout values.
 Insets are converted from pixels to logical units before `SetWindowMetrics()`.

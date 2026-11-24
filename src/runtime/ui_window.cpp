@@ -474,7 +474,14 @@ void ValidateWindowMetrics(const WindowMetrics& metrics) {
         std::isfinite(title_bar.left_inset) && title_bar.left_inset >= 0.0F && std::isfinite(title_bar.right_inset) &&
         title_bar.right_inset >= 0.0F && title_bar.left_inset + title_bar.right_inset <= metrics.viewport.width;
   }
-  if (!viewport_valid || !safe_area_valid || !title_bar_valid) {
+  bool keyboard_valid = true;
+  if (metrics.keyboard_bounds) {
+    const Rect bounds = *metrics.keyboard_bounds;
+    keyboard_valid = !bounds.IsEmpty() && std::isfinite(bounds.x) && bounds.x >= 0.0F &&
+                     std::isfinite(bounds.y) && bounds.y >= 0.0F &&
+                     std::isfinite(bounds.x + bounds.width) && std::isfinite(bounds.y + bounds.height);
+  }
+  if (!viewport_valid || !safe_area_valid || !title_bar_valid || !keyboard_valid) {
     throw std::invalid_argument("HuxerUI window metrics must contain finite, non-negative values");
   }
 }
@@ -1885,13 +1892,23 @@ void UiWindow::SetWindowMetrics(WindowMetrics metrics) {
   if (state_->window_->metrics == metrics) {
     return;
   }
+  const WindowMetrics previous = state_->window_->metrics;
+  state_->window_->metrics = metrics;
+  if (previous.keyboard_bounds != metrics.keyboard_bounds) {
+    state_->window_service_->UpdateKeyboardBounds(metrics.keyboard_bounds);
+  }
+  if (previous.viewport == metrics.viewport && previous.safe_area == metrics.safe_area &&
+      previous.title_bar == metrics.title_bar) {
+    state_->text_->InvalidateOverlay();
+    RequestFrame();
+    return;
+  }
   const bool window_controls_visibility_changed =
-      HasWindowControlGeometry(state_->window_->metrics) != HasWindowControlGeometry(metrics);
+      HasWindowControlGeometry(previous) != HasWindowControlGeometry(metrics);
   const bool previous_maximized =
-      state_->window_->metrics.title_bar.has_value() && state_->window_->metrics.title_bar->maximized;
+      previous.title_bar.has_value() && previous.title_bar->maximized;
   const bool maximized = metrics.title_bar.has_value() && metrics.title_bar->maximized;
   const bool maximize_state_changed = previous_maximized != maximized;
-  state_->window_->metrics = metrics;
   if (state_->mounted_root_) {
     state_->mounted_root_->measure_dirty = true;
     if ((window_controls_visibility_changed || maximize_state_changed) &&
@@ -2261,7 +2278,8 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
     RefreshInteractionTree();
   }
   state_->extension_tree_dirty_ = false;
-  ResolvePresentationTree(*state_->mounted_root_);
+  const auto keyboard_bounds = state_->window_->OverlayKeyboardBounds();
+  ResolvePresentationTree(*state_->mounted_root_, keyboard_bounds);
 
   HUXERUI_PROFILE_NEXT(profile_stage, Geometry);
   // The first layout establishes resolved caret geometry. Revealing that caret can change ancestor scroll offsets and
@@ -2280,7 +2298,7 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
       );
     }
     LayoutNode(*state_->mounted_root_, {0.0F, 0.0F});
-    ResolvePresentationTree(*state_->mounted_root_);
+    ResolvePresentationTree(*state_->mounted_root_, keyboard_bounds);
   }
   // Extensions prepare node-local geometry after the final layout. Text input geometry is then converted to host-view
   // coordinates while the platform IME session is synchronized.
@@ -2309,7 +2327,7 @@ const FrameCommit& UiWindow::BuildFrame(FrameInfo frame) {
     if (anchor_layers_dismissed) {
       RefreshInteractionTree();
     }
-    ResolvePresentationTree(*state_->mounted_root_);
+    ResolvePresentationTree(*state_->mounted_root_, keyboard_bounds);
     PrepareExtensionGeometry(*state_->mounted_root_, state_->owner_);
     anchor_layers_dismissed = state_->layer_controller_.RefreshAnchors(true);
     if (anchor_layers_dismissed) {

@@ -59,6 +59,9 @@ class IosRuntime;
 @end
 
 @interface HuxerUIIOSViewController : UIViewController {
+@public
+  huxerui::detail::IosUiWindow* huxeruiPlatformWindow;
+@private
   UIStatusBarStyle _huxerUIStatusBarStyle;
 }
 - (void)setHuxerUIStatusBarStyle:(UIStatusBarStyle)style;
@@ -612,14 +615,6 @@ WindowLifecycleState IosWindowLifecycle(UISceneActivationState state) {
   return WindowLifecycleState::Background;
 }
 
-bool IosHasFirstResponder(UIView* view) {
-  if (view.isFirstResponder) return true;
-  for (UIView* child in view.subviews) {
-    if (IosHasFirstResponder(child)) return true;
-  }
-  return false;
-}
-
 void ActivateIosScene(UISceneSession* session, NSUserActivity* activity, UIWindowScene* source,
                       void (^on_error)(NSError*)) {
   auto* options = [[UISceneActivationRequestOptions alloc] init];
@@ -844,28 +839,43 @@ public:
 
   void Start(Runtime& application, UIWindowScene* scene, const ViewFactory& content, const WindowOptions& options,
              const std::shared_ptr<WindowService>& service) {
+    keyboard_avoidance_ = options.keyboard_avoidance;
     window_ = [[UIWindow alloc] initWithWindowScene:scene];
     scene.title = IosClipboardString(options.title);
     view_controller_ = [[HuxerUIIOSViewController alloc] init];
+    view_controller_->huxeruiPlatformWindow = this;
     presentation_ = [[HUXPresentationCoordinator alloc] initWithOwner:view_controller_];
-    view_controller_.view.backgroundColor = UIColor.systemBackgroundColor;
+    UIView* root = view_controller_.view;
+    root.backgroundColor = UIColor.systemBackgroundColor;
 
     view_ = [[HuxerUIView alloc] initWithFrame:CGRectZero];
     view_.translatesAutoresizingMaskIntoConstraints = NO;
     view_->huxeruiPlatformWindow = this;
+    UIKeyboardLayoutGuide* keyboard_guide = root.keyboardLayoutGuide;
+    keyboard_guide.followsUndockedKeyboard = YES;
     if (@available(iOS 17.0, *)) {
+      keyboard_guide.usesBottomSafeArea = NO;
       [view_ registerForTraitChanges:@[UITraitUserInterfaceStyle.class]
                         withHandler:^(__kindof id<UITraitEnvironment> environment, UITraitCollection*) {
         HuxerUIView* host = (HuxerUIView*)environment;
         if (host->huxeruiPlatformWindow != nullptr) host->huxeruiPlatformWindow->RefreshSystemTheme();
       }];
     }
-    [view_controller_.view addSubview:view_];
+    [root addSubview:view_];
+    // A constrained child triggers a controller layout pass even when only the keyboard moves.
+    UIView* keyboard_frame = [[UIView alloc] initWithFrame:CGRectZero];
+    keyboard_frame.hidden = YES;
+    keyboard_frame.translatesAutoresizingMaskIntoConstraints = NO;
+    [root addSubview:keyboard_frame];
     [NSLayoutConstraint activateConstraints:@[
-      [view_.leadingAnchor constraintEqualToAnchor:view_controller_.view.leadingAnchor],
-      [view_.trailingAnchor constraintEqualToAnchor:view_controller_.view.trailingAnchor],
-      [view_.topAnchor constraintEqualToAnchor:view_controller_.view.topAnchor],
-      [view_.bottomAnchor constraintEqualToAnchor:view_controller_.view.bottomAnchor],
+      [view_.leadingAnchor constraintEqualToAnchor:root.leadingAnchor],
+      [view_.trailingAnchor constraintEqualToAnchor:root.trailingAnchor],
+      [view_.topAnchor constraintEqualToAnchor:root.topAnchor],
+      [view_.bottomAnchor constraintEqualToAnchor:root.bottomAnchor],
+      [keyboard_frame.leadingAnchor constraintEqualToAnchor:keyboard_guide.leadingAnchor],
+      [keyboard_frame.topAnchor constraintEqualToAnchor:keyboard_guide.topAnchor],
+      [keyboard_frame.widthAnchor constraintEqualToAnchor:keyboard_guide.widthAnchor],
+      [keyboard_frame.heightAnchor constraintEqualToAnchor:keyboard_guide.heightAnchor],
     ]];
 
     window_.rootViewController = view_controller_;
@@ -887,26 +897,18 @@ public:
 
     NSNotificationCenter* notifications = NSNotificationCenter.defaultCenter;
     [notifications addObserver:view_
-                      selector:@selector(huxeruiKeyboardFrameDidChange:)
-                          name:UIKeyboardWillChangeFrameNotification
-                        object:nil];
-    [notifications addObserver:view_
-                      selector:@selector(huxeruiKeyboardFrameDidChange:)
-                          name:UIKeyboardWillHideNotification
-                        object:nil];
-    [notifications addObserver:view_
                       selector:@selector(huxeruiResourceConfigurationDidChange:)
                           name:NSCurrentLocaleDidChangeNotification
                         object:nil];
 
     UiWindow::UpdateResourceConfiguration(Configuration());
-    Resize(view_.bounds.size);
     RequestFrameAt(Now());
   }
 
   void Shutdown() {
     // Closing presentation can synchronously call clients while the UIWindow still exists.
     detaching_ = true;
+    if (view_controller_ != nil) view_controller_->huxeruiPlatformWindow = nullptr;
     [presentation_ close];
     Retire();
     [NSNotificationCenter.defaultCenter removeObserver:view_];
@@ -944,6 +946,7 @@ public:
     if (state != WindowLifecycleState::Active) CancelActiveTouches();
     [presentation_ setActive:state == WindowLifecycleState::Active];
     UpdateWindowLifecycleState(state);
+    UpdateWindowMetrics();
   }
 
   ThemeBrightness QuerySystemThemeBrightness() const override {
@@ -990,32 +993,43 @@ public:
     [view_controller_ setHuxerUIStatusBarStyle:style];
   }
 
-  void Resize(CGSize size) {
-    viewport_size_ = size;
-    ApplyViewport();
-  }
-
-  void KeyboardFrameChanged(NSNotification* notification) {
-    keyboard_frame_.reset();
-    NSValue* value = notification.userInfo[UIKeyboardFrameEndUserInfoKey];
-    if (value != nil && window_ != nil && notification.name != UIKeyboardWillHideNotification &&
-        IosHasFirstResponder(window_)) {
-      id<UICoordinateSpace> screen = window_.windowScene.screen.coordinateSpace;
-      if ([notification.object isKindOfClass:UIScreen.class]) {
-        UIScreen* keyboard_screen = notification.object;
-        if (keyboard_screen != window_.windowScene.screen) {
-          ApplyViewport();
-          return;
-        }
-        screen = keyboard_screen.coordinateSpace;
+  void UpdateWindowMetrics() {
+    if (!IsInitialized()) {
+      return;
+    }
+    const CGRect bounds = view_.bounds;
+    const float width = std::max(0.0F, static_cast<float>(bounds.size.width));
+    const float height = std::max(0.0F, static_cast<float>(bounds.size.height));
+    const UIEdgeInsets safe_area = view_.safeAreaInsets;
+    std::optional<Rect> keyboard_bounds;
+    UIWindowScene* scene = view_.window.windowScene;
+    if (scene != nil && IosWindowLifecycle(scene.activationState) != WindowLifecycleState::Background) {
+      UIView* root = view_controller_.view;
+      const CGRect guide_frame = [view_ convertRect:root.keyboardLayoutGuide.layoutFrame fromView:root];
+      const CGRect frame = CGRectIntersection(bounds, guide_frame);
+      // On iOS 15 and 16 the hidden guide occupies the bottom safe area.
+      CGFloat bottom = CGRectGetMaxY(bounds) - safe_area.bottom;
+      if (@available(iOS 17.0, *)) {
+        bottom = CGRectGetMaxY(bounds);
       }
-      if (screen != nil) {
-        const CGRect keyboard_in_view = [view_ convertRect:value.CGRectValue fromCoordinateSpace:screen];
-        const CGRect frame = CGRectIntersection(view_.bounds, keyboard_in_view);
-        if (!CGRectIsEmpty(frame)) keyboard_frame_ = frame;
+      if (!CGRectIsEmpty(frame) && CGRectGetMinY(frame) < bottom) {
+        keyboard_bounds = Rect{
+            static_cast<float>(frame.origin.x), static_cast<float>(frame.origin.y),
+            static_cast<float>(frame.size.width), static_cast<float>(frame.size.height),
+        };
       }
     }
-    ApplyViewport();
+    const bool resize = keyboard_avoidance_ == KeyboardAvoidance::Resize && keyboard_bounds.has_value();
+    UiWindow::SetWindowMetrics({
+        .viewport = {width, resize ? keyboard_bounds->y : height},
+        .safe_area = {
+            .top = std::max(0.0F, static_cast<float>(safe_area.top)),
+            .right = std::max(0.0F, static_cast<float>(safe_area.right)),
+            .bottom = resize ? 0.0F : std::max(0.0F, static_cast<float>(safe_area.bottom)),
+            .left = std::max(0.0F, static_cast<float>(safe_area.left)),
+        },
+        .keyboard_bounds = keyboard_bounds,
+    });
   }
 
   void CommitFrameAndInvalidate() {
@@ -1115,30 +1129,6 @@ public:
   }
 
 private:
-  void ApplyViewport() {
-    if (!IsInitialized()) {
-      return;
-    }
-    float width = std::max(0.0F, static_cast<float>(viewport_size_.width));
-    float height = std::max(0.0F, static_cast<float>(viewport_size_.height));
-    bool keyboard_occludes_bottom = false;
-    if (keyboard_frame_.has_value() && !CGRectIsEmpty(*keyboard_frame_)) {
-      const float keyboard_top = std::max(0.0F, static_cast<float>(CGRectGetMinY(*keyboard_frame_)));
-      keyboard_occludes_bottom = keyboard_top < height;
-      height = std::min(height, keyboard_top);
-    }
-    const UIEdgeInsets safe_area = view_ == nil ? UIEdgeInsetsZero : view_.safeAreaInsets;
-    UiWindow::SetWindowMetrics({
-        .viewport = {width, height},
-        .safe_area = {
-            .top = std::max(0.0F, static_cast<float>(safe_area.top)),
-            .right = std::max(0.0F, static_cast<float>(safe_area.right)),
-            .bottom = keyboard_occludes_bottom ? 0.0F : std::max(0.0F, static_cast<float>(safe_area.bottom)),
-            .left = std::max(0.0F, static_cast<float>(safe_area.left)),
-        },
-    });
-  }
-
   void ScheduleFrame(double deadline) {
     if (frame_scheduler_ == nil) {
       return;
@@ -1207,8 +1197,7 @@ private:
   FrameCoordinator frame_coordinator_;
   std::unique_ptr<UIKitPlatformViews> platform_views_;
   std::unique_ptr<UIKitAccessibility> accessibility_;
-  CGSize viewport_size_ = CGSizeZero;
-  std::optional<CGRect> keyboard_frame_;
+  KeyboardAvoidance keyboard_avoidance_ = KeyboardAvoidance::Resize;
   std::optional<double> scheduled_frame_deadline_;
   bool detaching_ = false;
 };
@@ -1553,7 +1542,6 @@ UIViewController* GetUIKitViewController(UiWindow& ui_window) {
 - (void)layoutSubviews {
   [super layoutSubviews];
   if (huxeruiPlatformWindow != nullptr) {
-    huxeruiPlatformWindow->Resize(self.bounds.size);
     huxeruiPlatformWindow->InvalidateTextInputGeometry();
   }
 }
@@ -1561,7 +1549,7 @@ UIViewController* GetUIKitViewController(UiWindow& ui_window) {
 - (void)safeAreaInsetsDidChange {
   [super safeAreaInsetsDidChange];
   if (huxeruiPlatformWindow != nullptr) {
-    huxeruiPlatformWindow->Resize(self.bounds.size);
+    huxeruiPlatformWindow->UpdateWindowMetrics();
   }
 }
 
@@ -1593,12 +1581,6 @@ UIViewController* GetUIKitViewController(UiWindow& ui_window) {
   [super drawRect:rect];
   if (huxeruiPlatformWindow != nullptr) {
     huxeruiPlatformWindow->DrawCommittedFrame(UIGraphicsGetCurrentContext(), rect);
-  }
-}
-
-- (void)huxeruiKeyboardFrameDidChange:(NSNotification*)notification {
-  if (huxeruiPlatformWindow != nullptr) {
-    huxeruiPlatformWindow->KeyboardFrameChanged(notification);
   }
 }
 
@@ -1738,6 +1720,13 @@ UIViewController* GetUIKitViewController(UiWindow& ui_window) {
     _huxerUIStatusBarStyle = UIStatusBarStyleDarkContent;
   }
   return self;
+}
+
+- (void)viewDidLayoutSubviews {
+  [super viewDidLayoutSubviews];
+  if (huxeruiPlatformWindow != nullptr) {
+    huxeruiPlatformWindow->UpdateWindowMetrics();
+  }
 }
 
 - (BOOL)prefersStatusBarHidden {
