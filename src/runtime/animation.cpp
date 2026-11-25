@@ -262,17 +262,13 @@ public:
     }
   }
 
-  NodeExtension::FrameResult OnFrame(ViewNode& node, const FrameInfo& frame) override {
-    auto& mounted = static_cast<detail::MountedNode&>(node);
+  NodeExtension::FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
     const MotionAdvanceResult x_result = x_.Advance(frame);
     const MotionAdvanceResult y_result = y_.Advance(frame);
-    mounted.presentation.local_transform = detail::ComposeTransform(
-        detail::TranslationTransform({x_.Value(), y_.Value()}),
-        mounted.presentation.local_transform
-    );
     return {
         x_result.needs_frame || y_result.needs_frame,
         detail::EarliestWakeAfter(x_result.wake_after, y_result.wake_after),
+        detail::TranslationTransform({x_.Value(), y_.Value()}),
     };
   }
 

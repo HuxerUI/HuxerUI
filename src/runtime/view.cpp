@@ -61,6 +61,19 @@ void ApplyInteractionDefaults(detail::ViewSpec& spec, const std::shared_ptr<cons
   spec.properties.disabled_opacity = std::clamp(theme.interactions.disabled_opacity, 0.0F, 1.0F);
 }
 
+void ValidateModifier(const detail::ModifierSpec& modifier) {
+  if (modifier.descriptor == nullptr || !modifier.value) {
+    throw std::invalid_argument("HuxerUI modifier descriptor and value must not be empty");
+  }
+  const auto& descriptor = *modifier.descriptor;
+  if (descriptor.create_extension == nullptr && descriptor.update_extension != nullptr) {
+    throw std::invalid_argument("HuxerUI modifier extension update requires extension creation");
+  }
+  if (descriptor.compile == nullptr && descriptor.configure == nullptr && descriptor.create_extension == nullptr) {
+    throw std::invalid_argument("HuxerUI modifier descriptor must compile, configure, or create a node extension");
+  }
+}
+
 } // namespace
 
 namespace detail {
@@ -70,6 +83,64 @@ std::shared_ptr<detail::ViewSpec> MakeContainerSpec(detail::NodeKind kind, std::
   spec->children = std::move(children);
   return spec;
 }
+
+class ModifierCompiler {
+public:
+  ModifierCompiler(ViewSpec& spec, const std::shared_ptr<const Environment>& environment, AppResources& resources)
+      : spec_(spec), environment_(environment), resources_(resources) {}
+
+  void Apply(ModifierSpec modifier) {
+    if (modifier.descriptor == nullptr || !modifier.value) {
+      throw std::logic_error("HuxerUI modifier descriptor and value must not be empty");
+    }
+    if (IsDefaultIndicationDescriptor(modifier.descriptor)) {
+      // An explicit indication can come from a later Configure() call. Delay the default's foreground side effects.
+      if (!default_indication_) {
+        default_indication_ = std::move(modifier);
+        default_index_ = spec_.modifiers.size();
+      }
+      return;
+    }
+    if (modifier.descriptor->configure != nullptr) {
+      ModifierContext context{*this};
+      modifier.descriptor->configure(context, modifier.value.get());
+    }
+    Compile(modifier);
+    has_explicit_indication_ |= IsExplicitIndicationDescriptor(modifier.descriptor);
+    if (modifier.descriptor->create_extension != nullptr) {
+      spec_.modifiers.push_back(std::move(modifier));
+    }
+  }
+
+  void Finish() {
+    if (default_indication_ && !has_explicit_indication_) {
+      Compile(*default_indication_);
+      spec_.modifiers.insert(
+          spec_.modifiers.begin() + static_cast<std::ptrdiff_t>(default_index_), std::move(*default_indication_));
+    }
+  }
+
+  const std::any* FindEnvironment(std::type_index type) const {
+    return FindEnvironmentValue(environment_, type);
+  }
+
+private:
+  void Compile(ModifierSpec& modifier) {
+    if (modifier.descriptor->compile != nullptr) {
+      modifier.descriptor->compile(spec_, modifier, environment_, resources_);
+    }
+    if (modifier.descriptor == nullptr || !modifier.value) {
+      throw std::logic_error("HuxerUI compiled modifier descriptor and value must not be empty");
+    }
+  }
+
+  ViewSpec& spec_;
+  const std::shared_ptr<const Environment>& environment_;
+  AppResources& resources_;
+  std::optional<ModifierSpec> default_indication_;
+  std::size_t default_index_ = 0;
+  bool has_explicit_indication_ = false;
+};
 
 namespace {
 
@@ -151,21 +222,11 @@ ViewSpec CompileViewSpec(const ViewSpec& declaration, const std::shared_ptr<cons
   if (compiled.defaults != nullptr) {
     compiled.defaults(compiled, environment);
   }
-  for (const ModifierSpec& declaration_modifier : declaration.modifiers) {
-    if (declaration_modifier.descriptor == nullptr || !declaration_modifier.value) {
-      throw std::logic_error("HuxerUI modifier descriptor and value must not be empty");
-    }
-    ModifierSpec compiled_modifier = declaration_modifier;
-    if (declaration_modifier.descriptor->compile != nullptr) {
-      declaration_modifier.descriptor->compile(compiled, compiled_modifier, environment, resources);
-    }
-    if (!compiled_modifier.value) {
-      throw std::logic_error("HuxerUI compiled modifier value must not be empty");
-    }
-    if (compiled_modifier.descriptor->create_extension != nullptr) {
-      compiled.modifiers.push_back(std::move(compiled_modifier));
-    }
+  ModifierCompiler compiler(compiled, environment, resources);
+  for (const ModifierSpec& modifier : declaration.modifiers) {
+    compiler.Apply(modifier);
   }
+  compiler.Finish();
 
   if (compiled.properties.background.has_value()) {
     compiled.properties.background = compile_fill(*compiled.properties.background);
@@ -214,6 +275,15 @@ std::shared_ptr<ViewSpec> MakeVirtualLayoutSpec(const VirtualLayoutDescriptor& l
 
 } // namespace detail
 
+void ModifierContext::ApplyModifier(detail::ModifierSpec modifier) {
+  ValidateModifier(modifier);
+  compiler_.Apply(std::move(modifier));
+}
+
+const std::any* ModifierContext::FindEnvironment(std::type_index type) const {
+  return compiler_.FindEnvironment(type);
+}
+
 View::View(std::shared_ptr<detail::ViewSpec> spec) : spec_(std::move(spec)) {
 }
 
@@ -236,15 +306,7 @@ void View::AddDefaultIndication() {
 }
 
 void View::AddModifier(detail::ModifierSpec modifier) {
-  if (modifier.descriptor == nullptr || !modifier.value) {
-    throw std::invalid_argument("HuxerUI modifier descriptor and value must not be empty");
-  }
-  if (modifier.descriptor->create_extension == nullptr && modifier.descriptor->update_extension != nullptr) {
-    throw std::invalid_argument("HuxerUI modifier extension update requires extension creation");
-  }
-  if (modifier.descriptor->compile == nullptr && modifier.descriptor->create_extension == nullptr) {
-    throw std::invalid_argument("HuxerUI modifier descriptor must compile or create a node extension");
-  }
+  ValidateModifier(modifier);
   EnsureUniqueSpec();
   if (detail::IsExplicitIndicationDescriptor(modifier.descriptor)) {
     std::erase_if(spec_->modifiers, [](const detail::ModifierSpec& existing) {
@@ -263,15 +325,7 @@ void View::AddModifier(detail::ModifierSpec modifier) {
 }
 
 void View::SetModifier(detail::ModifierSpec modifier) {
-  if (modifier.descriptor == nullptr || !modifier.value) {
-    throw std::invalid_argument("HuxerUI modifier descriptor and value must not be empty");
-  }
-  if (modifier.descriptor->create_extension == nullptr && modifier.descriptor->update_extension != nullptr) {
-    throw std::invalid_argument("HuxerUI modifier extension update requires extension creation");
-  }
-  if (modifier.descriptor->compile == nullptr && modifier.descriptor->create_extension == nullptr) {
-    throw std::invalid_argument("HuxerUI modifier descriptor must compile or create a node extension");
-  }
+  ValidateModifier(modifier);
   EnsureUniqueSpec();
   const auto found = std::ranges::find_if(spec_->modifiers, [&modifier](const detail::ModifierSpec& existing) {
     return existing.descriptor == modifier.descriptor;

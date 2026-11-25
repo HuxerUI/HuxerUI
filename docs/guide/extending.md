@@ -28,11 +28,25 @@ Use [Custom layout](layout.md#custom-layout) to measure and place ordinary child
 
 ## Modifiers and NodeExtension
 
-Use a property modifier for reusable declaration data that applies directly to `ViewSpec`.
-Use a retained modifier with `NodeExtension` when one mounted node needs lifecycle, gesture, animation, semantics, or foreground paint state.
+A custom modifier can implement `void Configure(ModifierContext&) const` to apply existing modifiers to the same View. The SDK calls it when it compiles the View for mount or reconciliation, after theme and component defaults. Each `context.Apply(...)` runs at the custom modifier's position in `.With(...)`. Use `context.GetEnvironment<T>()` to read and observe the effective value for that View. Borrowed values and the context are valid for the current call.
+
+```cpp
+struct CardSurface {
+  void Configure(ModifierContext& context) const {
+    const auto& theme = context.GetEnvironment<ThemeSpec>();
+    context.Apply(Padding(12.0F), CornerRadius(8.0F), Background(theme.colors.surface));
+  }
+};
+
+// Attach the surface to a View with .With(CardSurface{}).
+```
+
+The same type can declare an `Extension` derived from `NodeExtension` to retain lifecycle, input, animation, semantics, or paint state. Its own extension follows the modifiers applied by `Configure()`. An explicit `Indication` applied either way replaces the same View's default indication, regardless of where `.OnClick()` appears.
 
 `NodeExtension` is not a general plugin registry.
 Update compatible declarative configuration without discarding retained state, request timing through `FrameResult`, and invalidate paint when paint-visible retained state changes.
+
+Set `FrameResult::presentation_transform` in `OnFrame()` to transform this View and its descendants. Return the complete finite transform on each call, including the final value when animation stops. The SDK composes it in modifier order with `Offset`, `Scale`, and `Rotation` while preserving layout. Paint, hit testing, and accessibility use the resolved transform, and a transform change alone can reuse recorded drawing commands.
 
 Use the protected `EmitEvent<Key>(...)` operation to report semantic output to `.On<Key>()` on the View carrying the extension.
 It uses the node's latest handlers after recomposition and does not bubble to ancestors or emit through an enclosing component's scope.

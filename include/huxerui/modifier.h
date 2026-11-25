@@ -1,12 +1,15 @@
 #pragma once
 
+#include <any>
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
-#include <concepts>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <source_location>
+#include <stdexcept>
+#include <typeindex>
 #include <type_traits>
 #include <utility>
 
@@ -20,6 +23,7 @@
 namespace huxerui {
 
 class Environment;
+class ModifierContext;
 class PaintContext;
 class UiWindow;
 class SemanticBuilder;
@@ -37,6 +41,7 @@ struct FileDropTargetCapability;
 struct ViewHandleBinding;
 class GestureRecognizer;
 struct InternalAccess;
+class ModifierCompiler;
 class SceneTransitionService;
 }
 
@@ -93,13 +98,19 @@ public:
     Both,
   };
 
-  /// Requests follow-up frame scheduling from OnFrame().
+  /// Supplies the current presentation transform and follow-up scheduling from OnFrame().
   struct FrameResult {
     /// Requests another frame as soon as the platform can produce one.
     bool needs_frame = false;
 
     /// Requests a frame after this many seconds when continuous frames are unnecessary.
     std::optional<double> wake_after{};
+
+    /// This extension's complete finite transform for the current frame. Defaults to identity.
+    /// The SDK composes it after earlier modifiers, before the node's layout offset and ancestor transforms.
+    /// Keep returning the final transform after motion stops. It moves the node and its descendants together for
+    /// drawing, hit testing, and accessibility while preserving layout.
+    Transform2D presentation_transform{};
 
     bool operator==(const FrameResult&) const = default;
   };
@@ -123,7 +134,8 @@ public:
 
   /// Advances retained time-based state for the current mounted node.
   ///
-  /// Return a scheduling request when more work remains, and call InvalidatePaint() when retained visual state changes.
+  /// Return a scheduling request when more work remains. Call InvalidatePaint() when recorded drawing commands change.
+  /// A change confined to the returned transform reuses the recorded drawing commands.
   virtual FrameResult OnFrame(ViewNode&, const FrameInfo&) {
     return {};
   }
@@ -366,6 +378,7 @@ struct ModifierDescriptor {
   bool layout_affecting = false;
   bool (*equals)(const void*, const void*) = nullptr;
   bool (*layout_equals)(const void*, const void*) = nullptr;
+  void (*configure)(ModifierContext&, const void*) = nullptr;
 };
 
 template <class Value> constexpr auto ErasedEqualsFor() noexcept -> bool (*)(const void*, const void*) {
@@ -419,18 +432,36 @@ concept ExplicitModifierDescriptor = requires {
 };
 
 template <class Modifier>
-concept AutomaticModifierDescriptor =
-    requires { typename Modifier::Extension; } && std::derived_from<typename Modifier::Extension, NodeExtension> &&
-    std::constructible_from<typename Modifier::Extension, ViewNode&, const Modifier&> &&
-    requires(typename Modifier::Extension& extension, ViewNode& node, const Modifier& modifier) {
-      extension.Update(node, modifier);
-    };
+concept AutomaticModifierDescriptor = requires {
+  ModifierDescriptorFor<Modifier, typename Modifier::Extension>();
+};
 
 template <class Modifier>
-  requires ExplicitModifierDescriptor<Modifier> || AutomaticModifierDescriptor<Modifier>
+concept ConfigurableModifier = requires(const Modifier& modifier, ModifierContext& context) {
+  { modifier.Configure(context) } -> std::same_as<void>;
+};
+
+template <class Modifier>
+concept ModifierDeclaration = AutomaticModifierDescriptor<Modifier> ||
+    (!requires { typename Modifier::Extension; } &&
+     (ExplicitModifierDescriptor<Modifier> || ConfigurableModifier<Modifier>));
+
+template <ModifierDeclaration Modifier>
 const ModifierDescriptor& ResolveModifierDescriptor() {
   if constexpr (ExplicitModifierDescriptor<Modifier>) {
     return Modifier::Descriptor();
+  } else if constexpr (ConfigurableModifier<Modifier>) {
+    static const ModifierDescriptor descriptor = [] {
+      ModifierDescriptor result;
+      if constexpr (AutomaticModifierDescriptor<Modifier>) {
+        result = ModifierDescriptorFor<Modifier, typename Modifier::Extension>();
+      }
+      result.configure = [](ModifierContext& context, const void* value) {
+        static_cast<const Modifier*>(value)->Configure(context);
+      };
+      return result;
+    }();
+    return descriptor;
   } else {
     return ModifierDescriptorFor<Modifier, typename Modifier::Extension>();
   }
@@ -438,11 +469,11 @@ const ModifierDescriptor& ResolveModifierDescriptor() {
 
 } // namespace detail
 
-/// Identifies a copyable value that View::With() can apply as a property or retained modifier.
+/// Identifies a copyable value accepted by View::With() and ModifierContext::Apply().
+/// A declared Extension must meet NodeExtension's construction and Update() requirements.
 template <class T>
 concept ViewModifier =
-    std::copy_constructible<std::remove_cvref_t<T>> && (detail::ExplicitModifierDescriptor<std::remove_cvref_t<T>> ||
-                                                        detail::AutomaticModifierDescriptor<std::remove_cvref_t<T>>);
+    std::copy_constructible<std::remove_cvref_t<T>> && detail::ModifierDeclaration<std::remove_cvref_t<T>>;
 
 namespace detail {
 
@@ -455,6 +486,49 @@ template <ViewModifier Modifier> ModifierSpec MakeModifierSpec(Modifier&& modifi
 }
 
 } // namespace detail
+
+/// Configures the current View from a modifier's `void Configure(ModifierContext&) const` method.
+///
+/// The SDK calls Configure() when compiling the View for mount or reconciliation, after applying theme and component
+/// defaults. Configure() can run again when an observed Environment value changes.
+/// The context is borrowed for the duration of Configure().
+class ModifierContext {
+public:
+  ModifierContext(const ModifierContext&) = delete;
+  ModifierContext& operator=(const ModifierContext&) = delete;
+
+  /// Applies modifiers to this View from left to right at the calling modifier's position in With().
+  /// Any extensions from these modifiers come before the calling modifier's own optional extension.
+  template <ViewModifier... Modifiers> void Apply(Modifiers&&... modifiers) {
+    (ApplyModifier(detail::MakeModifierSpec(std::forward<Modifiers>(modifiers))), ...);
+  }
+
+  /// Reads the effective inherited value for this View and observes it for recomposition.
+  /// @tparam Value Environment value type with a static Default() convertible to Value.
+  /// @return The inherited value or the type's default. The reference is valid for the duration of Configure().
+  template <class Value>
+    requires requires { { Value::Default() } -> std::convertible_to<Value>; }
+  const Value& GetEnvironment() const {
+    if (const auto* value = FindEnvironment(typeid(Value))) {
+      if (const auto* typed = std::any_cast<Value>(value)) {
+        return *typed;
+      }
+      throw std::logic_error("HuxerUI environment value has an invalid stored type");
+    }
+    static const Value fallback = Value::Default();
+    return fallback;
+  }
+
+private:
+  explicit ModifierContext(detail::ModifierCompiler& compiler) : compiler_(compiler) {}
+
+  void ApplyModifier(detail::ModifierSpec modifier);
+  const std::any* FindEnvironment(std::type_index type) const;
+
+  detail::ModifierCompiler& compiler_;
+
+  friend class detail::ModifierCompiler;
+};
 
 /// Configures the geometry, motion, and colors of a ScrollBar.
 ///

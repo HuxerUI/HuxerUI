@@ -329,6 +329,8 @@ Presentation properties live on retained render nodes:
 Updating these properties does not record content again.
 The renderer composes them during scene traversal, and hit testing uses the same transform chain in reverse.
 
+Retained extensions can return a local transform in `FrameResult`. UiWindow resets the node's presentation each frame and composes each extension's complete transform after earlier modifiers, before applying the layout offset and ancestor transforms. Geometry consumers use the resolved result, and a compatible extension can continue returning its final transform after it stops requesting frames.
+
 A `ScrollView` owns a viewport RenderNode with a local clip and a children transform derived from the scroll offset.
 Changing the offset updates that transform without affecting the viewport's content or foreground.
 The retained child layout outputs and PaintSequences remain unchanged.

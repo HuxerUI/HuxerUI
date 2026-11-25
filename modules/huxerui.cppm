@@ -268,6 +268,7 @@ export namespace huxerui {
     using huxerui::MenuSection;
     using huxerui::MenuSeparatorMode;
     using huxerui::MenuStyle;
+    using huxerui::ModifierContext;
     using huxerui::MotionAdvanceResult;
     using huxerui::MotionController;
     using huxerui::MotionScheme;

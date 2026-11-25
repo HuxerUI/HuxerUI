@@ -5,6 +5,7 @@
 #include "application/application_internal.h"
 #include "application/platform_registry_internal.h"
 #include "graphics/external_texture_internal.h"
+#include "graphics/geometry_internal.h"
 #include "resources/resource_internal.h"
 #include "runtime_pointer_internal.h"
 #include "runtime_text_internal.h"
@@ -2859,6 +2860,13 @@ bool UiWindow::UpdateNodeExtensions(
       entry.interaction_sync_pending = false;
     }
     const NodeExtension::FrameResult result = entry.extension->OnFrame(node, node_frame);
+    if (!result.presentation_transform.IsIdentity()) {
+      const Transform2D transform = ComposeTransform(result.presentation_transform, node.presentation.local_transform);
+      if (!IsFiniteTransform(transform)) {
+        throw std::invalid_argument("HuxerUI modifier presentation transform must be finite");
+      }
+      node.presentation.local_transform = transform;
+    }
     needs_frame = needs_frame || result.needs_frame;
     if (result.wake_after.has_value() && (!next_wakeup.has_value() || *result.wake_after < *next_wakeup)) {
       next_wakeup = *result.wake_after;

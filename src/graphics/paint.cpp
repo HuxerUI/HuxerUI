@@ -33,11 +33,6 @@ bool IsFinite(Color color) noexcept {
          std::isfinite(color.alpha);
 }
 
-bool IsFinite(Transform2D transform) noexcept {
-  return std::isfinite(transform.m11) && std::isfinite(transform.m12) && std::isfinite(transform.m21) &&
-         std::isfinite(transform.m22) && std::isfinite(transform.translate_x) && std::isfinite(transform.translate_y);
-}
-
 void RequireRect(Rect rect) {
   if (!IsValid(rect)) {
     throw std::invalid_argument("HuxerUI paint rectangle must be finite with non-negative dimensions");
@@ -185,7 +180,7 @@ void detail::ValidateGradient(const LinearGradient& gradient) {
   if (!IsFinite(gradient.start) || !IsFinite(gradient.end)) {
     throw std::invalid_argument("HuxerUI linear gradient endpoints must be finite");
   }
-  if (!IsFinite(gradient.transform) || !InverseTransform(gradient.transform).has_value()) {
+  if (!IsFiniteTransform(gradient.transform) || !InverseTransform(gradient.transform).has_value()) {
     throw std::invalid_argument("HuxerUI linear gradient transform must be finite and invertible");
   }
   RequireGradientStops(gradient.stops);
@@ -196,7 +191,7 @@ void detail::ValidateGradient(const RadialGradient& gradient) {
       gradient.radius.width <= 0.0F || gradient.radius.height <= 0.0F) {
     throw std::invalid_argument("HuxerUI radial gradient geometry must be finite with positive radii");
   }
-  if (!IsFinite(gradient.transform) || !InverseTransform(gradient.transform).has_value()) {
+  if (!IsFiniteTransform(gradient.transform) || !InverseTransform(gradient.transform).has_value()) {
     throw std::invalid_argument("HuxerUI radial gradient transform must be finite and invertible");
   }
   RequireGradientStops(gradient.stops);
@@ -806,7 +801,7 @@ void PaintContext::PopClip() {
 
 void PaintContext::PushTransform(Transform2D transform) {
   RequireOpen();
-  if (!IsFinite(transform)) {
+  if (!detail::IsFiniteTransform(transform)) {
     throw std::invalid_argument("HuxerUI paint transform must be finite");
   }
   sequence_.commands_.emplace_back(PushTransformCommand{transform});

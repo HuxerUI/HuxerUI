@@ -1,6 +1,8 @@
 #include "runtime_test_support.h"
 
+#include <algorithm>
 #include <limits>
+#include <memory>
 #include <unordered_set>
 
 #include "components/indication_internal.h"
@@ -731,6 +733,142 @@ View ExplicitIndicationApp() {
   return Button("explicit").OnClick([] { ++indication_clicks; }).With(huxerui::Indication{});
 }
 
+constexpr Color surface_hover_color = Color::Rgb(50, 80, 160);
+constexpr Color default_foreground = Color::Rgb(150, 30, 60);
+State<bool> alternate_surface;
+bool configure_feedback = true;
+bool click_before_surface = false;
+bool use_built_in_button = false;
+
+struct SurfaceFeedback {
+  void Configure(ModifierContext& context) const {
+    context.Apply(Indication{.hover = IndicationLayer{.fill = surface_hover_color, .enter = SnapSpec{}}});
+  }
+};
+
+struct ThemedSurface {
+  class Extension final : public NodeExtension {
+  public:
+    Extension(ViewNode&, const ThemedSurface&) {}
+    void Update(ViewNode&, const ThemedSurface&) {}
+  };
+
+  bool feedback;
+
+  void Configure(ModifierContext& context) const {
+    context.Apply(Background(context.GetEnvironment<ThemeSpec>().colors.surface));
+    if (feedback) {
+      context.Apply(SurfaceFeedback{});
+    }
+  }
+
+  bool operator==(const ThemedSurface&) const = default;
+};
+
+struct InvalidExtensionConstructor {
+  struct Extension : NodeExtension {
+    explicit Extension(ViewNode&) {}
+    void Update(ViewNode&, const InvalidExtensionConstructor&) {}
+  };
+
+  void Configure(ModifierContext&) const {}
+};
+
+struct InvalidExtensionUpdate {
+  struct Extension : NodeExtension {
+    Extension(ViewNode&, const InvalidExtensionUpdate&) {}
+    void Update(ViewNode&, InvalidExtensionUpdate&) {}
+  };
+
+  void Configure(ModifierContext&) const {}
+};
+
+static_assert(ViewModifier<SurfaceFeedback>);
+static_assert(ViewModifier<ThemedSurface>);
+static_assert(!ViewModifier<InvalidExtensionConstructor>);
+static_assert(!ViewModifier<InvalidExtensionUpdate>);
+
+View ConfiguredSurfaceApp() {
+  auto alternate = UseState(false);
+  alternate_surface = alternate;
+  ThemeSpec theme = ThemeSpec::Default();
+  theme.colors.surface = alternate.Get() ? Color::White() : Color::Black();
+  theme.interactions.indication = Indication{
+      .hover = IndicationLayer{.foreground = default_foreground},
+      .ripple = RippleEffect{},
+  };
+  ButtonStyle style = ButtonStyle::Default();
+  style.indication = theme.interactions.indication;
+  ThemeDefinition definition(theme);
+  definition.Set(style);
+
+  const auto clicked = [] { ++indication_clicks; };
+  View surface = use_built_in_button ? View(Button("Surface")) : View(Text("Surface"));
+  if (click_before_surface) {
+    surface = std::move(surface).OnClick(clicked);
+  }
+  surface = std::move(surface).With(Background(Color::Transparent()), ThemedSurface{configure_feedback},
+                                   Foreground(Color::Rgb(42, 70, 89)));
+  if (!click_before_surface) {
+    surface = std::move(surface).OnClick(clicked);
+  }
+  return Theme {std::move(definition), std::move(surface)};
+}
+
+struct SwipeOffset {
+  std::shared_ptr<MotionController> motion;
+
+  class Extension final : public NodeExtension {
+  public:
+    Extension(ViewNode& node, const SwipeOffset& value) { Update(node, value); }
+    void Update(ViewNode&, const SwipeOffset& value) { motion_ = value.motion; }
+
+    FrameResult OnFrame(ViewNode&, const FrameInfo& frame) override {
+      const auto result = motion_->Advance(frame);
+      return {result.needs_frame, result.wake_after, Transform2D{.translate_x = motion_->Value()}};
+    }
+
+  private:
+    std::shared_ptr<MotionController> motion_;
+  };
+
+  bool operator==(const SwipeOffset&) const = default;
+};
+
+State<bool> swipe_enabled;
+ScrollController swipe_scroll;
+std::shared_ptr<MotionController> swipe_motion;
+int swipe_row_clicks = 0;
+int swipe_action_clicks = 0;
+
+View SwipeActionApp() {
+  auto enabled = UseState(true);
+  swipe_enabled = enabled;
+  swipe_scroll = UseScrollController();
+  View row = Button("Message").With(Frame{160.0F, 44.0F}, Indication{}).OnClick([] { ++swipe_row_clicks; });
+  if (enabled.Get()) {
+    row = std::move(row).With(SwipeOffset{swipe_motion});
+  }
+  auto swipe_row = Stack {
+    Row {
+      Spacer().With(Grow{}),
+      Button("Archive").With(Frame{52.0F, 44.0F}).OnClick([] { ++swipe_action_clicks; }),
+    },
+    std::move(row),
+  }.With(
+      ClipChildren{},
+      DragGesture{.axis = Axis::Horizontal, .minimum_distance = 4.0F}
+  ).On<DragEvents::Changed>([](const DragEvent& event) {
+    swipe_motion->Set(std::clamp(event.translation.x, -60.0F, 0.0F));
+  }).On<DragEvents::Canceled>([](const DragEvent&) {
+    swipe_motion->AnimateTo(0.0F, TweenSpec{0.2, Easing::Linear});
+  });
+  return ScrollView(Column {
+    std::move(swipe_row),
+    Spacer().With(Frame{160.0F, 100.0F}),
+  }).Controller(swipe_scroll);
+}
+
 View NodeExtensionPruningApp() {
   auto visible = UseState(true);
   show_modifier_branch = visible;
@@ -937,6 +1075,105 @@ TEST_CASE("TestExplicitIndicationOverridesAutomaticDefault") {
 
   ClickAt(runtime, {20.0F, 20.0F}, 93);
   REQUIRE(indication_clicks == 1);
+}
+
+TEST_CASE("Configured modifiers follow the mounted environment and replace only default indications", "[modifier]") {
+  click_before_surface = GENERATE(false, true);
+  use_built_in_button = GENERATE(false, true);
+  configure_feedback = GENERATE(false, true);
+  indication_clicks = 0;
+  TestPlatform platform;
+  UiWindow runtime{ConfiguredSurfaceApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 80.0F}});
+  CHECK(FindRectWithColor(runtime.BuildFrame(), Color::Black()) != nullptr);
+  const auto* mounted = runtime.RootNode()->children.front().get();
+  REQUIRE(mounted->extensions.size() == 2);
+  const NodeExtension* extension = nullptr;
+  for (const auto& entry : mounted->extensions) {
+    if (!detail::IsDefaultIndicationDescriptor(entry.descriptor) &&
+        !detail::IsExplicitIndicationDescriptor(entry.descriptor)) {
+      extension = entry.extension.get();
+    }
+  }
+  REQUIRE(extension != nullptr);
+  CHECK(static_cast<bool>(mounted->foreground_indication) == !configure_feedback);
+
+  alternate_surface = true;
+  CHECK(FindRectWithColor(runtime.BuildFrame(), Color::White()) != nullptr);
+  CHECK(std::ranges::any_of(mounted->extensions, [extension](const auto& entry) {
+    return entry.extension.get() == extension;
+  }));
+
+  runtime.HandlePointerEvent({PointerEventType::Move, 1, {20.0F, 20.0F}, PointerDeviceKind::Mouse});
+  CHECK((FindRectWithColor(runtime.BuildFrame(), surface_hover_color) != nullptr) == configure_feedback);
+  runtime.HandlePointerEvent({PointerEventType::Down, 1, {20.0F, 20.0F}, PointerDeviceKind::Mouse});
+  runtime.BuildFrame();
+  platform.AdvanceTime(0.1);
+  CHECK(std::ranges::any_of(runtime.BuildFrame().Commands(), [](const PaintCommand& command) {
+    return std::holds_alternative<DrawCircleCommand>(command);
+  }) == !configure_feedback);
+  runtime.HandlePointerEvent({PointerEventType::Up, 1, {20.0F, 20.0F}, PointerDeviceKind::Mouse});
+  CHECK(indication_clicks == 1);
+}
+
+TEST_CASE("A modifier frame transform moves swipe content and its input and semantics together", "[modifier]") {
+  swipe_motion = std::make_shared<MotionController>();
+  swipe_row_clicks = 0;
+  swipe_action_clicks = 0;
+  TestPlatform platform;
+  UiWindow runtime{SwipeActionApp, platform};
+  runtime.SetWindowMetrics({.viewport = {160.0F, 44.0F}});
+  const auto check_message = [&](float x) {
+    const auto& frame = runtime.BuildCommit();
+    REQUIRE(frame.semantic_frame);
+    const auto& nodes = frame.semantic_frame->nodes;
+    const auto message = std::ranges::find(nodes, "Message", &SemanticNode::label);
+    REQUIRE(message != nodes.end());
+    CHECK(message->bounds == Rect{x, 0.0F, 160.0F, 44.0F});
+    const auto& stack = *runtime.RootNode()->children.front()->children.front();
+    const auto& row = *stack.children.back();
+    CHECK(row.render_node.transform.translate_x == x);
+    CHECK(row.LayoutOffset() == Point{});
+  };
+  const auto drag_left = [&] {
+    runtime.HandlePointerEvent({PointerEventType::Down, 1, {120.0F, 20.0F}, PointerDeviceKind::Touch});
+    runtime.HandlePointerEvent({PointerEventType::Move, 1, {60.0F, 20.0F}, PointerDeviceKind::Touch});
+  };
+
+  check_message(0.0F);
+  drag_left();
+  check_message(-60.0F);
+  runtime.HandlePointerEvent({PointerEventType::Cancel, 1, {60.0F, 20.0F}, PointerDeviceKind::Touch});
+  check_message(-60.0F);
+  platform.AdvanceTime(0.1);
+  check_message(-30.0F);
+  platform.AdvanceTime(0.1);
+  check_message(0.0F);
+  CHECK(swipe_row_clicks == 0);
+
+  drag_left();
+  runtime.HandlePointerEvent({PointerEventType::Up, 1, {60.0F, 20.0F}, PointerDeviceKind::Touch});
+  check_message(-60.0F);
+  ClickAt(runtime, {20.0F, 20.0F}, 2);
+  ClickAt(runtime, {145.0F, 20.0F}, 3);
+  CHECK(swipe_row_clicks == 1);
+  CHECK(swipe_action_clicks == 1);
+
+  swipe_enabled = false;
+  check_message(0.0F);
+  ClickAt(runtime, {145.0F, 20.0F}, 4);
+  CHECK(swipe_row_clicks == 2);
+  CHECK(swipe_action_clicks == 1);
+
+  swipe_enabled = true;
+  swipe_motion->Set(0.0F);
+  check_message(0.0F);
+  runtime.HandlePointerEvent({PointerEventType::Down, 5, {120.0F, 38.0F}, PointerDeviceKind::Touch});
+  runtime.HandlePointerEvent({PointerEventType::Move, 5, {120.0F, 5.0F}, PointerDeviceKind::Touch});
+  runtime.BuildFrame();
+  CHECK(swipe_scroll.Offset() > 0.0F);
+  CHECK(swipe_motion->Value() == 0.0F);
+  runtime.HandlePointerEvent({PointerEventType::Cancel, 5, {120.0F, 5.0F}, PointerDeviceKind::Touch});
 }
 
 TEST_CASE("TestNodeExtensionFrameSubtreeCache") {

@@ -108,7 +108,10 @@ public:
     return std::move(*this);
   }
 
-  /// Applies property or retained modifiers from left to right.
+  /// Records modifiers for this View in left-to-right order.
+  ///
+  /// The SDK applies them when compiling the View for mount or reconciliation.
+  /// @see ModifierContext
   template <ViewModifier... Modifiers> View With(Modifiers&&... modifiers) && {
     ApplyModifiers(std::forward<Modifiers>(modifiers)...);
     return std::move(*this);

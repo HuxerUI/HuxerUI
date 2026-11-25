@@ -8,6 +8,11 @@
 
 namespace huxerui::detail {
 
+inline bool IsFiniteTransform(const Transform2D& transform) noexcept {
+  return std::isfinite(transform.m11) && std::isfinite(transform.m12) && std::isfinite(transform.m21) &&
+         std::isfinite(transform.m22) && std::isfinite(transform.translate_x) && std::isfinite(transform.translate_y);
+}
+
 inline Transform2D ComposeTransform(const Transform2D& outer, const Transform2D& inner) noexcept {
   return {
       outer.m11 * inner.m11 + outer.m21 * inner.m12,
