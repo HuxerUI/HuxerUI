@@ -196,7 +196,7 @@ cmake --build build --target example_ui_gallery
 [`example_system_tasks`](../../examples/system_tasks/README.md) demonstrates continued file export, system-scheduled export validation, and an ongoing HTTP receive session. It includes Android cold-start loading and foreground service configuration, plus an iOS Info.plist selected through `HUXERUI_APP_INFO_PLIST`. Its README covers platform support, storage, build commands, and device checks.
 
 Desktop binaries or application bundles are emitted under the configured build output.
-Android examples use `platform/android/example_runner`, and iOS examples use the repository platform runner.
+Android examples use `platform/android/example_runner`, and iOS examples use the repository platform runner. The [HarmonyOS example runner](../../platform/ohos/README.md#building-the-example-runner) selects examples with `-p huxeruiExample=<name>` and runs them on a connected device or emulator.
 The Android runner resolves the selected example's final CMake shared-library name into `BuildConfig.HUXERUI_APP_LIBRARY`; MainActivity loads it before creating the hosted Runtime, without a fixed application `.so` name.
 
 [`example_buffer_reference`](../../examples/buffer_reference/main.cpp) pulls successive grayscale frames from one fixed native allocation, analyzes row-strided bytes in C++, and displays the mean, histogram, and backing-reference reuse check without converting frames into images.

@@ -262,12 +262,57 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  ohos-artifacts:
+    name: Build HarmonyOS platform artifacts
+    needs: validate
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_REF }}
+      - name: Install HarmonyOS tools
+        shell: pwsh
+        env:
+          HUXERUI_OHOS_CLT_URL: ${{ vars.HUXERUI_OHOS_CLT_URL }}
+        run: |
+          if (-not $env:HUXERUI_OHOS_CLT_URL) {
+              throw "Set HUXERUI_OHOS_CLT_URL to the prepared Windows HarmonyOS toolchain ZIP"
+          }
+
+          $tools = "$env:RUNNER_TEMP/ohos"
+          New-Item -ItemType Directory -Path $tools | Out-Null
+          $archive = Join-Path $tools "command-line-tools.zip"
+          curl.exe --fail --silent --show-error --location --retry 3 --output $archive -- $env:HUXERUI_OHOS_CLT_URL
+          if ($LASTEXITCODE -ne 0) { throw "Cannot download HarmonyOS tools" }
+          tar.exe -xf $archive -C $tools
+          if ($LASTEXITCODE -ne 0) { throw "Cannot unpack HarmonyOS tools" }
+          Remove-Item -LiteralPath $archive
+
+          $clt = Join-Path $tools "command-line-tools"
+          "OHOS_NATIVE_SDK=$(Join-Path $clt 'sdk/default/openharmony/native')" >> $env:GITHUB_ENV
+          "DEVECO_SDK_HOME=$(Join-Path $clt 'sdk')" >> $env:GITHUB_ENV
+          "$clt/bin" >> $env:GITHUB_PATH
+      - name: Build HAR and both native ABIs
+        shell: pwsh
+        env:
+          npm_config_audit: "false"
+          npm_config_fund: "false"
+        run: .\scripts\package_sdk.ps1 -OhosArtifactsOnly -BuildDirectory "${{ runner.temp }}/huxerui-ohos" -Jobs 4
+      - name: Upload HarmonyOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-artifacts-ohos
+          path: ${{ runner.temp }}/huxerui-ohos/platform-artifacts
+          if-no-files-found: error
+          retention-days: 7
+
   build-windows:
     name: Build Windows x86_64 SDK
     needs:
       - validate
       - android-artifacts
       - web-artifacts
+      - ohos-artifacts
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
@@ -282,6 +327,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: platform-artifacts-web
+          path: platform-artifacts
+      - name: Download HarmonyOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-artifacts-ohos
           path: platform-artifacts
       - uses: ilammy/msvc-dev-cmd@v1
       - name: Build Windows host tools
@@ -378,6 +428,7 @@ jobs:
       - android-artifacts
       - web-artifacts
       - ios-artifacts
+      - ohos-artifacts
     strategy:
       fail-fast: false
       matrix:
@@ -414,6 +465,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: platform-artifacts-ios
+          path: platform-artifacts
+      - name: Download HarmonyOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-artifacts-ohos
           path: platform-artifacts
       - name: Build macOS host tools
         run: |
@@ -477,6 +533,7 @@ jobs:
       - android-artifacts
       - web-artifacts
       - linux-host-tools
+      - ohos-artifacts
     strategy:
       fail-fast: false
       matrix:
@@ -506,6 +563,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: platform-artifacts-web
+          path: platform-artifacts
+      - name: Download HarmonyOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: platform-artifacts-ohos
           path: platform-artifacts
       - name: Download Linux host tools
         uses: actions/download-artifact@v4

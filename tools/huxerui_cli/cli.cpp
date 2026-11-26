@@ -572,10 +572,14 @@ int RunCreate(std::span<const std::string_view> arguments, const std::filesystem
     std::vector<prompt::Choice> choices;
     std::vector<std::size_t> all;
     for (const std::string_view id : PlatformIds()) {
+      if (id == "ohos" && !selection.Has(BuildSystem::CMake)) {
+        continue;
+      }
       all.push_back(choices.size());
       const std::string_view hint = id == "macos" || id == "ios" ? "builds on a Mac"
                                     : id == "web"                ? "WebAssembly"
                                     : id == "android"            ? "an APK through Gradle"
+                                    : id == "ohos"               ? "a HAP through Hvigor"
                                                                  : "";
       choices.push_back({std::string(id), std::string(hint)});
     }
@@ -604,15 +608,18 @@ int RunCreate(std::span<const std::string_view> arguments, const std::filesystem
   } catch (const std::invalid_argument& error) {
     throw UsageError(error.what());
   }
-  std::vector<const PlatformDriver*> application_platforms;
-  std::vector<const PlatformDriver*> library_platforms;
-  if (kind == ProjectKind::App) {
-    application_platforms = ResolvePlatforms(platform_list.value_or("all"));
-  } else {
-    application_platforms = ResolvePlatforms(platform_list.value_or("all"));
-    if (platform_specified) {
-      library_platforms = application_platforms;
+  std::vector<const PlatformDriver*> application_platforms = ResolvePlatforms(platform_list.value_or("all"));
+  if (!selection.Has(BuildSystem::CMake)) {
+    const auto removed = std::erase_if(application_platforms, [](const PlatformDriver* platform) {
+      return platform->Id() == "ohos";
+    });
+    if (removed && platform_list && *platform_list != "all") {
+      throw UsageError("HarmonyOS projects require CMake");
     }
+  }
+  std::vector<const PlatformDriver*> library_platforms;
+  if (kind == ProjectKind::Library && platform_specified) {
+    library_platforms = application_platforms;
   }
   std::string prompted_agents;
   if (prompter != nullptr && !agent_list) {
@@ -755,7 +762,15 @@ int RunPlatform(std::span<const std::string_view> arguments, const std::filesyst
 
   const Project project = DiscoverProject(working_directory);
   const ProjectTemplate project_template = LoadProjectTemplate(project);
-  const std::vector<const PlatformDriver*> platforms = ResolvePlatforms(arguments[2]);
+  auto platforms = ResolvePlatforms(arguments[2]);
+  if (!project.Declares(BuildSystem::CMake)) {
+    const auto removed = std::erase_if(platforms, [](const PlatformDriver* platform) {
+      return platform->Id() == "ohos";
+    });
+    if (removed && arguments[2] != "all") {
+      throw UsageError("HarmonyOS projects require CMake");
+    }
+  }
   AddProjectPlatforms(project, project_template, platforms);
 
   output << "Updated platforms:";
@@ -1336,7 +1351,8 @@ int RunEnvironment(std::span<const std::string_view> arguments, const std::files
       std::ranges::none_of(platforms, [](const auto* platform) { return platform->Id() == "android"; }))
     throw UsageError("--java-home requires Android");
   if (!options.request.generator.empty() && std::ranges::any_of(platforms, [](const auto* platform) {
-        return platform->Id() == "android" || platform->Id() == "ios" || platform->Id() == "windows";
+        const auto id = platform->Id();
+        return id == "android" || id == "ios" || id == "ohos" || id == "windows";
       }))
     throw UsageError("--generator requires platform builds that accept an explicit CMake generator");
   if (platforms.empty() && (setup || (options.platforms && !project))) {
@@ -1790,7 +1806,8 @@ PlatformCommandContext MakeCommandContext(const Project& project, const Platform
     if (!std::filesystem::is_regular_file(build_directory / "CMakeCache.txt")) {
       cmake_generator = FindExecutable("ninja", environment) ? "Ninja" : "NMake Makefiles";
     }
-  } else if (platform.Id() != "android" && platform.Id() != "ios" && cmake_generator.empty() &&
+  } else if (platform.Id() != "android" && platform.Id() != "ios" && platform.Id() != "ohos" &&
+             cmake_generator.empty() &&
              !std::filesystem::is_regular_file(build_directory / "CMakeCache.txt") &&
              !ReadEnvironmentVariable("CMAKE_GENERATOR") && FindExecutable("ninja", environment)) {
     cmake_generator = "Ninja";
@@ -1836,12 +1853,21 @@ void ExecuteCommands(std::span<const ProcessCommand> commands, std::ostream& out
   for (const ProcessCommand& planned : commands) {
     const auto command = detail::WithEnvironment(planned, environment);
     console.Command(output, DescribeProcess(command), true);
-    const int result = RunProcess(command);
+    ProcessResult result;
+    if (command.required_output.empty()) {
+      result.exit_code = RunProcess(command);
+    } else {
+      result = RunProcessCapture(command);
+      output << result.output;
+    }
     console.CommandEnded(output);
-    if (result != 0) {
+    if (result.exit_code != 0) {
       throw std::runtime_error(
-          "command failed with exit code " + std::to_string(result) + ": " + DescribeProcess(command)
+          "command failed with exit code " + std::to_string(result.exit_code) + ": " + DescribeProcess(command)
       );
+    }
+    if (!command.required_output.empty() && result.output.find(command.required_output) == std::string::npos) {
+      throw std::runtime_error("command did not report success: " + DescribeProcess(command));
     }
   }
 }
@@ -2016,6 +2042,10 @@ McppBuild PrepareMcppBuild(const Project& project, BuildOptions& options, std::s
   }
   std::vector<const PlatformDriver*> platforms =
       ResolveBuildPlatforms(project, options, command, options.no_shell ? ShellUse::Optional : ShellUse::Required);
+  const auto removed = std::erase_if(platforms, [](const PlatformDriver* platform) { return platform->Id() == "ohos"; });
+  if (removed && (platforms.empty() || options.platforms != "all")) {
+    throw UsageError("HarmonyOS builds require CMake");
+  }
   if (options.no_shell) {
     for (const PlatformDriver* platform : platforms) {
       if (!HasCoreShell(*platform)) {

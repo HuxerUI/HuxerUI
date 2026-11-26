@@ -6,7 +6,7 @@ Use this workflow to build an SDK archive from a HuxerUI checkout. See [Installa
 
 `cmake/HuxerUIBuild.cmake` defines the native `HuxerUILibraries` component for top-level builds. `cmake/HuxerUISdk.cmake` assembles the [installed SDK layout](../design/sdk-cli.md#sdk-home-and-discovery) from the native install output, headers, CMake metadata, host tools, resources, and platform artifacts. Profiling must be disabled for installation. Published archives use `HUXERUI_OPTIMIZATION=default` and `HUXERUI_ENABLE_LTO=OFF`. See [Runtime profiling](building.md#runtime-profiling) for source-build diagnostics.
 
-Desktop archive scripts assemble the SDK for their host and include the Android and Web artifacts. The macOS archive also includes the device and Simulator iOS XCFramework. Release CI additionally builds an Android arm64-v8a host SDK for Termux, reusing the separately assembled Android target libraries.
+Desktop archive scripts assemble the SDK for their host and include the Android, HarmonyOS, and Web artifacts. The macOS archive also includes the device and Simulator iOS XCFramework. Release CI additionally builds an Android arm64-v8a host SDK for Termux, reusing the separately assembled Android target libraries.
 
 ### Android artifacts
 
@@ -52,6 +52,22 @@ sh scripts/package_sdk.sh --build-dir ./build/sdk --output-dir ./build/sdk/packa
 
 Packaging output belongs in a build directory and must not be written into the source tree.
 
+## HarmonyOS artifacts
+
+The release toolchain uses DevEco Command Line Tools `26.0.0.865`, HarmonyOS NDK `26.0.0.105`, and [OpenHarmony Clang `19.1.4` (`79830f`) with its matching NDK libc++](https://repo.huaweicloud.com/openharmony/compiler/clang/19.1.4-79830f/windows/). To assemble the Windows bundle, replace `sdk/default/openharmony/native/llvm` under `command-line-tools` with the Clang distribution. Copy `__config_site`, `libc++.a`, and `libc++experimental.a` from the matching NDK libc++ distribution into their corresponding paths under `native/llvm` for both target ABIs.
+
+Configure the [HarmonyOS build environment](../../platform/ohos/README.md#requirements) on Windows. The SDK packager builds the HAR and static libraries for `arm64-v8a` and `x86_64`. To build those artifacts separately, run the following command.
+
+```powershell
+.\scripts\package_sdk.ps1 -OhosArtifactsOnly -BuildDirectory .\build\sdk
+```
+
+Use a separate build directory for each HarmonyOS toolchain, or clear the corresponding CMake cache under `build/sdk/ohos` before selecting a different toolchain.
+
+Copy `build/sdk/platform-artifacts/ohos` from the same source revision to a directory outside the Unix packager's build staging directory, then set `HUXERUI_OHOS_ARTIFACTS` to the copied directory before running `package_sdk.sh`. Release CI builds these inputs once on Windows and includes them in all desktop archives.
+
+Set the GitHub Actions repository variable `HUXERUI_OHOS_CLT_URL` to the Windows toolchain ZIP URL. The ZIP contains `command-line-tools` at its root. Release CI downloads and extracts this bundle before building the HarmonyOS SDK artifacts.
+
 ## Validate an archive
 
 Verify its checksum and compare the extracted contents with the [SDK layout and platform artifacts](../design/sdk-cli.md#platform-release-forms). On macOS, verify the AppKit `HuxerUIPlatform` module and both iOS XCFramework slices. Check that the packaged libraries pass Objective-C and Swift import-and-link fixtures. macOS libraries and host tools must declare macOS 12 as their minimum deployment version, and both XCFramework slices must declare iOS 15.
@@ -71,6 +87,8 @@ The generated smoke project must contain `.agents/skills/huxerui-app-development
 These tests must not query public releases or replace a developer's SDK.
 
 On macOS, also create an iOS-only smoke project and run `huxerui build ios --config release` so the installed XCFramework participates in a complete Simulator application-core build.
+
+For HarmonyOS package verification, build a CMake application against the installed desktop SDK with `huxerui package ohos --abi arm64,x64`. Verify that the HAP contains one application shared library per ABI and that the signed HAP installs and launches on an arm64 device.
 
 CMake packaging changes require both an incremental build and a separate clean configure and build on the affected host.
 

@@ -1,0 +1,8 @@
+{
+  "name": "entry",
+  "version": "0.1.0",
+  "dependencies": {
+    "@huxerui/huxerui": "file:../.huxerui/huxerui.har",
+    "lib@TARGET_NAME@.so": "file:./src/main/cpp/types/lib@TARGET_NAME@"
+  }
+}

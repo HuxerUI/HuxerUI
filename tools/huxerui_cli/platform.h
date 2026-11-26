@@ -390,6 +390,8 @@ const PlatformDriver& LinuxPlatformDriver() noexcept;
 const PlatformDriver& MacOSPlatformDriver() noexcept;
 /// Returns the iOS driver singleton.
 const PlatformDriver& IosPlatformDriver() noexcept;
+/// Returns the HarmonyOS driver singleton.
+const PlatformDriver& OhosPlatformDriver() noexcept;
 /// Returns the Web driver singleton.
 const PlatformDriver& WebPlatformDriver() noexcept;
 

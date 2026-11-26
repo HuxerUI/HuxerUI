@@ -156,6 +156,22 @@ if (HUXERUI_INTERNAL_SDK_ARTIFACT_ROOT)
             DESTINATION
             "${CMAKE_INSTALL_DATADIR}/huxerui/platform/web/emscripten-${HUXERUI_WEB_EMSCRIPTEN_VERSION}"
     )
+    if (NOT ANDROID)
+        set(HUXERUI_OHOS_ARTIFACT_ROOT "${HUXERUI_SDK_ARTIFACT_ROOT}/ohos")
+        foreach (HUXERUI_REQUIRED_PLATFORM_ARTIFACT IN ITEMS
+                "${HUXERUI_OHOS_ARTIFACT_ROOT}/huxerui.har"
+                "${HUXERUI_OHOS_ARTIFACT_ROOT}/arm64-v8a/libhuxerui_static.a"
+                "${HUXERUI_OHOS_ARTIFACT_ROOT}/x86_64/libhuxerui_static.a"
+        )
+            if (NOT EXISTS "${HUXERUI_REQUIRED_PLATFORM_ARTIFACT}")
+                message(FATAL_ERROR "HuxerUI SDK platform artifact is missing: ${HUXERUI_REQUIRED_PLATFORM_ARTIFACT}")
+            endif ()
+        endforeach ()
+        install(DIRECTORY "${HUXERUI_OHOS_ARTIFACT_ROOT}/" DESTINATION "${CMAKE_INSTALL_DATADIR}/huxerui/platform/ohos")
+        install(FILES "${HUXERUI_PROJECT_DIR}/platform/ohos/huxerui/src/main/cpp/ohos_app_module.cpp"
+                DESTINATION "${HUXERUI_INSTALL_CMAKE_DIR}"
+        )
+    endif ()
     if (APPLE AND NOT IOS)
         set(HUXERUI_IOS_XCFRAMEWORK
                 "${HUXERUI_SDK_ARTIFACT_ROOT}/ios/HuxerUI.xcframework"

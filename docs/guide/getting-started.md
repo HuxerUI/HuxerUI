@@ -5,11 +5,11 @@ Start with an [installed HuxerUI SDK](installation.md) and check the [platform r
 ## Create a project
 
 ```bash
-huxerui create app hello_huxer --id dev.example.hello --platform windows,macos,linux,web,android,ios
+huxerui create app hello_huxer --id dev.example.hello --platform windows,macos,linux,web,android,ios,ohos
 cd hello_huxer
 ```
 
-The command creates `src/app.cpp`, the resource directories, the selected shells under `platform`, and the application-development Skill. The CMake scaffold enables all six shells by default. Use a subset with `--platform` and add another shell later with `huxerui platform add <platform-list>`.
+The command creates `src/app.cpp`, the resource directories, the selected shells under `platform`, and the application-development Skill. The CMake scaffold enables all platform shells by default. Use a subset with `--platform` and add another shell later with `huxerui platform add <platform-list>`.
 
 Run in a terminal, `huxerui create` asks for whatever the command line leaves out: the kind and name, the build system, the template, the platforms, and the agents whose skill files to add. It confirms before writing anything, then names the command to run next.
 `--yes`, or running without a terminal, applies the defaults instead, and the command prints the options that recreate the same project.
@@ -74,6 +74,8 @@ huxerui run web
 
 Use `huxerui run <platform> --watch` to rebuild after edits and relaunch the application or refresh the Web page. A build failure leaves the current instance running. Each successful reload starts a new application session. Press Ctrl+C to end the watch session.
 
+HarmonyOS uses the [CMake and Hvigor build workflow](../../platform/ohos/README.md#using-an-installed-sdk). The HarmonyOS driver does not support `--watch`.
+
 `build` and `run` default to `debug`. Use `--config release` for a release build or [package the application](packaging.md) to produce distributable output. `--generator <name>` selects a compatible CMake generator for macOS, Linux, or Web. Desktop builds honor `CMAKE_BUILD_PARALLEL_LEVEL`.
 
 ### Select the build system
@@ -89,7 +91,7 @@ Capabilities that only mcpp offers are used through `mcpp` directly.
 
 ### Select an SDK for one invocation
 
-Use `--sdk <path>` to try another installed SDK or build against a source checkout. The selection applies to that invocation and its child processes. CMake caches are separate for each framework location.
+Use `--sdk <path>` to select another installed SDK or build against a source checkout. The selection applies to that invocation and its child processes. The CLI separates its own CMake build directories by framework location. HarmonyOS uses Hvigor's native build directories. Clean the applicable build mode before switching SDKs, as described in the [HarmonyOS guide](../../platform/ohos/README.md#using-an-installed-sdk).
 
 ```bash
 huxerui run windows --sdk ../HuxerUI
@@ -97,18 +99,22 @@ huxerui run windows --sdk ../HuxerUI
 
 Without `--sdk`, the CLI uses the installed SDK selected by `HUXERUI_HOME` or located next to the running CLI. Direct CMake builds of generated projects can select either layout with `-DHUXERUI_HOME=<path>`. Use a separate build directory for each location. To collect [Runtime profiling](../development/building.md#runtime-profiling), pass `--profile` with an explicit source checkout.
 
-### Select an Android or iOS device
+### Select a mobile device
 
 List destinations before selecting a device for `run`.
 
 ```bash
 huxerui devices android
 huxerui devices ios
+huxerui devices ohos
 huxerui run android --device <id>
 huxerui run ios --device <id>
+huxerui run ohos --device <id>
 ```
 
 Desktop hosts use a ready Android device or emulator. Supply `--device` when several devices are ready. Pass `--java-home <path>` to select the JDK for the Gradle build. On Termux, `run android` opens the APK in the system installer on the local device. iOS can target a booted Simulator or a paired physical device. A plain `build ios` uses the generic Simulator destination.
+
+HarmonyOS uses devices and emulators reported by `hdc`. Configure signing for a physical device in DevEco Studio. [HarmonyOS setup and signing](../../platform/ohos/README.md#using-an-installed-sdk)
 
 ### Open a platform project in an IDE
 

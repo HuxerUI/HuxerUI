@@ -3,6 +3,14 @@ include_guard(GLOBAL)
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIResources.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/HuxerUIOptimization.cmake")
 
+function(_huxerui_ohos_link_libraries output_variable)
+    set(${output_variable}
+            ace_napi.z ace_ndk.z dl hilog_ndk.z icu image_packer image_source native_buffer native_drawing native_window
+            ohfileuri pasteboard pixelmap rawfile.z udmf EGL GLESv3
+            PARENT_SCOPE
+    )
+endfunction()
+
 function(_huxerui_configure_library_graph_framework)
     if (TARGET huxerui_library_graph_framework)
         return()

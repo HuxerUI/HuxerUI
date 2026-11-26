@@ -503,6 +503,20 @@ TEST_CASE("HuxerUICliCreatesSelectedPlatformShells") {
 
 }
 
+TEST_CASE("HuxerUICliCreatesHarmonyOsShellForCMake") {
+  TemporaryDirectory temporary;
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "Ohos-App", "--id", "dev.example.ohosapp", "--platform",
+                                    "ohos", "--build-system", "cmake", "--agent", "none"}).result == 0);
+  const auto shell = temporary.Path() / "Ohos-App/platform/ohos";
+  REQUIRE(Read(shell / "AppScope/app.json5").find("dev.example.ohosapp") != std::string::npos);
+  REQUIRE(Read(shell / "entry/oh-package.json5").find("file:../.huxerui/huxerui.har") != std::string::npos);
+  REQUIRE(Read(shell / "entry/src/main/ets/entryability/EntryAbility.ets").find("libohos_app.so") != std::string::npos);
+  REQUIRE(std::filesystem::is_regular_file(shell / "entry/src/main/cpp/types/libohos_app/index.d.ts"));
+  REQUIRE_FALSE(std::filesystem::exists(shell / "huxerui"));
+  REQUIRE(Invoke(temporary.Path(), {"create", "app", "Ohos-Mcpp", "--platform", "ohos", "--build-system", "mcpp",
+                                    "--agent", "none"}).result == 2);
+}
+
 TEST_CASE("HuxerUICliCreatesLibraryAndPreviewProjects") {
   TemporaryDirectory temporary;
   const Invocation invocation = Invoke(
@@ -796,7 +810,7 @@ TEST_CASE("HuxerUICliCreatesCommonOnlyLibrariesWithRunnablePreviews") {
 
   REQUIRE(invocation.result == 0);
   REQUIRE(invocation.output.find("Library platforms: none") != std::string::npos);
-  REQUIRE(invocation.output.find("Preview platforms: android windows linux macos ios web") != std::string::npos);
+  REQUIRE(invocation.output.find("Preview platforms: android windows linux macos ios ohos web") != std::string::npos);
   const std::filesystem::path library = temporary.Path() / "AudioTools";
   REQUIRE(std::filesystem::is_regular_file(library / "CMakeLists.txt"));
   REQUIRE(std::filesystem::is_regular_file(library / "HuxerUIProject.cmake"));
@@ -805,7 +819,7 @@ TEST_CASE("HuxerUICliCreatesCommonOnlyLibrariesWithRunnablePreviews") {
   REQUIRE_FALSE(std::filesystem::exists(library / "platform"));
   const huxerui::cli::Project preview =
       huxerui::cli::ResolveApplicationProject(huxerui::cli::DiscoverProject(library));
-  REQUIRE(preview.platforms == std::vector<std::string>{"android", "ios", "linux", "macos", "web", "windows"});
+  REQUIRE(preview.platforms == std::vector<std::string>{"android", "ios", "linux", "macos", "ohos", "web", "windows"});
   REQUIRE(std::filesystem::is_regular_file(library / "examples/preview/platform/android/settings.gradle"));
   REQUIRE(std::filesystem::is_regular_file(library / "examples/preview/platform/ios/Config/Base.xcconfig"));
   REQUIRE(std::filesystem::is_regular_file(library / "examples/preview/platform/linux/main.cpp"));

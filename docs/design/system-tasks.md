@@ -599,5 +599,5 @@ Public declarations update header self-containment checks, umbrella exposure, ge
 - [Android: Foreground service timeouts](https://developer.android.com/develop/background-work/services/fgs/timeout) defines system timeout and teardown requirements.
 - [Android: Notification runtime permission](https://developer.android.com/develop/ui/compose/notifications/notification-permission) distinguishes notification authorization from foreground-service startup.
 - [Android: User stopping foreground-service apps](https://developer.android.com/develop/background-work/services/fgs/handle-user-stopping) documents process termination without a cleanup callback.
-- [Huawei: Continuous background tasks](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/continuous-task) describes purpose-specific system background modes and their constraints for future backend evaluation.
+- [Huawei: Continuous background tasks](https://developer.huawei.com/consumer/cn/doc/harmonyos-guides/continuous-task) describes the system background modes and authorization requirements used by the HarmonyOS adapter.
 - [Huawei: Background task usage](https://developer.huawei.com/consumer/cn/doc/doccenter-app-quality/bpta-use-of-background-tasks) distinguishes short, continuous, and deferred system work.

@@ -19,6 +19,7 @@ Packaging uses the same application target and platform shell as `build`. Interm
 | macOS | DMG containing the application bundle and an Applications link |
 | Linux | AppImage, DEB, or RPM |
 | Android | APK |
+| HarmonyOS | HAP |
 | iOS | Built application bundle |
 | Web | Deployment files |
 
@@ -76,17 +77,19 @@ DEB and RPM use the project ID as the package name and the CMake project version
 | Platform | Canonical ABIs | Output |
 | --- | --- | --- |
 | Android | `arm64-v8a`, `x86_64` | One APK with the selected ABIs. Termux supports only `arm64-v8a`. |
+| HarmonyOS | `arm64-v8a`, `x86_64` | One HAP with the selected ABIs. See [HarmonyOS setup and signing](../../platform/ohos/README.md#using-an-installed-sdk). |
 | Windows | `x86_64` | One application or installer. |
 | Linux | `aarch64`, `x86_64` | A separate build and AppImage per ABI, under `dist/linux/<abi>` when packaging both. DEB and RPM use the host ABI. Use one ABI with `run`. |
 | macOS | `arm64`, `x86_64` | One app bundle and DMG. Building both architectures requires a HuxerUI source checkout selected with `--sdk` and universal dependencies. |
 | iOS | `arm64` for devices, `arm64` or `x86_64` for simulators | One bundle for the selected destination. Simulator builds can contain both slices when supported by Xcode. |
 | Web | `wasm32` | One Web deployment. |
 
-`x64` and `amd64` both resolve to `x86_64`. `arm64` and `aarch64` resolve to the selected platform's 64-bit ARM spelling, including `arm64-v8a` on Android. The canonical values in the table are also accepted.
+`x64` and `amd64` both resolve to `x86_64`. `arm64` and `aarch64` resolve to the selected platform's 64-bit ARM spelling, including `arm64-v8a` on Android and HarmonyOS. The canonical values in the table are also accepted.
 
 ```bash
 huxerui package android --abi arm64
 huxerui build android --abi arm64-v8a,x64
+huxerui package ohos --abi arm64,x64
 huxerui package macos --abi arm64,x86_64 --sdk ../HuxerUI
 ```
 
@@ -97,6 +100,10 @@ For an explicit Linux cross-build, select a HuxerUI source checkout with `--sdk`
 Generated Android applications and the repository example runner use the local debug signing configuration for Release APKs by default, so optimized builds can be installed directly for development and testing.
 This signing choice preserves the Release build configuration and its optimization settings.
 Before publishing an application, replace `signingConfig = signingConfigs.debug` with your own release signing configuration in `platform/android/app/build.gradle`; app stores such as Google Play do not accept debug certificates for publication.
+
+## HarmonyOS signing
+
+Configure application signing for the intended Hvigor product in DevEco Studio. Use the distribution certificate and provisioning profile for publication. `huxerui package ohos` publishes the HAP under `dist/ohos`, and installation on a physical device requires a signed HAP. [HarmonyOS setup and signing](../../platform/ohos/README.md#using-an-installed-sdk)
 
 ## Size optimization
 

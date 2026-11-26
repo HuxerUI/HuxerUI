@@ -1,0 +1,3 @@
+{
+  "string": [{ "name": "app_name", "value": "@PROJECT_NAME@" }]
+}

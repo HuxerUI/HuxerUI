@@ -15,7 +15,7 @@ set(HUXERUI_PLATFORM_SOURCE_FILES
         "${HUXERUI_OHOS_CPP_DIR}/ohos_text_input.cpp"
         "${HUXERUI_OHOS_CPP_DIR}/ohos_text_layout.cpp"
 )
-set(HUXERUI_PLATFORM_LINK_LIBRARIES
-        ace_napi.z ace_ndk.z dl hilog_ndk.z icu image_packer image_source native_buffer native_drawing native_window
-        ohfileuri pasteboard pixelmap rawfile.z udmf EGL GLESv3
-)
+set(HUXERUI_PLATFORM_COMPILE_OPTIONS -fexperimental-library)
+set(HUXERUI_PLATFORM_INTERFACE_COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CXX>:-fexperimental-library>")
+set(HUXERUI_PLATFORM_LINK_OPTIONS -fexperimental-library)
+_huxerui_ohos_link_libraries(HUXERUI_PLATFORM_LINK_LIBRARIES)

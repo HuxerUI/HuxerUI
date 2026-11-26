@@ -75,6 +75,12 @@ Bluetooth scan and connect share Core Bluetooth authorization. Queries read `CBM
 
 Notifications reuse UserNotifications authorization for both application and notification-service calls. On iOS 16 and later, the app settings target for notifications uses the dedicated notification settings URL. Other iOS application targets use the app settings URL. iOS does not expose a supported deep link to the global location or Bluetooth switch.
 
+### HarmonyOS
+
+Declare the permissions used by the application in the entry module. The ArkTS host checks those declarations and the application's access token before requesting authorization. A permission request uses the originating `UIAbilityContext`. The `Application` settings target opens the authorization settings for the requested permissions, and the `System` target is unavailable.
+
+`Location` uses approximate location. `PreciseLocation` requests approximate and precise location together and reports `Limited` when only approximate access is granted. `BackgroundLocation` uses the separate background grant. `PhotosRead` and `VideosRead` share the image and video read grant, and `BluetoothScan` and `BluetoothConnect` share the Bluetooth access grant. Notification authorization uses Notification Kit.
+
 ### Windows and Web
 
 Windows uses `AppCapability` for prompt-free queries when the API is present and `Geolocator::RequestAccessAsync()` for `Location` requests. The camera and microphone privacy pages can serve both settings targets. The location privacy page is available through the `System` target. The notification status uses the registered toast identity, with no separate permission dialog. Windows 7 compatibility builds report these permissions and settings as unavailable.

@@ -1,6 +1,6 @@
 # Platform Support
 
-HuxerUI application code and the shared Runtime support Windows, macOS, Linux, Web, Android, and iOS.
+HuxerUI application code and the shared Runtime support Windows, macOS, Linux, Web, Android, iOS, and HarmonyOS.
 Each backend uses platform lifecycle, input, text, accessibility, file, network, and rendering services where available.
 
 ## Capability overview
@@ -13,15 +13,14 @@ Each backend uses platform lifecycle, input, text, accessibility, file, network,
 | Web | Canvas 2D and browser text metrics | Yes | Not supported | Yes | Yes | Browser permissions, limited requests | Unavailable | No |
 | Android | Android Canvas and StaticLayout | Yes | AccessibilityNodeInfo | Yes | Yes | Application permissions | Configured NotificationManager | No |
 | iOS | Core Graphics and Core Text | Yes | UIKit accessibility | Yes | Yes | Application permissions | User Notifications | No |
+| HarmonyOS | Native Drawing and typography | Yes | ArkUI accessibility | Yes | Yes | Application permissions | Notification Kit and agent-powered reminders | No |
 
 Capabilities not listed as implemented are not implied by the shared API.
-The experimental HarmonyOS backend requires HarmonyOS 6.0.0 (API 20) or later. The [HarmonyOS example runner](../../platform/ohos/README.md) builds and runs repository examples that use the current backend capabilities.
-The system screen reader accesses HuxerUI controls and embedded PlatformViews through ArkUI.
 
 See [Application Permissions](../design/permissions.md#supported-capabilities) for supported queries, requests, and settings targets on each operating system.
 
 The shared local-notification API is available on every listed platform.
-Registered Windows applications, configured Android hosts, and the iOS and macOS adapters install native transports; Linux and Web currently report unavailable capabilities and operations.
+Registered Windows applications, configured Android hosts, and the iOS, macOS, and HarmonyOS adapters provide notification transports. Linux and Web report notifications as unavailable.
 See [Local Notifications](../design/local-notifications.md) for authorization, activation, and platform mapping details.
 
 ## Shared CPU buffer references
@@ -354,7 +353,7 @@ An Activity hosting several HuxerUI views forwards results until one consumes th
 ## iOS
 
 The iOS backend requires iOS 15 or later and uses UIKit, Core Graphics, Core Text, `UITextInput`, and UIKit accessibility.
-Build on macOS with Xcode 26 or later and the appropriate platform SDK. Run on a booted Simulator or a paired device using the [device selection commands](getting-started.md#select-an-android-or-ios-device).
+Build on macOS with Xcode 26 or later and the appropriate platform SDK. Run on a booted Simulator or a paired device using the [device selection commands](getting-started.md#select-a-mobile-device).
 
 The generated Xcode shell opts into the scene lifecycle through `UIApplicationSceneManifest` in `App/Info.plist`:
 
@@ -382,7 +381,13 @@ Native libraries include `<huxerui/ios/external_texture.h>` for the iOS forms of
 They have the same ownership, format, origin, alpha, synchronization, and Image rendering contract as their macOS counterparts; the C++ types remain in `huxerui::ios` rather than a shared Apple namespace.
 Objective-C and Swift import the concrete objects as `HUXPixelBufferTexture`/`PixelBufferTexture` and `HUXMetalTexture`/`MetalTexture`.
 
-## HarmonyOS platform extensions
+## HarmonyOS
+
+HarmonyOS 6.0.0 (API 20) and later use ArkUI, Native Drawing, and the system input method. The screen reader accesses HuxerUI controls and embedded PlatformViews through ArkUI.
+
+Build with CMake and DevEco Command Line Tools. The desktop HuxerUI SDK includes the ArkTS HAR and static libraries for `arm64-v8a` and `x86_64`. See the [HarmonyOS guide](../../platform/ohos/README.md) for toolchain configuration, signing, and application packaging.
+
+### HarmonyOS platform extensions
 
 Return a `HuxerUIPlatformExtensions` object from `HuxerUIAbility.getPlatformExtensions()` in your ArkTS application. Its `module`, `windowModule`, and `view` methods resolve names from C++ registrations in an application hook. Import the ArkTS interfaces from `@huxerui/huxerui` and include `<huxerui/ohos/platform_registry.h>` on the C++ side.
 

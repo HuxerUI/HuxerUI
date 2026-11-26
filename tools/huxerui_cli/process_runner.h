@@ -23,6 +23,8 @@ struct ProcessCommand {
   std::filesystem::path working_directory;
   /// Overrides inherited values for this child only.
   ProcessEnvironment environment = {};
+  /// Success marker required by CLI command execution when the tool may report failures with exit code zero.
+  std::string required_output = {};
 };
 
 /// Captured child-process completion state.

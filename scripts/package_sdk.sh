@@ -8,8 +8,9 @@ Usage: package_sdk.sh [--build-dir <path>] [--output-dir <path>]
                       [--configuration Debug|Release] [--jobs <count>]
 
 Builds Android and Web target artifacts, plus iOS on macOS, then packages a
-complete SDK for the current host. Android SDK/NDK, Java, and Emscripten 4.0.19
-must be installed. macOS packaging also requires Xcode.
+complete SDK for the current host. Set HUXERUI_OHOS_ARTIFACTS to an assembled
+HarmonyOS artifact directory (huxerui.har and both ABI subdirectories).
+Android SDK/NDK, Java, and Emscripten 4.0.19 must be installed. macOS requires Xcode.
 EOF
 }
 
@@ -111,7 +112,15 @@ run() {
   "$@"
 }
 
+ohos_artifacts=${HUXERUI_OHOS_ARTIFACTS:-}
+[ -n "$ohos_artifacts" ] && [ -d "$ohos_artifacts" ] ||
+  fail "set HUXERUI_OHOS_ARTIFACTS to the HarmonyOS artifact directory"
+ohos_artifacts=$(CDPATH= cd -- "$ohos_artifacts" && pwd -P)
+case "$ohos_artifacts/" in
+  "$platform_artifact_root/"*) fail "HarmonyOS input artifacts must be outside the package staging directory" ;;
+esac
 reset_owned_directory "$platform_artifact_root"
+cp -R -- "$ohos_artifacts" "$platform_artifact_root/ohos"
 reset_owned_directory "$web_build_directory"
 reset_owned_directory "$host_build_directory"
 if [ "$host_system" = Darwin ]; then

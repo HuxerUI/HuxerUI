@@ -416,7 +416,7 @@ Platform adapters preserve the same contract through platform-specific compositi
 | Web | HuxerUI Canvas slices and DOM PlatformViews are ordered siblings in one isolated CSS stacking context. The Web host coordinates DOM event targeting with UiWindow hit testing. |
 | Android | The host is a ViewGroup that alternates HuxerUI slice replay with ordinary child drawing in committed order. A `TextureView` participates as a regular child, while any `SurfaceView` subtree is rejected because its system composition cannot preserve this Canvas order. |
 | iOS | Transparent HuxerUI slice views or layers and UIViews are retained as ordered siblings under one host UIView. CoreGraphics replay targets only damaged slices. |
-| HarmonyOS | The XComponent draws the base slice. Clipped ArkUI children and custom drawing nodes retain the order of the remaining placements and slices. ArkUI navigates inside each hosted focus scope and returns Tab navigation to UiWindow when the scope loses focus. |
+| HarmonyOS | ArkUI custom nodes draw the base slice and subsequent drawing slices through `OnDraw`, interleaved with clipped ArkUI children in scene order. The XComponent handles input and accessibility. ArkUI navigates inside each hosted focus scope and returns Tab navigation to UiWindow when the scope loses focus. |
 
 These strategies are conformance requirements, not application-selectable composition modes.
 A factory whose platform object cannot preserve exact ordering on the current platform fails with a diagnostic identifying the PlatformView registration name or unavailable adapter capability at the layer that detects it.

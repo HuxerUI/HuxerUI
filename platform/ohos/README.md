@@ -1,31 +1,79 @@
 # HarmonyOS
 
-Open this directory in DevEco Studio to build the [`huxerui` host module](huxerui/) and the [`example_runner` application](example_runner/). The host module supplies the `UIAbility` lifecycle, surface component, and binding declarations. HuxerUI requires HarmonyOS 6.0.0 (API 20) or later. The runner defaults to `arm64-v8a` and the [Counter example](../../examples/counter/).
+HuxerUI applications require HarmonyOS 6.0.0 (API 20) or later. CMake builds the C++ application, and Hvigor assembles the HAP. The desktop HuxerUI SDK provides the [`huxerui` ArkTS host](huxerui/) as a HAR and includes static framework libraries for `arm64-v8a` and `x86_64`. Each application links the framework and its Node-API entry into its own shared library.
 
-`huxerui_add_app` compiles the framework's Node-API registration with the application's output name. Hvigor packages the selected example and the statically linked HuxerUI framework in `libhuxerui_example_runner.so`.
+## Requirements
 
-The runner stages the generated HuxerUI resource package under the HAP's `rawfile` resources before resource compilation. The host reads it through the resource manager and supplies the application data, cache, and temporary directories from `UIAbilityContext`.
+Use CMake and DevEco Command Line Tools with the HarmonyOS 26.0.0 Release NDK (`26.0.0.105`), OpenHarmony Clang `19.1.4` (`79830f`), and its matching NDK libc++. The C++ standard library must provide `<source_location>` and `<stop_token>`. See [HarmonyOS SDK packaging](../../docs/development/sdk-packaging.md#harmonyos-artifacts) for toolchain preparation.
 
-Use the HarmonyOS command-line tools with an OHOS C++ toolchain whose standard library supplies `<source_location>` and `<stop_token>`. The LLVM 15.0.4 standard library supplied by some HarmonyOS SDKs lacks both headers. If using a separate toolchain, select it locally with `-DCMAKE_TOOLCHAIN_FILE=<path>` in the entry module's `externalNativeOptions.arguments`.
+Set `DEVECO_SDK_HOME` to the DevEco SDK directory and `OHOS_NATIVE_SDK` to the NDK's `native` directory. Add `ohpm`, `hvigorw`, and `hdc` to `PATH`. Use an `OHOS_NATIVE_SDK` path without spaces so Hvigor can pass `CMAKE_TOOLCHAIN_FILE` to CMake.
 
-Install dependencies and build the runner from this directory.
+For direct CMake builds, use `$OHOS_NATIVE_SDK/build/cmake/ohos.toolchain.cmake` with `-DOHOS_ARCH=arm64-v8a` or `-DOHOS_ARCH=x86_64`, `-DOHOS_STL=c++_static`, and `-DOHOS_COMPATIBLE_SDK_VERSION=20.0.0`. The HuxerUI targets enable the required libc++ features.
+
+## Building the example runner
+
+The [`example_runner` module](example_runner/) builds repository examples. It defaults to `arm64-v8a` and the [Counter example](../../examples/counter/). Run `ohpm install --all` from `platform/ohos` to install its dependencies. Use `runExample` from the same directory to build, install, and launch a selected example.
 
 ```sh
-ohpm install --all
-hvigorw --mode module -p product=default -p module=example_runner@default assembleHap --no-daemon
+hvigorw --mode module -p product=default -p module=example_runner@default -p huxeruiExample=ui_gallery runExample --no-daemon
 ```
 
-To build another example, add `-DHUXERUI_EXAMPLE=dynamic_list` to `externalNativeOptions.arguments` in `example_runner/build-profile.json5`. Use the directory name under `examples/`. The example must use capabilities available on the current backend.
+Use the directory name under `examples/` for `huxeruiExample`. Add `-p device=<id>` to select a target from `hdc list targets`. Use `assembleHap` in place of `runExample` to build the HAP without installing it. For the Windows DevEco emulator, set `HUXERUI_OHOS_ABIS=x86_64` in the environment before running the command.
 
-Build the ArkTS host as a standalone HAR with `hvigorw --mode module -p product=default -p module=huxerui@default assembleHar --no-daemon`. An application can reference the resulting `huxerui.har` in its `oh-package.json5` and build its application library through CMake.
+For installation on a physical device, use DevEco Studio to obtain a debug certificate and provisioning profile for `org.huxerui.examples`. Include the device in the provisioning profile. Save the corresponding DevEco `signingConfigs` entry as `.huxerui/signing.json` under `platform/ohos`. The runner loads this Git-ignored configuration for the `default` product.
 
-For device testing, use DevEco Studio to configure debug signing for `org.huxerui.examples` and register the test device in its provisioning profile.
+```json
+{
+  "name": "default",
+  "type": "HarmonyOS",
+  "material": {
+    "certpath": "D:/signing/debug.cer",
+    "storeFile": "D:/signing/debug.p12",
+    "profile": "D:/signing/debug.p7b",
+    "storePassword": "<value from DevEco Studio>",
+    "keyAlias": "<value from DevEco Studio>",
+    "keyPassword": "<value from DevEco Studio>",
+    "signAlg": "SHA256withECDSA"
+  }
+}
+```
 
-For the Windows DevEco emulator, select `x86_64` locally in `externalNativeOptions.abiFilters` and use an x86_64 OHOS toolchain. Install the unsigned HAP with `hdc app install <path-to-hap>`.
+To build the ArkTS host independently, run `hvigorw --mode module -p product=default -p module=huxerui@default -p buildMode=release assembleHar --no-daemon` from `platform/ohos`. The output is `huxerui/build/default/outputs/default/huxerui.har`.
+
+## Using an installed SDK
+
+Install the [desktop HuxerUI SDK](../../docs/guide/installation.md) and configure the HarmonyOS toolchain. The CLI generates a CMake application with a Hvigor project under `platform/ohos` and stages the SDK's HAR before each build.
+
+```sh
+huxerui create app my_app --platform ohos --build-system cmake
+cd my_app
+huxerui doctor ohos
+huxerui build ohos
+huxerui package ohos --abi arm64,x64
+```
+
+The package command writes a release HAP under `dist/ohos`. The generated project defaults to `arm64-v8a`. When running without an explicit `--abi`, the CLI selects `x86_64` for a detected local emulator.
+
+Configure signing for the application's bundle name in DevEco Studio before installing on a physical device. Use `huxerui devices ohos` to list destinations and `huxerui run ohos` to build, install, and launch the application.
+
+After switching HuxerUI SDKs, clean the Hvigor build mode you intend to rebuild. For a release build, run `hvigorw --mode module -p product=default -p module=entry@default -p buildMode=release clean --no-daemon` from the generated project's `platform/ohos` directory.
+
+## Integrating an existing Hvigor project
+
+Use the desktop SDK's `share/huxerui/platform/ohos/huxerui.har` as the application's `@huxerui/huxerui` dependency. With `HUXERUI_HOME` set to the same SDK, resolve its CMake package and declare the application target.
+
+```cmake
+find_package(HuxerUI CONFIG REQUIRED PATHS "$ENV{HUXERUI_HOME}" NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+huxerui_add_app(my_app SOURCES main.cpp)
+```
+
+`huxerui_add_app()` links the SDK archive and the Node-API registration into `libmy_app.so`. Import this library from the entry ability and return it from `HuxerUIAbility.getApplicationModule()`. Set the `HUXERUI_OHOS_RESOURCE_OUTPUT_ROOT` environment variable for the CMake build and stage `<resource-root>/<abi>/package` under the module's `rawfile` resources before Hvigor processes them. The [example runner](example_runner/hvigorfile.ts) shows the task dependencies for resource staging. Configure application signing and run `assembleHap` for the entry module.
+
+## Platform capabilities
 
 The main window supports `SafeArea` and `EdgeToEdge` content, drawing behind the system bars in immersive layout. `SystemBarsAppearance` controls the status-bar icons, and HarmonyOS controls the bottom gesture indicator. `UseSystemThemeBrightness()` follows system light and dark mode changes.
 
-`OpenWindowAsync()` creates child windows in the running ability's `WindowStage`. Each loads the same host page and composes its own C++ root in the shared Runtime. Pass the page's `getUIContext()` to `handleHuxerUIBack()` so the back action goes to the originating window. Run with `-DHUXERUI_EXAMPLE=multi_window` to open or cancel a child window, share a counter, and edit text independently in each window.
+`OpenWindowAsync()` creates child windows in the running ability's `WindowStage`. Each loads the same host page and composes its own C++ root in the shared Runtime. Pass the page's `getUIContext()` to `handleHuxerUIBack()` so the back action goes to the originating window. Run with `-p huxeruiExample=multi_window` to open or cancel a child window, share a counter, and edit text independently in each window.
 
 Text measurement and replay use Native Drawing typography. Application-supplied fonts use private font collections, and attributed inline objects use paragraph placeholders. Line limits and ellipsis use the shared overflow implementation. `TextLayout` exposes line, caret, hit-test, and range geometry in logical units with UTF-16 offsets. When the drawing engine groups multiple graphemes into a glyph, HuxerUI estimates the interior caret positions and retains the shaped line width. Editable clients use system keyboard sessions with selection, preedit, and action keys. Secure editors suppress surrounding text.
 

@@ -81,7 +81,7 @@ export default class BackgroundTasks extends HuxerUIBackgroundTaskExtensionAbili
 }
 ```
 
-Set `requires_network`, `requires_external_power`, or both. WorkScheduler requires a trigger condition. A future `earliest_start` additionally requires API 22 or later. The system chooses when eligible work runs and limits each attempt to two minutes. If your app also registers its own WorkScheduler jobs, reserve IDs from `0x40000000` through `0x7fffffff` for HuxerUI. [HarmonyOS WorkScheduler requirements](https://developer.huawei.com/consumer/en/doc/harmonyos-guides/work-scheduler/)
+Set `requires_network`, `requires_external_power`, or both. WorkScheduler requires a trigger condition. Specifying an `earliest_start` later than the current time requires API 22 or later. The system chooses when eligible work runs and limits each attempt to two minutes. If your app also registers its own WorkScheduler jobs, reserve IDs from `0x40000000` through `0x7fffffff` for HuxerUI. [HarmonyOS WorkScheduler requirements](https://developer.huawei.com/consumer/en/doc/harmonyos-guides/work-scheduler/)
 
 The extension runs the application's hooks and background handler in its own Runtime without a window. Keep inputs and business results in application storage. An observing Runtime can read task progress and terminal status through `GetState()` or `WaitAsync()`, including after reopening the app. Application `State` remains local to the process that owns it.
 

@@ -43,6 +43,7 @@ add_library(huxerui_cli_core STATIC
         platform/ios.cpp
         platform/linux.cpp
         platform/macos.cpp
+        platform/ohos.cpp
         platform/web.cpp
         platform/windows.cpp
         mcpp/mcpp.cpp

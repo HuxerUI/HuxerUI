@@ -201,9 +201,13 @@ function(huxerui_add_app target_name)
     elseif (ANDROID)
         add_library(${target_name} SHARED ${HUXERUI_APP_SOURCES})
     elseif (CMAKE_SYSTEM_NAME STREQUAL "OHOS")
-        add_library(${target_name} SHARED ${HUXERUI_APP_SOURCES}
-                "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../platform/ohos/huxerui/src/main/cpp/ohos_app_module.cpp"
-        )
+        set(HUXERUI_OHOS_APP_MODULE "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/ohos_app_module.cpp")
+        if (NOT EXISTS "${HUXERUI_OHOS_APP_MODULE}")
+            set(HUXERUI_OHOS_APP_MODULE
+                    "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/../platform/ohos/huxerui/src/main/cpp/ohos_app_module.cpp"
+            )
+        endif ()
+        add_library(${target_name} SHARED ${HUXERUI_APP_SOURCES} "${HUXERUI_OHOS_APP_MODULE}")
         target_compile_definitions(${target_name} PRIVATE
                 "HUXERUI_OHOS_APP_MODULE_NAME=\"$<TARGET_FILE_BASE_NAME:${target_name}>\""
         )
@@ -234,6 +238,10 @@ function(huxerui_add_app target_name)
             ${HUXERUI_APP_FRAMEWORK_TARGET}
     )
 
+    if (CMAKE_SYSTEM_NAME STREQUAL "OHOS" AND NOT HUXERUI_APP_RESOURCE_OUTPUT_DIRECTORY
+            AND NOT "$ENV{HUXERUI_OHOS_RESOURCE_OUTPUT_ROOT}" STREQUAL "")
+        set(HUXERUI_APP_RESOURCE_OUTPUT_DIRECTORY "$ENV{HUXERUI_OHOS_RESOURCE_OUTPUT_ROOT}/${OHOS_ARCH}")
+    endif ()
     if (HUXERUI_APP_RESOURCE_OUTPUT_DIRECTORY)
         get_filename_component(HUXERUI_APP_RESOURCE_OUTPUT_DIRECTORY
                 "${HUXERUI_APP_RESOURCE_OUTPUT_DIRECTORY}"

@@ -806,7 +806,7 @@ The iOS frame transaction commits PlatformViews before accessibility and accessi
 
 ### HarmonyOS
 
-The XComponent publishes the committed `SemanticFrame` through the node-based ArkUI accessibility provider. The rendering host uses the same XComponent's `SurfaceHolder`, and ArkUI exposes embedded PlatformViews through its own hierarchy.
+The XComponent publishes the committed `SemanticFrame` through the node-based ArkUI accessibility provider. ArkUI exposes embedded PlatformViews through its own hierarchy. Custom drawing nodes present the render frame independently of the provider.
 
 Provider node IDs preserve UiWindow's semantic identity, with a reserved ID for the synthetic root. The provider supplies bounds in local physical pixels and ArkUI accounts for the host's screen position. Embedded views are separate ArkUI subtrees. Their accessibility follows the corresponding semantic anchor's visibility, including when a modal excludes the background.
 

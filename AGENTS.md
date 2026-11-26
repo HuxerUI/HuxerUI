@@ -245,7 +245,7 @@ Include `linux_internal.h` before any huxerui header in Linux sources so the pla
 
 HarmonyOS platform configuration lives in `cmake/platform/OHOS.cmake`. The Hvigor project under `platform/ohos/` contains the `huxerui` HAR and `example_runner` HAP modules. The `huxerui` module owns the ArkTS host and the C++ sources under `src/main/cpp`. The HAR supplies `UIAbility` lifecycle and `ContentSlot` hosting, and the application target links the C++ backend and Node-API registration into its shared library. The C++ backend owns the Runtime and UiWindow on the ArkUI thread. Recreate platform drawing resources when the surface changes while retaining the mounted UI on the same attachment. Keep coordinates in logical units in UiWindow and convert at the ArkUI boundary.
 
-The experimental arm64 runner requires HarmonyOS 6.0.0 (API 20). Keep local SDK paths, signing material, and device profiles out of tracked files.
+HarmonyOS requires version 6.0.0 (API 20) or later. The desktop SDK includes the HAR and static libraries for `arm64-v8a` and `x86_64`. Keep local SDK paths, signing material, and provisioning profiles out of tracked files.
 
 `ohos_adapter.cpp` owns the application and surface lifecycle. `ohos_renderer.cpp` replays PaintCommands, and `ohos_text_layout.cpp` owns Native Drawing typography and maps normalized line ranges and glyph advances to the source's UTF-16 grapheme boundaries. Use the system ICU bidi API when mapping the typography's logical advances into visual order.
 
@@ -289,7 +289,7 @@ Finish with `git diff --check` and `git status --short`. Report important files,
 
 ## C++20/23 modules and the mcpp build
 
-CMake and mcpp both build the framework and applications for every supported platform; on Android and iOS the standard Gradle and Xcode shells consume the core either one builds. The mcpp files `mcpp.toml`, `build.mcpp`, `buildtools/mcpp/`, `modules/`, and `templates/` are independent of CMake's build configuration.
+CMake builds the framework and applications for all supported platforms. HarmonyOS uses CMake with Hvigor. On Android and iOS, the standard Gradle and Xcode shells consume the core built by either CMake or mcpp. The mcpp files `mcpp.toml`, `build.mcpp`, `buildtools/mcpp/`, `modules/`, and `templates/` are independent of CMake's build configuration.
 
 - Keep the public API available through both `import huxerui;` and `#include <huxerui/huxerui.h>`. Use `huxerui-module-gen` to update `modules/huxerui.cppm` when public exports change.
 - `hcg` expands `HUXERUI_SCOPE` so generated scope code works in module units. In handwritten module code, spell explicit scopes with the exported `Scope` and `View` APIs.

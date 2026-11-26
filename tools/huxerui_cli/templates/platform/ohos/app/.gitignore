@@ -1,0 +1,7 @@
+.hvigor/
+.huxerui/
+**/.cxx/
+**/build/
+**/oh_modules/
+/*/BuildProfile.ets
+local.properties

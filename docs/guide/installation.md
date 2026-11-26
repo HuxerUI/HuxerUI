@@ -114,3 +114,5 @@ The installer refuses to remove a directory that does not contain a recognizable
 ## Toolchains
 
 After installing HuxerUI, use [environment diagnosis and setup](getting-started.md#diagnose-the-environment) to check and prepare the external toolchain for your target.
+
+For HarmonyOS development, install the HuxerUI SDK for your desktop operating system and configure CMake and DevEco Command Line Tools. [HarmonyOS toolchain requirements](../../platform/ohos/README.md#requirements)

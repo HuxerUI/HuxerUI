@@ -1,7 +1,7 @@
 # Window Insets and System Bars Design
 
 This document defines the platform-neutral contract for window metrics, safe-area layout, edge-to-edge content, system-bar backgrounds, and system-bar foreground brightness.
-It covers Android, iOS, and the future OHOS adapter while preserving zero-inset desktop behavior and a compatible Web extension point.
+It covers Android, iOS, and HarmonyOS and defines the default behavior for desktop and Web backends.
 
 ## Goals
 
@@ -19,7 +19,7 @@ It covers Android, iOS, and the future OHOS adapter while preserving zero-inset 
 The public API does not provide:
 
 - A `fullscreen` Boolean that combines layout, system-bar visibility, and immersive input behavior.
-- Public Android, iOS, or OHOS inset categories.
+- Public platform-specific inset categories.
 - Arbitrary native status-bar text colors on platforms that expose only light and dark foreground modes.
 - Dynamic page-by-page changes to the root `WindowContentMode`.
 - System-bar visibility control.
@@ -186,7 +186,7 @@ The application root's local coordinate system still begins at zero inside that 
 System-bar regions are painted by a Runtime-owned backplane beneath application and Layer content.
 The backplane uses the resolved `SystemBarsAppearance`, so status and navigation regions remain themed even though ordinary application content does not enter them.
 
-This mode deliberately does not ask Android, iOS, or OHOS to crop the native HuxerUI surface.
+Android, iOS, and HarmonyOS keep the HuxerUI surface at its full size in this mode.
 Keeping the complete platform surface gives every platform the same rendering and system-bar-style ownership, including Android versions that enforce edge-to-edge system windows.
 
 The default mode is `SafeArea` because a bare application root remains usable without any extra declaration.
@@ -363,7 +363,7 @@ The platform foreground call remains deduplicated.
 ## IME and text input
 
 IME occlusion is not part of `safe_area`.
-Android IME Insets, the iOS keyboard frame, and future OHOS keyboard AvoidArea continue through the current logical viewport-resize path.
+Android IME insets, the iOS keyboard frame, and ArkUI keyboard avoidance use the logical viewport-resize path.
 
 The platform computes the effective safe area after applying keyboard occlusion.
 When the keyboard covers the bottom system area, the submitted bottom inset is zero.
@@ -433,9 +433,9 @@ iOS does not expose a corresponding navigation or Home Indicator foreground API,
 The minimum deployment target remains iOS 15.
 All UIKit lifecycle and status-bar work stays on the main thread.
 
-## OHOS mapping
+## HarmonyOS mapping
 
-The OHOS application host enables immersive layout on the main Window before loading the full-window ArkUI surface. The ArkTS host owns the Window.
+The ArkTS host owns the main window and enables immersive layout before loading the full-window ArkUI surface.
 
 The host obtains and observes:
 
@@ -450,7 +450,7 @@ ArkUI resizes the surface above the keyboard. `OhosUiWindow` limits the bottom i
 The ArkTS Window owner applies the resolved status-bar foreground with `setWindowSystemBarProperties`. HarmonyOS owns the color of the bottom gesture indicator. The initial system brightness and subsequent color-mode changes follow the ability configuration.
 
 Both HuxerUI content modes keep the platform surface full-window for consistency.
-The shared Runtime simulates safe content in `SafeArea` mode and owns edge-to-edge layout in `EdgeToEdge` mode.
+The shared Runtime applies safe-area padding in `SafeArea` mode and lays out edge-to-edge content in `EdgeToEdge` mode.
 
 ## Desktop and Web mapping
 

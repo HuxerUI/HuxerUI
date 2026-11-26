@@ -10,13 +10,14 @@
 namespace huxerui::cli {
 namespace {
 
-const std::array<const PlatformDriver*, 6>& PlatformDrivers() {
+const auto& PlatformDrivers() {
   static const std::array drivers{
       &detail::AndroidPlatformDriver(),
       &detail::WindowsPlatformDriver(),
       &detail::LinuxPlatformDriver(),
       &detail::MacOSPlatformDriver(),
       &detail::IosPlatformDriver(),
+      &detail::OhosPlatformDriver(),
       &detail::WebPlatformDriver(),
   };
   return drivers;
@@ -316,14 +317,14 @@ std::string_view CurrentHostId() noexcept {
 }
 
 const PlatformDriver* FindPlatformDriver(std::string_view id) noexcept {
-  const std::array<const PlatformDriver*, 6>& drivers = PlatformDrivers();
+  const auto& drivers = PlatformDrivers();
   const auto iterator =
       std::find_if(drivers.begin(), drivers.end(), [id](const PlatformDriver* driver) { return driver->Id() == id; });
   return iterator == drivers.end() ? nullptr : *iterator;
 }
 
 std::vector<std::string_view> PlatformIds() {
-  const std::array<const PlatformDriver*, 6>& drivers = PlatformDrivers();
+  const auto& drivers = PlatformDrivers();
   std::vector<std::string_view> ids;
   ids.reserve(drivers.size());
   for (const PlatformDriver* driver : drivers) {

@@ -6,6 +6,7 @@ param(
     [string]$Configuration = "Release",
     [ValidateRange(1, 1024)]
     [int]$Jobs = [Math]::Max(1, [Environment]::ProcessorCount),
+    [switch]$OhosArtifactsOnly,
     [switch]$Help
 )
 
@@ -17,8 +18,9 @@ function Show-Usage {
 Usage: package_sdk.ps1 [-BuildDirectory <path>] [-OutputDirectory <path>]
                        [-Configuration Debug|Release] [-Jobs <count>]
 
-Builds Android and Web target artifacts, then packages a complete SDK for the
-current host. Android SDK/NDK, Java, and Emscripten 4.0.19 must be installed.
+Builds Android, HarmonyOS, and Web target artifacts, then packages the host SDK.
+Set OHOS_NATIVE_SDK to the prepared HarmonyOS NDK, and put ohpm and hvigorw on PATH.
+Use -OhosArtifactsOnly to build just the HarmonyOS artifacts for SDK assembly.
 "@
 }
 
@@ -112,6 +114,41 @@ function Reset-OwnedDirectory([string]$Path, [string]$Owner) {
     New-Item -ItemType Directory -Path $absolutePath -Force | Out-Null
 }
 
+function Build-OhosArtifacts {
+    if (-not $env:OHOS_NATIVE_SDK) {
+        throw "Set OHOS_NATIVE_SDK to the prepared HarmonyOS NDK (see platform/ohos/README.md)"
+    }
+    $ndk = Get-AbsolutePath $env:OHOS_NATIVE_SDK
+    $toolchain = Join-Path $ndk "build/cmake/ohos.toolchain.cmake"
+    if (-not (Test-Path -LiteralPath $toolchain -PathType Leaf)) {
+        throw "HarmonyOS NDK toolchain is missing: $toolchain"
+    }
+    $ohpm = Require-Command "ohpm"
+    $hvigor = Require-Command "hvigorw"
+    $ohosDirectory = Join-Path $sourceDirectory "platform/ohos"
+    $ohosArtifacts = Join-Path $platformArtifactRoot "ohos"
+    New-Item -ItemType Directory -Path $ohosArtifacts -Force | Out-Null
+    Invoke-Checked $ohpm @("install", "--all") $ohosDirectory
+    Invoke-Checked $hvigor @("--mode", "module", "-p", "product=default", "-p", "module=huxerui@default",
+        "-p", "buildMode=release", "assembleHar", "--no-daemon") $ohosDirectory
+    $har = Join-Path $ohosDirectory "huxerui/build/default/outputs/default/huxerui.har"
+    Copy-Item -LiteralPath $har -Destination $ohosArtifacts
+
+    foreach ($abi in @("arm64-v8a", "x86_64")) {
+        $abiBuild = Join-Path $buildDirectory "ohos/$abi"
+        Invoke-Checked $cmake @("-S", $sourceDirectory, "-B", $abiBuild, "-G", "Ninja",
+            "-DCMAKE_TOOLCHAIN_FILE=$toolchain", "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_INSTALL_LIBDIR=.",
+            "-DOHOS_ARCH=$abi", "-DOHOS_COMPATIBLE_SDK_VERSION=20.0.0",
+            "-DOHOS_STL=c++_static",
+            "-DHUXERUI_BUILD_SHARED=OFF", "-DHUXERUI_BUILD_STATIC=ON", "-DHUXERUI_ENABLE_PROFILING=OFF",
+            "-DHUXERUI_OPTIMIZATION=default", "-DHUXERUI_ENABLE_LTO=OFF",
+            "-DHUXERUI_BUILD_CLI=OFF", "-DHUXERUI_BUILD_EXAMPLES=OFF", "-DHUXERUI_BUILD_TESTS=OFF") $sourceDirectory
+        Invoke-Checked $cmake @("--build", $abiBuild, "--target", "huxerui_static", "--parallel", "$Jobs") $sourceDirectory
+        $abiArtifacts = Join-Path $ohosArtifacts $abi
+        Invoke-Checked $cmake @("--install", $abiBuild, "--component", "HuxerUILibraries", "--prefix", $abiArtifacts) $sourceDirectory
+    }
+}
+
 $sourceDirectory = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot ".."))
 $buildDirectory = if ($BuildDirectory) {
     Get-AbsolutePath $BuildDirectory
@@ -132,12 +169,16 @@ $hostConfiguration = if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win
 New-Item -ItemType Directory -Path $buildDirectory, $outputDirectory -Force | Out-Null
 
 $cmake = Require-Command "cmake"
+$null = Require-Command "ninja"
+if ($OhosArtifactsOnly) {
+    Build-OhosArtifacts
+    exit 0
+}
 $cpack = Require-Command "cpack"
 $null = Require-Command "java"
 $emcmake = Require-Command "emcmake"
 $emcc = Require-Command "emcc"
 Initialize-WindowsToolchain
-$null = Require-Command "ninja"
 
 $sdkDefinition = Get-Content -LiteralPath (Join-Path $sourceDirectory "cmake/HuxerUISdk.cmake") -Raw
 if ($sdkDefinition -notmatch 'set\(HUXERUI_WEB_EMSCRIPTEN_VERSION "([^"]+)"\)') {
@@ -152,6 +193,7 @@ if ($LASTEXITCODE -ne 0 -or $emccVersion -notmatch [regex]::Escape($webVersion))
 Reset-OwnedDirectory $platformArtifactRoot $buildDirectory
 Reset-OwnedDirectory $webBuildDirectory $buildDirectory
 Reset-OwnedDirectory $hostBuildDirectory $buildDirectory
+Build-OhosArtifacts
 
 $androidDirectory = Join-Path $sourceDirectory "platform/android"
 $androidProperties = Get-Content -LiteralPath (Join-Path $androidDirectory "gradle.properties") -Raw |

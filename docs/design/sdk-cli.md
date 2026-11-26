@@ -95,6 +95,9 @@ HUXERUI_HOME/
       ios/HuxerUI.xcframework/             # macOS SDK only
         ios-arm64/
         ios-arm64_x86_64-simulator/
+      ohos/                               # desktop SDKs
+        huxerui.har
+        <abi>/libhuxerui_static.a
       web/emscripten-<version>/libhuxerui.a
     resources/
     tools/<host>/<architecture>/
@@ -112,6 +115,7 @@ Platform build systems consume platform artifacts through their normal mechanism
 
 - Android uses a Java-only AAR plus ABI-specific static archives imported by the installed CMake package.
 - Android arm64-v8a also has a host SDK for Termux containing Bionic CLI and host-tool executables.
+- HarmonyOS uses the HAR and the arm64-v8a and x86_64 static libraries in the desktop SDK. The consuming CMake toolchain selects the ABI, and `huxerui_add_app()` links the framework and Node-API entry into the application's shared library.
 - macOS uses its host libraries and installed `HuxerUIPlatform` Clang module, while the macOS SDK carries a static iOS XCFramework with its UIKit `HuxerUIPlatform` module for device and Simulator application-core builds.
 - Windows and Linux use architecture- and toolchain-compatible CMake SDK archives.
 - Web uses the static archives for the selected SDK's Emscripten version and configures the application root through `emcmake`.
@@ -132,7 +136,7 @@ SDK installers manage HuxerUI archives and environment selection. External compi
 
 `HuxerUIConfig.cmake` exports the canonical framework targets and makes the application, library, resource, and code-generation helpers available. Repository-only compiler and platform configuration stays in the source tree.
 Desktop packages import `HuxerUI::huxerui` and `HuxerUI::huxerui_static` by default. `huxerui_add_app` selects the static target.
-Android, Web, and iOS import static framework artifacts through the canonical targets; Android applications link the framework into their own shared library.
+Android, HarmonyOS, Web, and iOS import static framework artifacts through the canonical targets. Android and HarmonyOS applications link the framework into their own shared library.
 Consumers may request only `COMPONENTS shared` or `COMPONENTS static`; requesting the Linux shared component does not resolve static-only dependencies, while the static component resolves the distribution-owned GTK 4, libepoxy, GIO, libsoup 3, pangoft2, and Fontconfig libraries through pkg-config.
 Only a top-level desktop HuxerUI build registers SDK installation and CPack behavior; consuming the source tree through `add_subdirectory` creates framework targets and public helpers without adding packaging or install rules to the parent project.
 
@@ -235,6 +239,14 @@ The source-controlled Xcode project owns process entry, platform resources, sign
 The driver combines paired physical devices from `devicectl` and Simulators from `simctl`. It preserves CoreDevice identifiers for physical devices, uses `simctl` as the authority for simulator records, and prefers ready records among duplicate reports from the same tool. The Xcode build selects the matching Simulator or device destination. Launch uses `simctl` or `devicectl` for that destination. `open ios` refreshes the generated library aggregator before opening the checked-in project.
 
 iOS archive export automation and public UIView embedding are outside the current SDK workflow. Repository examples use a single platform runner whose `HUXERUI_APP_TARGET` selects the application core.
+
+### HarmonyOS
+
+Hvigor owns the application module, ABI selection, signing, and HAP assembly. `huxerui_add_app()` compiles the Node-API registration for the application's shared library and links the selected static framework library. The generated entry ability loads that shared library and supplies it to `HuxerUIAbility` from the HAR.
+
+The CLI stages the HAR from the selected SDK or builds it from the selected source checkout. Each ABI's CMake build writes to its own resource output directory. The Hvigor module stages the ABI-independent resource package from one build under `rawfile` before resource compilation. Explicit `RESOURCE_OUTPUT_DIRECTORY` takes precedence over the default derived from `HUXERUI_OHOS_RESOURCE_OUTPUT_ROOT`.
+
+The driver delegates device discovery, installation, and launch to HDC. HarmonyOS builds use CMake. Hvigor controls the native build generator.
 
 ### Watching development builds
 

@@ -306,7 +306,7 @@ Window hooks see the new native window's resource configuration from the beginni
 Empty content and invalid options throw `std::invalid_argument`; invalid thread, lifetime, or timing throws `std::logic_error`; unsupported native creation throws `std::runtime_error`.
 A hook exception propagates after partial window cleanup without affecting other windows or causing application exit.
 Successful creation does not guarantee that the first frame has rendered.
-macOS, Windows, and Linux support synchronous `OpenWindow()`. Android, iOS, HarmonyOS, and Web report false from `SupportsMultipleWindows()`.
+macOS, Windows, and Linux report synchronous top-level window support through `SupportsMultipleWindows()`. On iOS and HarmonyOS, query `CanOpenWindow()` for asynchronous creation.
 
 Closing the last framework-owned desktop window requests application shutdown by default.
 Set `AppOptions::quit_on_last_window_closed = false` to keep application services, tasks, and activation handlers available without windows; an application or tray callback can then open a new window.

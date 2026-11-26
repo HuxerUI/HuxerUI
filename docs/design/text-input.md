@@ -713,6 +713,12 @@ The bridge:
 
 The implementation does not contain separate XIM, IBus, or Fcitx state machines. GTK's input-method module boundary owns those desktop-specific protocols.
 
+## HarmonyOS adapter
+
+The ArkTS host connects the focused HuxerUI editor to the system input method controller. The bridge translates UTF-16 selection, surrounding text, preview composition, and editing commands to the active UiWindow session. Secure sessions suppress surrounding text.
+
+The system controller has one connection across all windows. The ArkTS host serializes connection changes and detaches only the current connection. Callbacks carry the originating window ID and session token so a retired session cannot edit the next focused client.
+
 ## Web adapter
 
 The browser adapter keeps an input proxy for the current session and translates DOM composition and input events into the same command batches. See [Browser text input and IME](web.md#browser-text-input-and-ime) for surrounding-text mapping, restart identity, and geometry.

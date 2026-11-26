@@ -89,6 +89,7 @@ Explore more components in the [UI Gallery](examples/ui_gallery/) and complete a
 | Web | Emscripten and browser APIs | Canvas 2D |
 | Android | Android View and InputConnection | Android Canvas |
 | iOS | UIKit and UITextInput | Core Graphics and Core Text |
+| HarmonyOS | ArkUI and Input Method Kit | Native Drawing |
 
 For build requirements and backend capabilities, see [Platform Support](docs/guide/platforms.md).
 
