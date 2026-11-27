@@ -3699,7 +3699,7 @@ bool UiWindow::ReconcileChildren(
   origins.reserve(incoming_children.size());
   auto previous = std::move(mounted_children);
   bool layout_changed = false;
-  bool structure_changed = previous.size() != incoming_children.size();
+  bool structure_changed = false;
 
   try {
     for (std::size_t index = 0; index < incoming_children.size(); ++index) {
@@ -3717,11 +3717,12 @@ bool UiWindow::ReconcileChildren(
             break;
           }
         }
-      } else if (
-          index < previous.size() && previous[index] && !previous[index]->key.has_value() &&
-          IsCompatibleNode(*previous[index], *child_view.spec_)
-      ) {
-        origin = index;
+      } else {
+        const std::size_t mounted_index = next.size();
+        if (mounted_index < previous.size() && previous[mounted_index] && !previous[mounted_index]->key.has_value() &&
+            IsCompatibleNode(*previous[mounted_index], *child_view.spec_)) {
+          origin = mounted_index;
+        }
       }
 
       if (origin.has_value()) {

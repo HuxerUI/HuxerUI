@@ -2079,4 +2079,49 @@ TEST_CASE("TestNestedEnvironment") {
   REQUIRE(observed_environment_values[2] == "inner");
 }
 
+TEST_CASE("Empty View siblings do not shift unkeyed sibling reconciliation") {
+  static int mounts = 0;
+  static int unmounts = 0;
+  static State<int> parent_tick;
+  static State<int> child_state;
+  mounts = 0;
+  unmounts = 0;
+  parent_tick = State<int>{};
+  child_state = State<int>{};
+
+  View (*app)() = []() -> View {
+    parent_tick = UseState(0);
+    View child = Scope([]() -> View {
+      child_state = UseState(0);
+      Lifecycle([] {
+        ++mounts;
+        return [] { ++unmounts; };
+      });
+      return Text("child:" + std::to_string(child_state.Get()));
+    });
+    return Column {
+      Text("header:" + std::to_string(parent_tick.Get())),
+      View{},
+      std::move(child),
+      Text("footer"),
+    };
+  };
+
+  TestPlatform platform;
+  UiWindow runtime{app, platform};
+  runtime.SetWindowMetrics({.viewport = {320.0F, 240.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(mounts == 1);
+  REQUIRE(unmounts == 0);
+
+  child_state = 7;
+  parent_tick = 1;
+  runtime.BuildFrame();
+
+  REQUIRE(mounts == 1);
+  REQUIRE(unmounts == 0);
+  REQUIRE(child_state.Get() == 7);
+}
+
 } // namespace huxerui::test
