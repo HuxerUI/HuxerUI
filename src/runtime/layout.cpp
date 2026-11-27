@@ -222,6 +222,9 @@ bool BuildPointerRouteImpl(MountedNode& node, Point position, std::vector<Mounte
   if (within_node &&
       (HandlesPointer(node) || ExtensionHandlesPointer(node, *local_position) ||
        ExtensionHandlesHover(node, *local_position) || IsScrollContainer(node) || node.IsFocusable() ||
+       (purpose == PointerRoutePurpose::Input &&
+        (HasEventBinding<ViewEvents::PointerIntercept>(node.event_bindings) ||
+         HasEventBinding<ViewEvents::ContextMenuRequested>(node.event_bindings))) ||
        (purpose == PointerRoutePurpose::Cursor && node.properties.pointer_cursor.has_value()) ||
        (purpose == PointerRoutePurpose::Hover && HasEventBinding<ViewEvents::Hover>(node.event_bindings)) ||
        node.kind == NodeKind::PlatformView)) {

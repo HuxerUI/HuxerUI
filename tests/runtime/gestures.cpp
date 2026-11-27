@@ -1729,4 +1729,41 @@ TEST_CASE("Gesture declarations and platform defaults reject invalid values") {
   REQUIRE_THROWS_AS(UiWindow(DragApp, invalid_platform), std::logic_error);
 }
 
+TEST_CASE("Plain view with only ContextMenuRequested receives right click without stealing left click") {
+  ResetGestureEvents();
+  View (*app)() = []() -> View {
+    return Column {
+      Row {
+        Text("cell"),
+      }.With(huxerui::Frame{60.0F, 60.0F})
+          .On<ViewEvents::ContextMenuRequested>([](Point position) {
+            gesture_events.emplace_back("plain child context");
+            context_menu_positions.push_back(position);
+          }),
+    }.With(huxerui::Frame{120.0F, 60.0F})
+        .OnClick([] {
+          ++gesture_clicks;
+          gesture_events.emplace_back("parent click");
+        });
+  };
+
+  TestPlatform platform;
+  UiWindow runtime{app, platform};
+  runtime.SetWindowMetrics({.viewport = {120.0F, 60.0F}});
+  runtime.BuildFrame();
+
+  REQUIRE(runtime.HasContextMenuHandler({20.0F, 30.0F}));
+
+  Pointer(runtime, PointerEventType::Down, 60, {20.0F, 30.0F}, PointerButton::Primary, PointerButton::Primary);
+  Pointer(runtime, PointerEventType::Up, 60, {20.0F, 30.0F}, PointerButton::Primary, PointerButton::None);
+  REQUIRE(gesture_events == std::vector<std::string>{"parent click"});
+  REQUIRE(gesture_clicks == 1);
+
+  Pointer(runtime, PointerEventType::Down, 61, {20.0F, 30.0F}, PointerButton::Secondary, PointerButton::Secondary);
+  Pointer(runtime, PointerEventType::Up, 61, {22.0F, 32.0F}, PointerButton::Secondary, PointerButton::None);
+  REQUIRE(gesture_events == std::vector<std::string>{"parent click", "plain child context"});
+  REQUIRE(gesture_clicks == 1);
+  REQUIRE(context_menu_positions == std::vector<Point>{{22.0F, 32.0F}});
+}
+
 } // namespace huxerui::test
